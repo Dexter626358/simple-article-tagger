@@ -89,6 +89,9 @@ output/
 html_output/
 *.html
 
+.docx_output/
+.html_output/
+.docx
 # Логи
 *.log
 

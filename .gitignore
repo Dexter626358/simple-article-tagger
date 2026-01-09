@@ -78,20 +78,36 @@ Thumbs.db
 # Project specific
 # Выходные файлы метаданных
 output/
+
+# JSON файлы (игнорируем все, кроме примеров и конфигов)
 *.json
+# Исключаем важные конфигурационные файлы
+!config.json.example
+!list_of_journals.json
+# Но игнорируем реальный config.json (может содержать секреты)
+config.json
 
-# Входные файлы (раскомментируйте, если не хотите коммитить DOCX/RTF файлы)
-# words_input/
-# *.docx
-# *.rtf
+# Входные данные (JSON файлы статей)
+json_input/
 
-# Временные HTML файлы (если используются)
+# Входные файлы статей (Word, RTF, PDF)
+words_input/
+pdf_articles_input/
+
+# Выходные файлы
+xml_output/
+docx_output/
 html_output/
-*.html
 
-.docx_output/
-.html_output/
-.docx
+# Кэш GPT запросов
+gpt_cache/
+
+# Отладочные HTML файлы
+debug_*.html
+*.html
+# Исключаем важные HTML файлы (если есть)
+!README.html
+
 # Логи
 *.log
 
@@ -99,3 +115,17 @@ html_output/
 tmp/
 temp/
 *.tmp
+
+# Тестовые файлы (если не нужны в репозитории)
+test_*.py
+*_test.py
+
+# Файлы операционной системы
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Резервные копии
+*.bak
+*.backup
+*~

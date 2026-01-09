@@ -1,0 +1,80 @@
+{
+  "general": {
+    "project_root": ".",
+    "encoding": "utf-8"
+  },
+  "directories": {
+    "json_input": "json_input",
+    "words_input": "words_input",
+    "output": "output",
+    "xml_output": "xml_output",
+    "html_output": "html_output",
+    "docx_output": "docx_output",
+    "pdf_articles_input": "pdf_articles_input"
+  },
+  "app": {
+    "host": "127.0.0.1",
+    "port": 5001,
+    "debug": false,
+    "auto_open_browser": true,
+    "use_word_reader": false,
+    "browser_delay_sec": 1.2
+  },
+  "word_reader": {
+    "clean_text": true,
+    "merge_doi_url": true,
+    "rtf_encodings": [
+      "utf-8",
+      "cp1251",
+      "windows-1251",
+      "latin-1"
+    ]
+  },
+  "word_to_html": {
+    "use_word_reader": false,
+    "include_metadata": false,
+    "include_default_style_map": true,
+    "style_map": null
+  },
+  "metadata": {
+    "merge_doi_url_with_references": true,
+    "processed_suffix": "_processed"
+  },
+  "xml_generator": {
+    "list_of_journals_file": "list_of_journals.json",
+    "xml_schema_file": "xml_schema.xsd",
+    "validate_xml": true,
+    "ignore_validation_errors": {
+      "empty_volume": true,
+      "empty_references": true
+    }
+  },
+  "xml_validation": {
+    "preferred_library": "xmlschema",
+    "fallback_to_basic_check": true
+  },
+  "markup": {
+    "auto_select_range": true,
+    "show_line_numbers": true,
+    "enable_search": true
+  },
+  "pdf_reader": {
+    "first_pages": 3,
+    "last_pages": 3,
+    "extract_all_pages": false,
+    "clean_text": true
+  },
+  "gpt_extraction": {
+    "enabled": true,
+    "model": "gpt-4o-mini",
+    "temperature": 0.3,
+    "api_key": "YOUR_OPENAI_API_KEY_HERE",
+    "cache_dir": "gpt_cache",
+    "use_prompts_module": true,
+    "use_cache": true
+  },
+  "_comment": {
+    "gpt_extraction.api_key": "Рекомендуется использовать переменную окружения OPENAI_API_KEY вместо указания ключа здесь. Если ключ указан здесь, он будет использован только если переменная окружения не установлена."
+  }
+}
+

@@ -129,32 +129,86 @@ def save_metadata(metadata: Dict[str, Any], output_path: Path) -> None:
 def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     """
     Извлекает текст из HTML контента для разметки.
-    Разбивает HTML на параграфы и возвращает их как список элементов.
+    Разбивает HTML на параграфы и другие блочные элементы, возвращает их как список элементов.
+    Обрабатывает: списки (li), параграфы (p), заголовки (h1-h6), div элементы.
+    Сохраняет порядок элементов в документе.
     
     Args:
         html_content: HTML содержимое
         
     Returns:
-        Список словарей с информацией о параграфах
+        Список словарей с информацией о параграфах и других блочных элементах
     """
-    # Находим все параграфы <p>...</p>
-    pattern = r'<p[^>]*>(.*?)</p>'
-    matches = re.finditer(pattern, html_content, re.DOTALL)
-    
     lines = []
-    for idx, match in enumerate(matches, 1):
+    idx = 1
+    
+    # Создаем список всех блочных элементов с их позициями в документе
+    # Это позволяет обработать их в правильном порядке
+    elements = []
+    
+    # 1. Находим все элементы списков <li>
+    list_pattern = r'<li[^>]*>(.*?)</li>'
+    for match in re.finditer(list_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        elements.append({
+            'start': match.start(),
+            'end': match.end(),
+            'type': 'li',
+            'content': match.group(1)
+        })
+    
+    # 2. Находим все параграфы <p>
+    paragraph_pattern = r'<p[^>]*>(.*?)</p>'
+    for match in re.finditer(paragraph_pattern, html_content, re.DOTALL | re.IGNORECASE):
         content = match.group(1)
-        # Убираем HTML теги для отображения
+        # Пропускаем параграфы, которые содержат списки (они будут обработаны через <li>)
+        if not re.search(r'<li[^>]*>', content, re.IGNORECASE):
+            elements.append({
+                'start': match.start(),
+                'end': match.end(),
+                'type': 'p',
+                'content': content
+            })
+    
+    # 3. Находим все заголовки <h1>-<h6>
+    heading_pattern = r'<h[1-6][^>]*>(.*?)</h[1-6]>'
+    for match in re.finditer(heading_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        elements.append({
+            'start': match.start(),
+            'end': match.end(),
+            'type': 'h',
+            'content': match.group(1)
+        })
+    
+    # 4. Находим div элементы (только те, что не содержат других блочных элементов)
+    div_pattern = r'<div[^>]*>(.*?)</div>'
+    for match in re.finditer(div_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        content = match.group(1)
+        # Пропускаем div, если внутри есть другие блочные элементы
+        if not re.search(r'<(p|ul|ol|li|h[1-6])[^>]*>', content, re.IGNORECASE):
+            elements.append({
+                'start': match.start(),
+                'end': match.end(),
+                'type': 'div',
+                'content': content
+            })
+    
+    # Сортируем элементы по их позиции в документе (сохраняем порядок)
+    elements.sort(key=lambda x: x['start'])
+    
+    # Обрабатываем элементы в порядке их появления
+    for elem in elements:
+        content = elem['content']
         text_clean = re.sub(r'<[^>]+>', '', content)
         text_clean = text_clean.strip()
         
-        if text_clean:  # Пропускаем пустые параграфы
+        if text_clean:
             lines.append({
                 "id": idx,
                 "text": text_clean,
                 "line_number": idx,
                 "html": content  # Сохраняем оригинальный HTML для точного выделения
             })
+            idx += 1
     
     return lines
 

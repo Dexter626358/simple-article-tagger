@@ -517,7 +517,7 @@ def read_rtf(path: Union[str, Path], clean: bool = True) -> List[str]:
 
 def get_files_from_words_input(input_dir: Optional[Union[str, Path]] = None) -> List[Path]:
     """
-    Получает список поддерживаемых файлов из папки words_input.
+    Получает список поддерживаемых файлов из папки words_input (рекурсивно).
     """
     if input_dir is None:
         script_dir = Path(__file__).parent.absolute()
@@ -528,10 +528,14 @@ def get_files_from_words_input(input_dir: Optional[Union[str, Path]] = None) -> 
     if not input_dir.exists() or not input_dir.is_dir():
         return []
     
-    files = [
-        f for f in input_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in SUPPORTED_EXTENSIONS
-    ]
+    # Рекурсивный поиск файлов во всех подпапках
+    files = []
+    for ext in SUPPORTED_EXTENSIONS:
+        files.extend(input_dir.rglob(f"*{ext}"))
+        files.extend(input_dir.rglob(f"*{ext.upper()}"))
+    
+    # Фильтруем только файлы (не директории)
+    files = [f for f in files if f.is_file()]
     
     return sorted(files, key=lambda x: x.name)
 

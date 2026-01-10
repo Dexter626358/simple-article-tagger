@@ -254,6 +254,105 @@ If the source title is in UPPERCASE, convert it to proper title case:
 
 Return only valid JSON without additional comments or explanations. """
 
+    # Промпт для форматирования списка литературы (исправление ошибок OCR)
+    REFERENCES_FORMATTING_RUS = """
+Задание:
+
+Перед тобой — список литературы, полученный с помощью распознавания текста (OCR). В нем уже выверено содержание и порядок источников, но есть технические ошибки форматирования: разрывы слов и инициалов пробелами, лишние пробелы, ошибки переноса, а также нарушение единообразия в оформлении.
+Твоя задача — привести список к аккуратному, читабельному виду для публикации на сайте, не внося никаких изменений в библиографическую информацию, а только исправив форматирование.
+
+Правила:
+
+1. Убери лишние пробелы внутри слов, фамилий, инициалов и между ними (например, "Ве с е л о в а И . С ." → "Веселова И. С.").
+
+2. Убери разрывы строк внутри одной записи (одна публикация — одна строка).
+
+3. Исправь переносы внутри слов (например, "му- зыкальной" → "музыкальной").
+
+4. Приведи оформление к единообразному стилю (например, кавычки, тире, точки и запятые, если они отличаются).
+
+5. Не изменяй суть и порядок библиографических описаний.
+
+6. Не добавляй и не убирай элементы описания.
+
+7. В конце каждого описания ставь точку, если это соответствует принятому стандарту.
+
+8. Выводи результат как аккуратно отформатированный, удобочитаемый список для сайта.
+
+9. **ВАЖНО: Удали строки, которые НЕ являются библиографическими источниками:**
+   - Заголовки журналов (например, "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
+   - Номера выпусков и страниц без авторов (например, "no. 6 2025 52")
+   - Служебные строки с фамилиями без полного описания (например, "ВОРОНИН и др. / VORONIN et al.")
+   - Строки, содержащие только название журнала, номер, год или страницы без автора и названия публикации
+   - Строки, которые явно являются частью оглавления или служебной информации, а не библиографической записью
+
+10. Верни результат в формате JSON: {"references": ["запись 1", "запись 2", ...]}
+
+Пример входных данных (с примерами строк, которые нужно удалить):
+
+IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS no. 6 2025 52 ВОРОНИН и др. / VORONIN et al.
+1. Ве с е л о в а И . С . Жесты публичной лаудации: доступы к благу // Комплекс Чебурашки, или Общество послушания: Сб. статей. СПб.: Пропповский центр, 2012. C. 11–49.
+2. До р о хо в а Е . А . Фольклорная комиссия Союза композиторов России и изучение традиционной му- зыкальной культуры Русского Севера // Рябининские чтения. Петрозаводск: Музей-заповедник «Кижи», 2007. С. 290–292.
+
+Пример ожидаемого результата (служебные строки удалены):
+
+1. Веселова И. С. Жесты публичной лаудации: доступы к благу // Комплекс Чебурашки, или Общество послушания: Сб. статей. СПб.: Пропповский центр, 2012. С. 11–49.
+2. Дорохова Е. А. Фольклорная комиссия Союза композиторов России и изучение традиционной музыкальной культуры Русского Севера // Рябининские чтения. Петрозаводск: Музей-заповедник «Кижи», 2007. С. 290–292.
+
+Выполни форматирование для всего приведенного ниже списка литературы:
+
+{references_text}
+
+Верни только валидный JSON без дополнительных комментариев.
+"""
+
+    REFERENCES_FORMATTING_ENG = """
+Task:
+
+You are given a bibliography list generated via OCR. The content is already checked for accuracy, but there are technical formatting issues: words and initials are split by spaces, there are extra spaces, line breaks, hyphenated word splits, and inconsistencies in punctuation.
+Your task is to correct only the formatting and output a clean, consistent, web-friendly bibliography list.
+
+Instructions:
+
+1. Remove extra spaces inside words, surnames, and initials.
+
+2. Merge any split lines belonging to the same reference.
+
+3. Restore hyphenated words to their correct form.
+
+4. Standardize punctuation, quotation marks, dashes, and dots according to standard bibliographic style.
+
+5. Do not change the actual content or order of the references.
+
+6. Do not add or remove any bibliographic elements.
+
+7. Output each reference as a single clean line, with proper punctuation at the end (as appropriate).
+
+8. **IMPORTANT: Remove lines that are NOT bibliographic references:**
+   - Journal titles/headers (e.g., "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
+   - Issue numbers and pages without authors (e.g., "no. 6 2025 52")
+   - Service lines with surnames without full description (e.g., "VORONIN et al.")
+   - Lines containing only journal name, issue number, year, or pages without author and publication title
+   - Lines that are clearly part of table of contents or service information, not bibliographic entries
+
+9. Return result in JSON format: {"references": ["entry 1", "entry 2", ...]}
+
+Example input (with lines to be removed):
+
+IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS no. 6 2025 52 VORONIN et al.
+1. V e s e l o v a , I . S . Gestures of public laudation: access to the good. The Cheburashka complex, or the Obedience Society: Collection of articles. St. Petersburg, 2012. P. 11–49. (In Russ.)
+
+Expected output (service lines removed):
+
+1. Veselova, I. S. Gestures of public laudation: access to the good. The Cheburashka complex, or the Obedience Society: Collection of articles. St. Petersburg, 2012. P. 11–49. (In Russ.)
+
+Format the following bibliography list:
+
+{references_text}
+
+Return only valid JSON without additional comments.
+"""
+
     @classmethod
     def get_prompt(cls, prompt_type: str = "scientific") -> str:
         """
@@ -267,6 +366,8 @@ Return only valid JSON without additional comments or explanations. """
         """
         prompts = {
             "scientific_detailed": cls.SCIENTIFIC_DETAILED,
+            "references_formatting_rus": cls.REFERENCES_FORMATTING_RUS,
+            "references_formatting_eng": cls.REFERENCES_FORMATTING_ENG,
         }
         
         return prompts.get(prompt_type, cls.SCIENTIFIC_DETAILED)
@@ -279,4 +380,4 @@ Return only valid JSON without additional comments or explanations. """
         Returns:
             list: Список доступных типов промптов
         """
-        return ["scientific_detailed"] 
+        return ["scientific_detailed", "references_formatting_rus", "references_formatting_eng"] 

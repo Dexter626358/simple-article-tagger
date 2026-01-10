@@ -319,17 +319,17 @@ def normalize_date(date_str: str) -> str:
 
 def find_docx_for_json(json_path: Path, words_input_dir: Path, json_input_dir: Optional[Path] = None) -> Optional[Path]:
     """
-    Находит соответствующий DOCX файл для JSON файла.
+    Находит соответствующий файл (DOCX/RTF/PDF) для JSON файла.
     Сначала пытается найти отдельный файл для статьи, затем общий файл выпуска.
     Все файлы ищутся в words_input_dir в соответствующей подпапке.
     
     Args:
         json_path: Путь к JSON файлу
-        words_input_dir: Директория с DOCX файлами (всегда words_input)
+        words_input_dir: Директория с файлами статей (DOCX/RTF/PDF) (всегда words_input)
         json_input_dir: Базовая директория JSON файлов для определения подпапки
         
     Returns:
-        Путь к DOCX файлу или None, если не найден
+        Путь к файлу (DOCX/RTF/PDF) или None, если не найден
     """
     json_stem = json_path.stem
     subdir_name = None
@@ -355,8 +355,8 @@ def find_docx_for_json(json_path: Path, words_input_dir: Path, json_input_dir: O
     if not same_subdir.exists() or not same_subdir.is_dir():
         return None
     
-    # Сначала ищем отдельный файл для статьи
-    for ext in [".docx", ".rtf"]:
+    # Сначала ищем отдельный файл для статьи (DOCX, RTF, PDF)
+    for ext in [".docx", ".rtf", ".pdf"]:
         docx_path = same_subdir / f"{json_stem}{ext}"
         if docx_path.exists():
             return docx_path
@@ -372,16 +372,17 @@ def find_docx_for_json(json_path: Path, words_input_dir: Path, json_input_dir: O
     ]
     
     for name in common_names:
-        for ext in [".docx", ".rtf"]:
+        for ext in [".docx", ".rtf", ".pdf"]:
             common_file = same_subdir / f"{name}{ext}"
             if common_file.exists():
                 return common_file
     
-    # Если не нашли по стандартным именам, ищем любой DOCX/RTF файл в подпапке
+    # Если не нашли по стандартным именам, ищем любой файл (DOCX/RTF/PDF) в подпапке
     # (если там только один файл, скорее всего это общий файл выпуска)
     docx_files = list(same_subdir.glob("*.docx"))
     rtf_files = list(same_subdir.glob("*.rtf"))
-    all_files = docx_files + rtf_files
+    pdf_files = list(same_subdir.glob("*.pdf"))
+    all_files = docx_files + rtf_files + pdf_files
     
     # Если в подпапке только один файл, считаем его общим файлом выпуска
     if len(all_files) == 1:

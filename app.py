@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 import threading
@@ -17,7 +18,7 @@ import webbrowser
 from pathlib import Path
 from typing import Optional
 
-from flask import Flask, render_template_string, abort, jsonify, request
+from flask import Flask, render_template_string, abort, jsonify, request, send_file
 
 # Импортируем функции конвертации из word_to_html
 try:
@@ -26,6 +27,14 @@ try:
 except ImportError:
     WORD_TO_HTML_AVAILABLE = False
     print("⚠ Ошибка: не удалось импортировать word_to_html. Убедитесь, что word_to_html.py доступен.")
+
+# Импортируем функции конвертации PDF в HTML
+try:
+    from pdf_to_html import convert_pdf_to_html
+    PDF_TO_HTML_AVAILABLE = True
+except ImportError:
+    PDF_TO_HTML_AVAILABLE = False
+    print("⚠ PDF поддержка недоступна. Установите: pip install pdfplumber или pip install pymupdf")
 
 # Импортируем функции для работы с метаданными
 try:
@@ -55,7 +64,7 @@ except ImportError:
 # Константы
 # ----------------------------
 
-SUPPORTED_EXTENSIONS = {".docx", ".rtf"}
+SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf"}
 SUPPORTED_JSON_EXTENSIONS = {".json"}
 
 HTML_TEMPLATE = """
@@ -503,10 +512,35 @@ HTML_TEMPLATE = """
                 btn.textContent = "✅ " + data.message;
                 btn.style.background = "#4caf50";
                 
+                // Скачиваем все XML файлы по очереди
+                if (data.files && data.files.length > 0) {
+                  // Функция для скачивания файла
+                  const downloadFile = (url, filename) => {
+                    return new Promise((resolve) => {
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = filename;
+                      a.style.display = "none";
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      // Небольшая задержка между скачиваниями
+                      setTimeout(resolve, 300);
+                    });
+                  };
+                  
+                  // Скачиваем все файлы последовательно
+                  (async () => {
+                    for (const file of data.files) {
+                      await downloadFile(file.url, file.name);
+                    }
+                  })();
+                }
+                
                 // Показываем уведомление
                 const notification = document.createElement("div");
                 notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;max-width:400px;";
-                notification.innerHTML = `<strong>Успешно!</strong><br>${data.message}<br><small>Создано файлов: ${data.files?.length || 0}</small>`;
+                notification.innerHTML = `<strong>Успешно!</strong><br>${data.message}<br><small>Скачано файлов: ${data.files?.length || 0}</small>`;
                 document.body.appendChild(notification);
                 
                 setTimeout(() => {
@@ -587,15 +621,35 @@ HTML_TEMPLATE = """
         
         <!-- Модальные окна для формы -->
         <div id="refsModal" class="modal">
-          <div class="modal-content">
+          <div class="modal-content" id="refsModalContent">
             <div class="modal-header">
               <h2 id="modalTitle">Список литературы</h2>
-              <button class="modal-close" onclick="closeRefsModal()">&times;</button>
+              <div class="modal-header-actions">
+                <button class="modal-expand-btn" id="refsModalExpandBtn" onclick="toggleRefsModalSize()" title="Увеличить/уменьшить окно">⛶</button>
+                <button class="modal-close" onclick="closeRefsModal()">&times;</button>
+              </div>
             </div>
             <div id="refsList" class="refs-list"></div>
             <div class="modal-footer">
               <button class="modal-btn modal-btn-cancel" onclick="closeRefsModal()">Отмена</button>
               <button class="modal-btn modal-btn-save" onclick="saveEditedReferences()">Сохранить изменения</button>
+            </div>
+          </div>
+        </div>
+        
+        <div id="annotationModal" class="modal">
+          <div class="modal-content" id="annotationModalContent">
+            <div class="modal-header">
+              <h2 id="annotationModalTitle">Аннотация</h2>
+              <div class="modal-header-actions">
+                <button class="modal-expand-btn" id="annotationModalExpandBtn" onclick="toggleAnnotationModalSize()" title="Увеличить/уменьшить окно">⛶</button>
+                <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
+              </div>
+            </div>
+            <textarea id="annotationModalTextarea" class="line-editor-textarea" style="min-height: 300px; max-height: 70vh; font-size: 14px; line-height: 1.6; resize: vertical;"></textarea>
+            <div class="modal-footer">
+              <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
+              <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
             </div>
           </div>
         </div>
@@ -776,8 +830,114 @@ HTML_TEMPLATE = """
         
         function closeRefsModal() {
           const modal = document.getElementById("refsModal");
+          const modalContent = document.getElementById("refsModalContent");
+          const expandBtn = document.getElementById("refsModalExpandBtn");
           if (modal) {
             modal.classList.remove("active");
+            // Сбрасываем размер при закрытии
+            if (modalContent) {
+              modalContent.classList.remove("expanded");
+            }
+            if (expandBtn) {
+              expandBtn.classList.remove("expanded");
+            }
+          }
+        }
+        
+        function toggleRefsModalSize() {
+          const modalContent = document.getElementById("refsModalContent");
+          const expandBtn = document.getElementById("refsModalExpandBtn");
+          if (modalContent && expandBtn) {
+            const isExpanded = modalContent.classList.contains("expanded");
+            if (isExpanded) {
+              modalContent.classList.remove("expanded");
+              expandBtn.classList.remove("expanded");
+              expandBtn.title = "Увеличить окно";
+            } else {
+              modalContent.classList.add("expanded");
+              expandBtn.classList.add("expanded");
+              expandBtn.title = "Уменьшить окно";
+            }
+          }
+        }
+        
+        let currentAnnotationFieldId = null;
+        
+        function viewAnnotation(fieldId, title) {
+          const field = document.getElementById(fieldId);
+          if (!field) return;
+          
+          currentAnnotationFieldId = fieldId;
+          
+          const annotationText = field.value.trim();
+          
+          const modal = document.getElementById("annotationModal");
+          const modalTitle = document.getElementById("annotationModalTitle");
+          const modalTextarea = document.getElementById("annotationModalTextarea");
+          
+          if (!modal || !modalTitle || !modalTextarea) return;
+          
+          modalTitle.textContent = title;
+          modalTextarea.value = annotationText;
+          
+          modal.classList.add("active");
+          setTimeout(() => {
+            modalTextarea.focus();
+            modalTextarea.setSelectionRange(0, 0);
+          }, 100);
+        }
+        
+        function saveEditedAnnotation() {
+          if (!currentAnnotationFieldId) return;
+          
+          const field = document.getElementById(currentAnnotationFieldId);
+          const modalTextarea = document.getElementById("annotationModalTextarea");
+          
+          if (!field || !modalTextarea) return;
+          
+          field.value = modalTextarea.value.trim();
+          closeAnnotationModal();
+          
+          const notification = document.createElement("div");
+          notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
+          notification.textContent = "Аннотация обновлена";
+          document.body.appendChild(notification);
+          setTimeout(() => {
+            notification.remove();
+          }, 2000);
+        }
+        
+        function closeAnnotationModal() {
+          const modal = document.getElementById("annotationModal");
+          const modalContent = document.getElementById("annotationModalContent");
+          const expandBtn = document.getElementById("annotationModalExpandBtn");
+          if (modal) {
+            modal.classList.remove("active");
+            // Сбрасываем размер при закрытии
+            if (modalContent) {
+              modalContent.classList.remove("expanded");
+            }
+            if (expandBtn) {
+              expandBtn.classList.remove("expanded");
+            }
+          }
+          currentAnnotationFieldId = null;
+        }
+        
+        function toggleAnnotationModalSize() {
+          const modalContent = document.getElementById("annotationModalContent");
+          const expandBtn = document.getElementById("annotationModalExpandBtn");
+          if (modalContent && expandBtn) {
+            const isExpanded = modalContent.classList.contains("expanded");
+            if (isExpanded) {
+              modalContent.classList.remove("expanded");
+              expandBtn.classList.remove("expanded");
+              expandBtn.title = "Увеличить окно";
+            } else {
+              modalContent.classList.add("expanded");
+              expandBtn.classList.add("expanded");
+              expandBtn.title = "Уменьшить окно";
+            }
           }
         }
         
@@ -843,6 +1003,11 @@ HTML_TEMPLATE = """
             closeRefsModal();
           }
           
+          const annotationModal = document.getElementById("annotationModal");
+          if (e.target === annotationModal) {
+            closeAnnotationModal();
+          }
+          
           const lineCopyModal = document.getElementById("lineCopyModal");
           if (e.target === lineCopyModal) {
             closeCopyModal();
@@ -853,6 +1018,7 @@ HTML_TEMPLATE = """
         document.addEventListener("keydown", (e) => {
           if (e.key === "Escape") {
             closeRefsModal();
+            closeAnnotationModal();
             closeCopyModal();
           }
         });
@@ -1644,12 +1810,14 @@ MARKUP_TEMPLATE = r"""
           <label>Аннотация (русский)</label>
           <textarea id="annotation" name="annotation">{% if form_data %}{{ form_data.get('annotation', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="annotation-lines"></div>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('annotation', 'Аннотация (русский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
         </div>
 
         <div class="field-group">
           <label>Аннотация (английский)</label>
           <textarea id="annotation_en" name="annotation_en">{% if form_data %}{{ form_data.get('annotation_en', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="annotation_en-lines"></div>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('annotation_en', 'Аннотация (английский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
         </div>
 
         <div class="field-group">
@@ -1671,7 +1839,12 @@ MARKUP_TEMPLATE = r"""
           <textarea id="references_ru" name="references_ru" rows="5">{% if form_data %}{{ form_data.get('references_ru', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="references_ru-lines"></div>
           <div class="keywords-count" id="references_ru-count">Количество источников: 0</div>
-          <button type="button" class="view-refs-btn" onclick="viewReferences('references_ru', 'Список литературы (русский)')">👁 Просмотреть список</button>
+          <div style="display: flex; gap: 10px; margin-top: 5px; flex-wrap: wrap;">
+            <button type="button" class="view-refs-btn" onclick="viewReferences('references_ru', 'Список литературы (русский)')">👁 Просмотреть список</button>
+            <button type="button" class="view-refs-btn" onclick="processReferencesWithAI('references_ru')" id="ai-process-btn-ru" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+              🤖 Обработать с ИИ
+            </button>
+          </div>
           <small style="color:#666;font-size:12px;">Каждая ссылка с новой строки</small>
         </div>
 
@@ -1680,7 +1853,12 @@ MARKUP_TEMPLATE = r"""
           <textarea id="references_en" name="references_en" rows="5">{% if form_data %}{{ form_data.get('references_en', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="references_en-lines"></div>
           <div class="keywords-count" id="references_en-count">Количество источников: 0</div>
-          <button type="button" class="view-refs-btn" onclick="viewReferences('references_en', 'Список литературы (английский)')">👁 Просмотреть список</button>
+          <div style="display: flex; gap: 10px; margin-top: 5px; flex-wrap: wrap;">
+            <button type="button" class="view-refs-btn" onclick="viewReferences('references_en', 'Список литературы (английский)')">👁 Просмотреть список</button>
+            <button type="button" class="view-refs-btn" onclick="processReferencesWithAI('references_en')" id="ai-process-btn-en" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+              🤖 Обработать с ИИ
+            </button>
+          </div>
           <small style="color:#666;font-size:12px;">Каждая ссылка с новой строки</small>
         </div>
 
@@ -1781,15 +1959,35 @@ MARKUP_TEMPLATE = r"""
 </div>
 
 <div id="refsModal" class="modal">
-  <div class="modal-content">
+  <div class="modal-content" id="refsModalContent">
     <div class="modal-header">
       <h2 id="modalTitle">Список литературы</h2>
-      <button class="modal-close" onclick="closeRefsModal()">&times;</button>
+      <div class="modal-header-actions">
+        <button class="modal-expand-btn" id="refsModalExpandBtn" onclick="toggleRefsModalSize()" title="Увеличить/уменьшить окно">⛶</button>
+        <button class="modal-close" onclick="closeRefsModal()">&times;</button>
+      </div>
     </div>
     <div id="refsList" class="refs-list"></div>
     <div class="modal-footer">
       <button class="modal-btn modal-btn-cancel" onclick="closeRefsModal()">Отмена</button>
       <button class="modal-btn modal-btn-save" onclick="saveEditedReferences()">Сохранить изменения</button>
+    </div>
+  </div>
+</div>
+
+<div id="annotationModal" class="modal">
+  <div class="modal-content" id="annotationModalContent">
+    <div class="modal-header">
+      <h2 id="annotationModalTitle">Аннотация</h2>
+      <div class="modal-header-actions">
+        <button class="modal-expand-btn" id="annotationModalExpandBtn" onclick="toggleAnnotationModalSize()" title="Увеличить/уменьшить окно">⛶</button>
+        <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
+      </div>
+    </div>
+    <textarea id="annotationModalTextarea" class="line-editor-textarea" style="min-height: 300px; max-height: 70vh; font-size: 14px; line-height: 1.6; resize: vertical;"></textarea>
+    <div class="modal-footer">
+      <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
+      <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
     </div>
   </div>
 </div>
@@ -1954,6 +2152,62 @@ function renumberReferences() {
   updateMergeButtons();
 }
 
+async function processReferencesWithAI(fieldId) {
+  const field = document.getElementById(fieldId);
+  if (!field) {
+    toast("Поле не найдено", "error");
+    return;
+  }
+  
+  const rawText = field.value.trim();
+  if (!rawText) {
+    toast("Поле пусто. Сначала добавьте текст списка литературы.", "error");
+    return;
+  }
+  
+  const btnId = fieldId === "references_ru" ? "ai-process-btn-ru" : "ai-process-btn-en";
+  const btn = document.getElementById(btnId);
+  const originalText = btn ? btn.textContent : "🤖 Обработать с ИИ";
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Обработка ИИ...";
+  }
+  
+  try {
+    const response = await fetch("/process-references-ai", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        field_id: fieldId,
+        text: rawText,
+      }),
+    });
+    
+    const data = await response.json();
+    
+    if (data.success) {
+      field.value = data.text;
+      // Обновляем счетчик
+      if (window.updateReferencesCount) {
+        window.updateReferencesCount(fieldId);
+      }
+      toast(`✅ Обработано ${data.count} источников с помощью ИИ`, "success");
+    } else {
+      toast(`❌ Ошибка: ${data.error}`, "error");
+    }
+  } catch (error) {
+    toast(`❌ Ошибка при обработке: ${error.message}`, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
 function saveEditedReferences() {
   if (!currentRefsFieldId) return;
   
@@ -1987,11 +2241,116 @@ function saveEditedReferences() {
 
 function closeRefsModal() {
   const modal = document.getElementById("refsModal");
+  const modalContent = document.getElementById("refsModalContent");
+  const expandBtn = document.getElementById("refsModalExpandBtn");
   if (modal) {
     modal.classList.remove("active");
+    // Сбрасываем размер при закрытии
+    if (modalContent) {
+      modalContent.classList.remove("expanded");
+    }
+    if (expandBtn) {
+      expandBtn.classList.remove("expanded");
+    }
   }
 }
 
+function toggleRefsModalSize() {
+  const modalContent = document.getElementById("refsModalContent");
+  const expandBtn = document.getElementById("refsModalExpandBtn");
+  if (modalContent && expandBtn) {
+    const isExpanded = modalContent.classList.contains("expanded");
+    if (isExpanded) {
+      modalContent.classList.remove("expanded");
+      expandBtn.classList.remove("expanded");
+      expandBtn.title = "Увеличить окно";
+    } else {
+      modalContent.classList.add("expanded");
+      expandBtn.classList.add("expanded");
+      expandBtn.title = "Уменьшить окно";
+    }
+  }
+}
+
+let currentAnnotationFieldId = null;
+
+function viewAnnotation(fieldId, title) {
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+  
+  currentAnnotationFieldId = fieldId;
+  
+  const annotationText = field.value.trim();
+  
+  const modal = document.getElementById("annotationModal");
+  const modalTitle = document.getElementById("annotationModalTitle");
+  const modalTextarea = document.getElementById("annotationModalTextarea");
+  
+  if (!modal || !modalTitle || !modalTextarea) return;
+  
+  modalTitle.textContent = title;
+  modalTextarea.value = annotationText;
+  
+  modal.classList.add("active");
+  setTimeout(() => {
+    modalTextarea.focus();
+    modalTextarea.setSelectionRange(0, 0);
+  }, 100);
+}
+
+function saveEditedAnnotation() {
+  if (!currentAnnotationFieldId) return;
+  
+  const field = document.getElementById(currentAnnotationFieldId);
+  const modalTextarea = document.getElementById("annotationModalTextarea");
+  
+  if (!field || !modalTextarea) return;
+  
+  field.value = modalTextarea.value.trim();
+  closeAnnotationModal();
+  
+  const notification = document.createElement("div");
+  notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
+  notification.textContent = "Аннотация обновлена";
+  document.body.appendChild(notification);
+  setTimeout(() => {
+    notification.remove();
+  }, 2000);
+}
+
+function closeAnnotationModal() {
+  const modal = document.getElementById("annotationModal");
+  const modalContent = document.getElementById("annotationModalContent");
+  const expandBtn = document.getElementById("annotationModalExpandBtn");
+  if (modal) {
+    modal.classList.remove("active");
+    // Сбрасываем размер при закрытии
+    if (modalContent) {
+      modalContent.classList.remove("expanded");
+    }
+    if (expandBtn) {
+      expandBtn.classList.remove("expanded");
+    }
+  }
+  currentAnnotationFieldId = null;
+}
+
+function toggleAnnotationModalSize() {
+  const modalContent = document.getElementById("annotationModalContent");
+  const expandBtn = document.getElementById("annotationModalExpandBtn");
+  if (modalContent && expandBtn) {
+    const isExpanded = modalContent.classList.contains("expanded");
+    if (isExpanded) {
+      modalContent.classList.remove("expanded");
+      expandBtn.classList.remove("expanded");
+      expandBtn.title = "Увеличить окно";
+    } else {
+      modalContent.classList.add("expanded");
+      expandBtn.classList.add("expanded");
+      expandBtn.title = "Уменьшить окно";
+    }
+  }
+}
 
 function openCopyModal(text) {
   const modal = document.getElementById("lineCopyModal");
@@ -2059,6 +2418,12 @@ document.addEventListener("click", async (e) => {
     closeRefsModal();
   }
   
+  // Закрытие модального окна аннотации при клике вне его
+  const annotationModal = document.getElementById("annotationModal");
+  if (e.target === annotationModal) {
+    closeAnnotationModal();
+  }
+  
   // Закрытие модального окна копирования при клике вне его
   const lineCopyModal = document.getElementById("lineCopyModal");
   if (e.target === lineCopyModal) {
@@ -2070,6 +2435,7 @@ document.addEventListener("click", async (e) => {
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     closeRefsModal();
+    closeAnnotationModal();
     closeCopyModal();
   }
 });
@@ -3614,20 +3980,41 @@ def merge_doi_url_in_html(html_content: str) -> str:
 
 def convert_file_to_html(file_path: Path, use_word_reader: bool = False) -> tuple[str, list[str]]:
     """
-    Конвертирует DOCX/RTF файл в HTML используя word_to_html.
+    Конвертирует файл (DOCX/RTF/PDF) в HTML.
     
     Args:
         file_path: Путь к исходному файлу
-        use_word_reader: Использовать ли word_reader для конвертации
+        use_word_reader: Использовать ли word_reader для конвертации (только для Word файлов)
         
     Returns:
         Кортеж (HTML содержимое, список предупреждений)
     """
-    if not WORD_TO_HTML_AVAILABLE:
-        raise RuntimeError("word_to_html недоступен")
-    
     if not file_path.exists():
         raise FileNotFoundError(f"Файл не найден: {file_path}")
+    
+    suffix = file_path.suffix.lower()
+    
+    # Обработка PDF файлов
+    if suffix == ".pdf":
+        if not PDF_TO_HTML_AVAILABLE:
+            raise RuntimeError(
+                "PDF поддержка недоступна. "
+                "Установите одну из библиотек: pip install pdfplumber или pip install pymupdf"
+            )
+        try:
+            html_body, warnings = convert_pdf_to_html(file_path, prefer_pdfplumber=True)
+            # Объединяем параграфы с DOI/URL с предыдущими (как для Word файлов)
+            html_body = merge_doi_url_in_html(html_body)
+            return html_body, warnings
+        except Exception as e:
+            raise RuntimeError(f"Ошибка конвертации PDF: {e}") from e
+    
+    # Обработка Word файлов (DOCX/RTF)
+    if suffix not in {".docx", ".rtf"}:
+        raise ValueError(f"Неподдерживаемый формат: {suffix}. Поддерживаются: .docx, .rtf, .pdf")
+    
+    if not WORD_TO_HTML_AVAILABLE:
+        raise RuntimeError("word_to_html недоступен")
     
     try:
         html_body, warnings = convert_to_html(
@@ -3700,17 +4087,37 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
                 list_of_journals_path=list_of_journals_path
             )
             
-            if results:
-                return jsonify({
-                    "success": True,
-                    "message": f"Успешно сгенерировано XML файлов: {len(results)}",
-                    "files": [str(r) for r in results]
-                })
-            else:
+            if not results:
                 return jsonify({
                     "success": False,
                     "error": "Не удалось сгенерировать XML файлы. Проверьте наличие JSON файлов в подпапках."
                 }), 400
+            
+            # Возвращаем список файлов для скачивания
+            files_info = []
+            for xml_file_path in results:
+                if xml_file_path.exists() and xml_file_path.is_file():
+                    # Создаем относительный путь от xml_output_dir для URL
+                    try:
+                        relative_path = xml_file_path.relative_to(xml_output_dir)
+                        # Заменяем обратные слеши на прямые для URL
+                        url_path = str(relative_path).replace('\\', '/')
+                        files_info.append({
+                            "name": xml_file_path.name,
+                            "url": f"/download-xml/{url_path}"
+                        })
+                    except ValueError:
+                        # Если файл не находится внутри xml_output_dir, используем полный путь
+                        files_info.append({
+                            "name": xml_file_path.name,
+                            "url": f"/download-xml/{xml_file_path.name}"
+                        })
+            
+            return jsonify({
+                "success": True,
+                "message": f"Успешно сгенерировано XML файлов: {len(files_info)}",
+                "files": files_info
+            })
                 
         except ImportError as e:
             return jsonify({
@@ -3722,6 +4129,34 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
                 "success": False,
                 "error": f"Ошибка при генерации XML: {str(e)}"
             }), 500
+    
+    @app.route("/download-xml/<path:xml_filename>")
+    def download_xml(xml_filename: str):
+        """Скачивание XML файла."""
+        try:
+            # Безопасность: проверяем, что путь не содержит опасные символы
+            if ".." in xml_filename or xml_filename.startswith("/") or xml_filename.startswith("\\"):
+                abort(404)
+            
+            xml_path = xml_output_dir / xml_filename
+            
+            # Проверяем, что файл существует и находится внутри xml_output_dir
+            if not xml_path.exists() or not xml_path.is_file():
+                abort(404)
+            
+            try:
+                xml_path.resolve().relative_to(xml_output_dir.resolve())
+            except ValueError:
+                abort(404)
+            
+            return send_file(
+                str(xml_path),
+                mimetype='application/xml',
+                as_attachment=True,
+                download_name=xml_path.name
+            )
+        except Exception as e:
+            abort(404)
     
     @app.route("/view/<path:filename>")
     def view_file(filename: str):
@@ -3790,7 +4225,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             # Преобразуем JSON в данные для формы
             form_data = json_structure_to_form_data(json_data)
             
-            # Находим соответствующий DOCX файл
+            # Находим соответствующий файл (DOCX/RTF/PDF)
             # Передаем json_input_dir для поиска в той же подпапке
             docx_path = find_docx_for_json(json_path, words_input_dir, json_input_dir)
             
@@ -3801,26 +4236,26 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
                     if len(relative_path.parts) > 1:
                         subdir_name = relative_path.parts[0]
                         error_msg = (
-                            f"Ошибка: не найден DOCX/RTF файл для статьи {json_filename}<br><br>"
+                            f"Ошибка: не найден файл (DOCX/RTF/PDF) для статьи {json_filename}<br><br>"
                             f"Искали:<br>"
-                            f"1. Отдельный файл: {json_path.stem}.docx или {json_path.stem}.rtf<br>"
+                            f"1. Отдельный файл: {json_path.stem}.docx, {json_path.stem}.rtf или {json_path.stem}.pdf<br>"
                             f"2. Общий файл выпуска в папке '{subdir_name}':<br>"
-                            f"   - {subdir_name}.docx<br>"
-                            f"   - issue.docx<br>"
-                            f"   - выпуск.docx<br><br>"
+                            f"   - {subdir_name}.docx/rtf/pdf<br>"
+                            f"   - issue.docx/rtf/pdf<br>"
+                            f"   - выпуск.docx/rtf/pdf<br><br>"
                             f"Поместите файл в папку: words_input/{subdir_name}/"
                         )
                     else:
-                        error_msg = f"Ошибка: не найден соответствующий DOCX/RTF файл для {json_filename}"
+                        error_msg = f"Ошибка: не найден соответствующий файл (DOCX/RTF/PDF) для {json_filename}"
                 except ValueError:
-                    error_msg = f"Ошибка: не найден соответствующий DOCX/RTF файл для {json_filename}"
+                    error_msg = f"Ошибка: не найден соответствующий файл (DOCX/RTF/PDF) для {json_filename}"
                 return error_msg, 404
             
             # Проверяем, является ли найденный файл общим файлом выпуска
             # (не совпадает с именем JSON файла)
             is_common_file = docx_path.stem != json_path.stem
             
-            # Конвертируем DOCX в HTML
+            # Конвертируем файл (DOCX/RTF/PDF) в HTML
             html_body, warnings = convert_file_to_html(docx_path, use_word_reader=use_word_reader)
             
             # Извлекаем текст из HTML для разметки
@@ -4043,7 +4478,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             # Проверяем, является ли найденный файл общим файлом выпуска
             is_common_file = docx_path.stem != json_path.stem
             
-            # Конвертируем DOCX в HTML
+            # Конвертируем файл (DOCX/RTF/PDF) в HTML
             html_body, warnings = convert_file_to_html(docx_path, use_word_reader=use_word_reader)
             
             # Извлекаем текст из HTML для разметки
@@ -4210,6 +4645,102 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             error_details = traceback.format_exc()
             print(error_details)
             return jsonify(error=error_msg, details=error_details), 500
+    
+    @app.route("/process-references-ai", methods=["POST"])
+    def process_references_ai():
+        """Обрабатывает список литературы с помощью ИИ прямо в веб-форме."""
+        try:
+            data = request.get_json()
+            field_id = data.get("field_id")  # "references_ru" или "references_en"
+            raw_text = data.get("text", "")
+            
+            if not raw_text or not raw_text.strip():
+                return jsonify(success=False, error="Текст для обработки пуст"), 400
+            
+            # Определяем язык и выбираем промпт
+            language = "RUS" if field_id == "references_ru" else "ENG"
+            prompt_type = "references_formatting_rus" if language == "RUS" else "references_formatting_eng"
+            
+            # Загружаем конфигурацию
+            config = None
+            try:
+                config_path = Path("config.json")
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+            except Exception:
+                pass
+            
+            # Получаем промпт из prompts.py
+            try:
+                from prompts import Prompts
+                base_prompt = Prompts.get_prompt(prompt_type)
+                prompt = base_prompt.format(references_text=raw_text)
+            except Exception as e:
+                # Если не удалось загрузить промпт, используем базовый
+                lang_name = "Русский" if language == "RUS" else "English"
+                prompt = f"""Ты помощник для нормализации библиографических списков научных статей.
+
+Задача: Разбери предоставленный текст списка литературы и верни нормализованный список, где каждая библиографическая запись находится на отдельной строке.
+
+Правила:
+1. Убери лишние пробелы внутри слов, фамилий, инициалов
+2. Объедини разорванные записи (если автор, название, год, страницы разбиты на несколько строк)
+3. Исправь переносы внутри слов
+4. Сохрани все важные элементы: авторы, название, год, издательство, страницы, DOI, URL
+5. Не объединяй разные источники в одну запись
+6. Верни результат в формате JSON: {{"references": ["запись 1", "запись 2", ...]}}
+
+Язык: {lang_name}
+
+Текст для обработки:
+{raw_text}
+
+Верни только валидный JSON без дополнительных комментариев."""
+            
+            # Используем GPT для обработки
+            from gpt_extraction import extract_metadata_with_gpt
+            
+            result = extract_metadata_with_gpt(
+                prompt,
+                model=config.get("gpt_extraction", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini",
+                temperature=0.3,
+                api_key=config.get("gpt_extraction", {}).get("api_key") if config else None,
+                config=config
+            )
+            
+            # Извлекаем нормализованный список
+            references = []
+            if isinstance(result, dict) and "references" in result:
+                references = result["references"]
+            elif isinstance(result, list):
+                references = result
+            else:
+                # Пытаемся извлечь из текста ответа
+                response_text = str(result)
+                # Ищем JSON в ответе
+                import re
+                json_match = re.search(r'\{.*"references".*\}', response_text, re.DOTALL)
+                if json_match:
+                    try:
+                        parsed = json.loads(json_match.group(0))
+                        references = parsed.get("references", [])
+                    except:
+                        pass
+                
+                # Если не нашли JSON, разбиваем по строкам
+                if not references:
+                    references = [line.strip() for line in response_text.split("\n") if line.strip() and not line.strip().startswith("{") and not line.strip().startswith("}")]
+            
+            # Объединяем в строку с переносами
+            normalized_text = "\n".join(references)
+            
+            return jsonify(success=True, text=normalized_text, count=len(references))
+            
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            return jsonify(success=False, error=str(e), details=error_details), 500
     
     @app.route("/markup/<path:json_filename>/save", methods=["POST"])
     def save_metadata(json_filename: str):

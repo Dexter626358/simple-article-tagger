@@ -3,7 +3,7 @@
 """
 Вспомогательный модуль для генерации XML файлов из JSON файлов в папке output.
 Парсит название папки (issn_год_том_номер или issn_год_номер) и использует данные
-из list_of_journals.json для создания конфигурации журнала.
+из data/list_of_journals.json для создания конфигурации журнала.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 try:
-    from xml_generator import (
+    from services.xml_generator import (
         json_to_article_xml,
         save_xml_to_file,
         create_xml_issue,
@@ -23,7 +23,7 @@ try:
 except ImportError as e:
     XML_GENERATOR_AVAILABLE = False
     print(f"⚠ Ошибка: не удалось импортировать xml_generator: {e}")
-    print("   Убедитесь, что xml_generator.py доступен и все его зависимости установлены.")
+    print("   Убедитесь, что services/xml_generator.py доступен и все его зависимости установлены.")
 except Exception as e:
     XML_GENERATOR_AVAILABLE = False
     print(f"⚠ Ошибка при импорте xml_generator: {e}")
@@ -53,7 +53,7 @@ def validate_xml_against_schema(xml_file: Path, schema_file: Optional[Path] = No
     
     Args:
         xml_file: Путь к XML файлу для валидации
-        schema_file: Путь к XSD схеме (по умолчанию: xml_schema.xsd в корне проекта)
+        schema_file: Путь к XSD схеме (по умолчанию: data/xml_schema.xsd в корне проекта)
         
     Returns:
         Кортеж (валиден ли файл, список ошибок)
@@ -63,7 +63,7 @@ def validate_xml_against_schema(xml_file: Path, schema_file: Optional[Path] = No
     # Определяем путь к схеме
     if schema_file is None:
         script_dir = Path(__file__).parent.resolve()
-        schema_file = script_dir / "xml_schema.xsd"
+        schema_file = script_dir / "data/xml_schema.xsd"
     
     # Проверяем существование файлов
     if not xml_file.exists():
@@ -331,11 +331,11 @@ def parse_folder_name(folder_name: str) -> Optional[Dict[str, Any]]:
 
 def load_journal_from_list(issn: str, list_of_journals_path: Path) -> Optional[Dict[str, Any]]:
     """
-    Загружает данные журнала из list_of_journals.json по ISSN.
+    Загружает данные журнала из data/list_of_journals.json по ISSN.
     
     Args:
         issn: ISSN журнала
-        list_of_journals_path: Путь к файлу list_of_journals.json
+        list_of_journals_path: Путь к файлу data/list_of_journals.json
         
     Returns:
         Словарь с данными журнала (ISSN и Title) или None, если не найден
@@ -354,7 +354,7 @@ def load_journal_from_list(issn: str, list_of_journals_path: Path) -> Optional[D
         
         return None
     except Exception as e:
-        print(f"⚠ Ошибка при загрузке list_of_journals.json: {e}")
+        print(f"⚠ Ошибка при загрузке data/list_of_journals.json: {e}")
         return None
 
 
@@ -364,11 +364,11 @@ def create_config_from_folder_and_journal(
     titleid: Optional[int] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Создает конфигурацию журнала на основе названия папки и данных из list_of_journals.json.
+    Создает конфигурацию журнала на основе названия папки и данных из data/list_of_journals.json.
     
     Args:
         folder_name: Название папки (например, "2619-1601_2024_6")
-        list_of_journals_path: Путь к файлу list_of_journals.json
+        list_of_journals_path: Путь к файлу data/list_of_journals.json
         titleid: ID журнала в elibrary (опционально)
         
     Returns:
@@ -389,7 +389,7 @@ def create_config_from_folder_and_journal(
     # Загружаем данные журнала
     journal_data = load_journal_from_list(issn, list_of_journals_path)
     if not journal_data:
-        print(f"⚠ Журнал с ISSN {issn} не найден в list_of_journals.json")
+        print(f"⚠ Журнал с ISSN {issn} не найден в data/list_of_journals.json")
         return None
     
     journal_title = journal_data.get("Title", "")
@@ -431,7 +431,7 @@ def generate_xml_for_output_folder(
     Args:
         json_input_dir: Базовая директория json_input (например, Path("json_input"))
         xml_output_dir: Директория для сохранения XML файлов (например, Path("xml_output"))
-        list_of_journals_path: Путь к файлу list_of_journals.json
+        list_of_journals_path: Путь к файлу data/list_of_journals.json
         folder_name: Название подпапки (например, "2619-1601_2024_6")
         
     Returns:
@@ -554,7 +554,7 @@ def generate_xml_for_all_folders(
     Args:
         json_input_dir: Базовая директория json_input
         xml_output_dir: Директория для сохранения XML файлов
-        list_of_journals_path: Путь к файлу list_of_journals.json
+        list_of_journals_path: Путь к файлу data/list_of_journals.json
         
     Returns:
         Список путей к созданным XML файлам
@@ -622,7 +622,7 @@ def main() -> int:
     parser.add_argument(
         "--list-of-journals",
         default=None,
-        help="Путь к файлу list_of_journals.json (по умолчанию: list_of_journals.json)"
+        help="Путь к файлу data/list_of_journals.json (по умолчанию: data/list_of_journals.json)"
     )
     parser.add_argument(
         "--folder",
@@ -654,17 +654,17 @@ def main() -> int:
         if not list_of_journals_path.is_absolute():
             list_of_journals_path = script_dir / list_of_journals_path
     else:
-        list_of_journals_path = script_dir / "list_of_journals.json"
+        list_of_journals_path = script_dir / "data/list_of_journals.json"
     
     # Проверяем доступность модулей
     if not XML_GENERATOR_AVAILABLE:
         print("❌ Ошибка: xml_generator недоступен")
-        print("   Убедитесь, что xml_generator.py находится в той же папке")
+        print("   Убедитесь, что services/xml_generator.py находится в той же папке")
         return 1
     
-    # Проверяем наличие файла list_of_journals.json
+    # Проверяем наличие файла data/list_of_journals.json
     if not list_of_journals_path.exists():
-        print(f"❌ Ошибка: файл list_of_journals.json не найден: {list_of_journals_path}")
+        print(f"❌ Ошибка: файл data/list_of_journals.json не найден: {list_of_journals_path}")
         return 1
     
     # Проверяем наличие папки json_input
@@ -720,7 +720,7 @@ def main() -> int:
             print("   1. В папке output есть подпапки с JSON файлами")
             print("   2. JSON файлы имеют суффикс _processed.json")
             print("   3. Названия подпапок соответствуют формату: issn_год_номер или issn_год_том_номер")
-            print("   4. Журналы с указанными ISSN найдены в list_of_journals.json")
+            print("   4. Журналы с указанными ISSN найдены в data/list_of_journals.json")
             return 1
 
 

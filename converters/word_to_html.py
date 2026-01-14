@@ -26,7 +26,7 @@ except ImportError:
     RTF_AVAILABLE = False
 
 try:
-    from word_reader import read_blocks, WordReaderError
+    from converters.word_reader import read_blocks, WordReaderError
     WORD_READER_AVAILABLE = True
 except ImportError:
     WORD_READER_AVAILABLE = False

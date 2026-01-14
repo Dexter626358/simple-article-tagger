@@ -74,7 +74,7 @@ python extract_metadata.py words_input/ -r -o output.json
 Самый удобный способ - открыть файл в браузере и выделять метаданные мышкой:
 
 ```bash
-python web_extract.py
+python scripts/web_extract.py
 ```
 
 **Как это работает:**
@@ -189,7 +189,7 @@ python interactive_extract.py words_input/ПММ-6_1.rtf
 Для работы с текстовыми PDF файлами (например, из InDesign) можно использовать графический интерфейс для выделения областей и извлечения текста:
 
 ```bash
-python pdf_text_area_selector.py
+python converters/pdf_text_area_selector.py
 ```
 
 **Как это работает:**
@@ -239,14 +239,19 @@ python pdf_text_area_selector.py
 
 ```
 word_parser_metadata/
-├── extract_metadata.py          # Основной скрипт
-├── metadata_extractor.py         # Модуль для извлечения метаданных
-├── pdf_text_area_selector.py     # Графический интерфейс для выделения областей в PDF
-├── pdf_bbox_helper.py            # Утилита для поиска блоков в PDF по ключевым словам
-├── requirements.txt              # Зависимости проекта
-├── README.md                     # Документация
-├── .gitignore                   # Игнорируемые файлы
-└── words_input/                 # Директория с входными файлами
+app/                          # Flask app package (routes, helpers, templates)
+services/                     # GPT extraction + XML generator services
+converters/                   # PDF/Word/RTF converters and helpers
+scripts/                      # CLI tools and one-off scripts
+data/                         # list_of_journals.json, xml_schema.xsd
+static/                       # static web assets
+input_files/                  # uploaded archives and source files
+json_input/                   # extracted JSON metadata
+xml_output/                   # generated XML
+processed_archives/           # archived runs
+requirements.txt
+README.md
+.gitignore
 ```
 
 ## Примечания

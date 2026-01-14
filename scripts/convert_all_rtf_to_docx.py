@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List
 
 try:
-    from convert_rtf_to_docx import convert_rtf_to_docx, ConversionError
+    from converters.convert_rtf_to_docx import convert_rtf_to_docx, ConversionError
 except ImportError:
     print("Ошибка: модуль convert_rtf_to_docx не найден")
     sys.exit(1)

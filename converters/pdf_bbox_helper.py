@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import List, Optional
 
 try:
-    from pdf_to_html import find_text_blocks_with_bbox, print_bbox_info, find_annotation_bbox_auto
+    from converters.pdf_to_html import find_text_blocks_with_bbox, print_bbox_info, find_annotation_bbox_auto
 except ImportError:
     print("Ошибка: не удалось импортировать функции из pdf_to_html.py")
     print("Убедитесь, что файл pdf_to_html.py доступен.")

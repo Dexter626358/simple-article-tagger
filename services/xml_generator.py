@@ -524,7 +524,7 @@ def generate_xml_for_issue(issue_name: Optional[str] = None) -> int:
         folder_name = Path(selected_dir).name
         issue_info = None
         try:
-            from xml_generator_helper import parse_folder_name
+            from services.xml_generator_helper import parse_folder_name
             issue_info = parse_folder_name(folder_name)
             if issue_info:
                 print(f"✅ Парсинг имени папки успешен:")
@@ -663,13 +663,13 @@ def xml_validator(xml_file: Path, schema_file: Optional[Path] = None) -> Tuple[b
     
     Args:
         xml_file: Путь к XML файлу
-        schema_file: Путь к XSD схеме (по умолчанию xml_schema.xsd)
+        schema_file: Путь к XSD схеме (по умолчанию data/xml_schema.xsd)
         
     Returns:
         Tuple[bool, List[str]]: (валиден ли файл, список ошибок)
     """
     if schema_file is None:
-        schema_file = Path("xml_schema.xsd")
+        schema_file = Path("data/xml_schema.xsd")
     
     errors = []
     

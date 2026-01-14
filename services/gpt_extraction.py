@@ -319,7 +319,7 @@ def extract_metadata_from_pdf(
     """
     # Импортируем модули для чтения PDF
     try:
-        from pdf_reader import read_pdf_text, PDFReaderConfig
+        from converters.pdf_reader import read_pdf_text, PDFReaderConfig
         from config import get_config
         from text_utils import clean_pdf_text_for_llm
     except ImportError as e:
@@ -491,19 +491,19 @@ if __name__ == "__main__":
         epilog="""
 Примеры использования:
   # Обработка всех PDF файлов из input_files (по умолчанию):
-  python gpt_extraction.py
+  python services/gpt_extraction.py
   
   # Обработка одного файла:
-  python gpt_extraction.py article.pdf
+  python services/gpt_extraction.py article.pdf
   
   # Обработка всех PDF файлов из указанной подпапки:
-  python gpt_extraction.py --folder 2619-1601_2024_4
+  python services/gpt_extraction.py --folder 2619-1601_2024_4
   
   # С указанием API ключа:
-  python gpt_extraction.py --api-key sk-your-key-here
+  python services/gpt_extraction.py --api-key sk-your-key-here
   
   # С указанием модели и температуры:
-  python gpt_extraction.py --model gpt-4o --temperature 0.5
+  python services/gpt_extraction.py --model gpt-4o --temperature 0.5
 
 Примечание: 
   - По умолчанию обрабатываются все PDF файлы из input_files (включая подпапки)

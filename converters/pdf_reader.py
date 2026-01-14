@@ -393,8 +393,8 @@ if __name__ == "__main__":
     import sys
     
     if len(sys.argv) < 2:
-        print("Использование: python pdf_reader.py <путь_к_pdf> [first_pages] [last_pages]")
-        print("Пример: python pdf_reader.py article.pdf 3 3")
+        print("Использование: python converters/pdf_reader.py <путь_к_pdf> [first_pages] [last_pages]")
+        print("Пример: python converters/pdf_reader.py article.pdf 3 3")
         sys.exit(1)
     
     pdf_path = Path(sys.argv[1])

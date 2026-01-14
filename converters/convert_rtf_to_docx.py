@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Optional, List
 
 try:
-    from word_reader import read_rtf_blocks, read_rtf, ReaderConfig, TextBlock
+    from converters.word_reader import read_rtf_blocks, read_rtf, ReaderConfig, TextBlock
     WORD_READER_AVAILABLE = True
 except ImportError:
     WORD_READER_AVAILABLE = False
@@ -287,11 +287,11 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 Примеры использования:
-  python convert_rtf_to_docx.py                    # Обработает {default_input_dir.name}/
-  python convert_rtf_to_docx.py document.rtf
-  python convert_rtf_to_docx.py document.rtf -o output.docx
-  python convert_rtf_to_docx.py words_input/ --output-dir docx_output/
-  python convert_rtf_to_docx.py words_input/ -r  # рекурсивно
+  python converters/convert_rtf_to_docx.py                    # Обработает {default_input_dir.name}/
+  python converters/convert_rtf_to_docx.py document.rtf
+  python converters/convert_rtf_to_docx.py document.rtf -o output.docx
+  python converters/convert_rtf_to_docx.py words_input/ --output-dir docx_output/
+  python converters/convert_rtf_to_docx.py words_input/ -r  # рекурсивно
         """
     )
     

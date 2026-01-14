@@ -655,11 +655,11 @@ if __name__ == '__main__':
         except WordReaderError as e:
             print(f"\nОшибка: {e}")
             print("\nИспользование:")
-            print("  python word_reader.py                    # Выбор файла из words_input/")
-            print("  python word_reader.py <путь_к_файлу>     # Указать файл напрямую")
-            print("  python word_reader.py <путь> --filter-service  # С фильтрацией служебных строк")
-            print("  python word_reader.py <путь> -f         # Короткий вариант фильтрации")
-            print("  Пример: python word_reader.py words_input/ПММ-6_1.rtf -f")
+            print("  python converters/word_reader.py                    # Выбор файла из words_input/")
+            print("  python converters/word_reader.py <путь_к_файлу>     # Указать файл напрямую")
+            print("  python converters/word_reader.py <путь> --filter-service  # С фильтрацией служебных строк")
+            print("  python converters/word_reader.py <путь> -f         # Короткий вариант фильтрации")
+            print("  Пример: python converters/word_reader.py words_input/ПММ-6_1.rtf -f")
             sys.exit(1)
     
     if not file_path.exists():

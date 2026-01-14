@@ -231,7 +231,7 @@ def extract_text_from_pdf(pdf_path: Path, include_bbox: bool = False) -> List[Di
     try:
         # Если нужно сохранять bbox, используем pdfplumber напрямую
         if include_bbox:
-            from pdf_to_html import PDFPLUMBER_AVAILABLE
+            from converters.pdf_to_html import PDFPLUMBER_AVAILABLE
             if PDFPLUMBER_AVAILABLE:
                 import pdfplumber
                 
@@ -284,7 +284,7 @@ def extract_text_from_pdf(pdf_path: Path, include_bbox: bool = False) -> List[Di
         
         # Обычное извлечение без bbox
         # Импортируем функции извлечения из pdf_to_html
-        from pdf_to_html import (
+        from converters.pdf_to_html import (
             _extract_lines_pdfplumber,
             _extract_lines_pymupdf,
             PDFPLUMBER_AVAILABLE,

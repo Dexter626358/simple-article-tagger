@@ -102,8 +102,8 @@ class Config:
             # Настройки XML генератора
             # ----------------------------
             "xml_generator": {
-                "list_of_journals_file": "list_of_journals.json",
-                "xml_schema_file": "xml_schema.xsd",
+                "list_of_journals_file": "data/list_of_journals.json",
+                "xml_schema_file": "data/xml_schema.xsd",
                 "validate_xml": True,
                 "ignore_validation_errors": {
                     "empty_volume": True,

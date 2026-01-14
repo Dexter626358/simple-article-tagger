@@ -1,0 +1,75 @@
+2761:           <div class="keywords-count" id="keywords_en-count">Количество: 0</div>
+2762:         </div>
+2763: 
+2764:         <div class="field-group">
+2765:           <label>Список литературы (русский)</label>
+2766:           <textarea id="references_ru" name="references_ru" rows="5">{% if form_data %}{{ form_data.get('references_ru', '')|e }}{% endif %}</textarea>
+2767:           <div class="selected-lines" id="references_ru-lines"></div>
+2768:           <div class="keywords-count" id="references_ru-count">Количество источников: 0</div>
+2769:           <div style="display: flex; gap: 10px; margin-top: 5px; flex-wrap: wrap;">
+2770:             <button type="button" class="view-refs-btn" onclick="viewReferences('references_ru', 'Список литературы (русский)')">👁 Просмотреть список</button>
+2771:             <button type="button" class="view-refs-btn" onclick="processReferencesWithAI('references_ru')" id="ai-process-btn-ru" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+2772:               🤖 Обработать с ИИ
+2773:             </button>
+2774:           </div>
+2775:           <small style="color:#666;font-size:12px;">Каждая ссылка с новой строки</small>
+2776:         </div>
+2777: 
+2778:         <div class="field-group">
+2779:           <label>Список литературы (английский)</label>
+2780:           <textarea id="references_en" name="references_en" rows="5">{% if form_data %}{{ form_data.get('references_en', '')|e }}{% endif %}</textarea>
+2781:           <div class="selected-lines" id="references_en-lines"></div>
+2782:           <div class="keywords-count" id="references_en-count">Количество источников: 0</div>
+2783:           <div style="display: flex; gap: 10px; margin-top: 5px; flex-wrap: wrap;">
+2784:             <button type="button" class="view-refs-btn" onclick="viewReferences('references_en', 'Список литературы (английский)')">👁 Просмотреть список</button>
+2785:             <button type="button" class="view-refs-btn" onclick="processReferencesWithAI('references_en')" id="ai-process-btn-en" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
+2786:               🤖 Обработать с ИИ
+2787:             </button>
+2788:           </div>
+2789:           <small style="color:#666;font-size:12px;">Каждая ссылка с новой строки</small>
+2790:         </div>
+2791: 
+2792:         <div class="field-group">
+2793:           <label>Тип статьи</label>
+2794:           <select id="art_type" name="art_type" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
+2795:             {% set current_art_type = (form_data.get('art_type') if form_data and form_data.get('art_type') else 'RAR') %}
+2796:             <option value="RAR" {% if current_art_type == 'RAR' %}selected{% endif %}>RAR - Исследовательская статья (по умолчанию)</option>
+2797:             <option value="REV" {% if current_art_type == 'REV' %}selected{% endif %}>REV - Обзорная статья</option>
+2798:             <option value="BRV" {% if current_art_type == 'BRV' %}selected{% endif %}>BRV - Рецензия</option>
+2799:             <option value="SCO" {% if current_art_type == 'SCO' %}selected{% endif %}>SCO - Краткое сообщение</option>
+2800:             <option value="REP" {% if current_art_type == 'REP' %}selected{% endif %}>REP - Отчет</option>
+2801:             <option value="CNF" {% if current_art_type == 'CNF' %}selected{% endif %}>CNF - Конференция</option>
+2802:             <option value="EDI" {% if current_art_type == 'EDI' %}selected{% endif %}>EDI - Редакционная статья</option>
+2803:             <option value="COR" {% if current_art_type == 'COR' %}selected{% endif %}>COR - Корреспонденция</option>
+2804:             <option value="ABS" {% if current_art_type == 'ABS' %}selected{% endif %}>ABS - Аннотация</option>
+2805:             <option value="RPR" {% if current_art_type == 'RPR' %}selected{% endif %}>RPR - Отчет о проекте</option>
+2806:             <option value="MIS" {% if current_art_type == 'MIS' %}selected{% endif %}>MIS - Разное</option>
+2807:             <option value="PER" {% if current_art_type == 'PER' %}selected{% endif %}>PER - Персоналия</option>
+2808:             <option value="UNK" {% if current_art_type == 'UNK' %}selected{% endif %}>UNK - Не определён (устаревший)</option>
+2809:           </select>
+2810:         </div>
+2811: 
+2812:         <div class="field-group">
+2813:           <label>Язык публикации</label>
+2814:           <select id="publ_lang" name="publ_lang" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
+2815:             {% set current_publ_lang = (form_data.get('publ_lang') if form_data and form_data.get('publ_lang') else 'RUS') %}
+2816:             <option value="RUS" {% if current_publ_lang == 'RUS' %}selected{% endif %}>RUS - Русский</option>
+2817:             <option value="ENG" {% if current_publ_lang == 'ENG' %}selected{% endif %}>ENG - Английский</option>
+2818:           </select>
+2819:         </div>
+2820: 
+2821:         <div class="field-group">
+2822:           <label>Финансирование (русский)</label>
+2823:           <textarea id="funding" name="funding" rows="3">{% if form_data %}{{ form_data.get('funding', '')|e }}{% endif %}</textarea>
+2824:           <div class="selected-lines" id="funding-lines"></div>
+2825:         </div>
+2826: 
+2827:         <div class="field-group">
+2828:           <label>Финансирование (английский)</label>
+2829:           <textarea id="funding_en" name="funding_en" rows="3">{% if form_data %}{{ form_data.get('funding_en', '')|e }}{% endif %}</textarea>
+2830:           <div class="selected-lines" id="funding_en-lines"></div>
+2831:         </div>
+2832: 
+2833:         <div class="buttons">
+2834:           <button type="button" class="btn-secondary" id="clearBtn">Очистить выделение</button>
+2835:           <button type="submit" class="btn-success">Сохранить</button>

@@ -213,6 +213,116 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     return lines
 
 
+def extract_text_from_pdf(pdf_path: Path, include_bbox: bool = False) -> List[Dict[str, Any]]:
+    """
+    Извлекает текст из PDF для разметки.
+    Аналогично extract_text_from_html, но для PDF файлов.
+    
+    Args:
+        pdf_path: Путь к PDF файлу
+        include_bbox: Если True, сохраняет координаты (bbox) для каждой строки
+        
+    Returns:
+        Список словарей с информацией о строках текста для разметки
+    """
+    lines = []
+    idx = 1
+    
+    try:
+        # Если нужно сохранять bbox, используем pdfplumber напрямую
+        if include_bbox:
+            from pdf_to_html import PDFPLUMBER_AVAILABLE
+            if PDFPLUMBER_AVAILABLE:
+                import pdfplumber
+                
+                with pdfplumber.open(pdf_path) as pdf:
+                    for page_num, page in enumerate(pdf.pages, start=1):
+                        # Извлекаем слова с координатами
+                        words = page.extract_words()
+                        
+                        if not words:
+                            continue
+                        
+                        # Группируем слова по строкам (по координате top)
+                        lines_by_y = {}
+                        for word in words:
+                            y = round(word['top'], 1)  # Округляем для группировки
+                            if y not in lines_by_y:
+                                lines_by_y[y] = []
+                            lines_by_y[y].append(word)
+                        
+                        # Сортируем строки по вертикальной позиции (сверху вниз)
+                        for y in sorted(lines_by_y.keys(), reverse=True):  # reverse=True т.к. y растет вниз
+                            words_in_line = sorted(lines_by_y[y], key=lambda w: w['x0'])
+                            
+                            if not words_in_line:
+                                continue
+                            
+                            # Объединяем текст строки
+                            line_text = " ".join(w['text'] for w in words_in_line)
+                            
+                            if not line_text.strip():
+                                continue
+                            
+                            # Вычисляем bbox для всей строки
+                            x0 = min(w['x0'] for w in words_in_line)
+                            top = words_in_line[0]['top']
+                            x1 = max(w['x1'] for w in words_in_line)
+                            bottom = words_in_line[0]['bottom']
+                            
+                            lines.append({
+                                "id": idx,
+                                "text": line_text.strip(),
+                                "line_number": idx,
+                                "page": page_num,
+                                "bbox": (x0, top, x1, bottom),
+                                "y_position": y
+                            })
+                            idx += 1
+                
+                return lines
+        
+        # Обычное извлечение без bbox
+        # Импортируем функции извлечения из pdf_to_html
+        from pdf_to_html import (
+            _extract_lines_pdfplumber,
+            _extract_lines_pymupdf,
+            PDFPLUMBER_AVAILABLE,
+            PYMUPDF_AVAILABLE
+        )
+        
+        # Выбираем экстрактор (предпочитаем pdfplumber)
+        extractor = None
+        if PDFPLUMBER_AVAILABLE:
+            extractor = _extract_lines_pdfplumber
+        elif PYMUPDF_AVAILABLE:
+            extractor = _extract_lines_pymupdf
+        
+        if not extractor:
+            # Если нет доступных библиотек, возвращаем пустой список
+            return []
+        
+        # Извлекаем строки из PDF
+        raw_lines = extractor(pdf_path)
+        
+        # Преобразуем в нужный формат (аналогично extract_text_from_html)
+        for line_text in raw_lines:
+            if line_text and line_text.strip():
+                lines.append({
+                    "id": idx,
+                    "text": line_text.strip(),
+                    "line_number": idx
+                })
+                idx += 1
+        
+    except Exception as e:
+        # В случае ошибки возвращаем пустой список
+        print(f"Ошибка при извлечении текста из PDF {pdf_path}: {e}")
+        return []
+    
+    return lines
+
+
 def get_default_output_path(input_file: Path, output_dir: Optional[Path] = None) -> Path:
     """
     Генерирует путь к выходному JSON файлу на основе входного файла.

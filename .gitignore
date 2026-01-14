@@ -78,6 +78,7 @@ Thumbs.db
 # Project specific
 # Выходные файлы метаданных
 output/
+static/pdfjs/
 
 # JSON файлы (игнорируем все, кроме примеров и конфигов)
 *.json

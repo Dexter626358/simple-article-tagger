@@ -1,0 +1,52 @@
+wer = document.getElementById('pdfViewerMarkup');
+  if (!viewer) return;
+  viewer.innerHTML = '';
+  const frame = document.createElement('iframe');
+  frame.src = pdfUrl;
+  frame.style.width = '100%';
+  frame.style.height = '80vh';
+  frame.style.border = 'none';
+  viewer.appendChild(frame);
+}
+
+async function loadPdfForMarkup(pdfFilename) {
+  try {
+    if (typeof pdfjsLib === 'undefined') {
+      console.error('PDF.js не загружен!');
+      return;
+    }
+    
+    pdfjsLib.GlobalWorkerOptions.workerSrc = '/static/pdf.worker.min.js';
+    
+    const pdfUrl = `/pdf/${encodeURIComponent(pdfFilename)}`;
+    console.log('Загружаем PDF для разметки из:', pdfUrl);
+    
+    const loadingTask = pdfjsLib.getDocument({
+      url: pdfUrl,
+      verbosity: 0
+    });
+    
+    pdfDocMarkup = await loadingTask.promise;
+    console.log(`PDF.js: Загружен документ для разметки, страниц: ${pdfDocMarkup.numPages}`);
+    
+    currentPageMarkup = 0;
+    await displayPageMarkup();
+  } catch (error) {
+    console.error('Ошибка загрузки PDF для разметки:', error);
+  }
+}
+
+async function displayPageMarkup() {
+  if (!pdfDocMarkup || currentPageMarkup < 0 || currentPageMarkup >= pdfDocMarkup.numPages) return;
+  
+  const viewer = document.getElementById('pdfViewerMarkup');
+  if (!viewer) {
+    console.error('PDF viewer контейнер не найден');
+    return;
+  }
+  
+  viewer.innerHTML = '';
+  
+  try {
+    const page = await pdfDocMarkup.getPage(currentPageMarkup + 1);
+    const viewport = page.getViewport({ scale: 1.

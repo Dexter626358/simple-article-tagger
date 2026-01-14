@@ -73,8 +73,23 @@
     "use_prompts_module": true,
     "use_cache": true
   },
+  "pdf_to_html": {
+    "use_mistral": false,
+    "mistral_model": "mistral-large-latest",
+    "mistral_api_key": "YOUR_MISTRAL_API_KEY_HERE",
+    "mistral_base_url": "https://api.mistral.ai/v1"
+  },
+  "llm": {
+    "provider": "mistral",
+    "model": "mistral-large-latest",
+    "api_key": "YOUR_MISTRAL_API_KEY_HERE",
+    "base_url": "https://api.mistral.ai/v1",
+    "temperature": 0.2
+  },
   "_comment": {
-    "gpt_extraction.api_key": "Рекомендуется использовать переменную окружения OPENAI_API_KEY вместо указания ключа здесь. Если ключ указан здесь, он будет использован только если переменная окружения не установлена."
+    "gpt_extraction.api_key": "Рекомендуется использовать переменную окружения OPENAI_API_KEY вместо указания ключа здесь. Если ключ указан здесь, он будет использован только если переменная окружения не установлена.",
+    "pdf_to_html.use_mistral": "Включить использование Mistral AI для улучшения конвертации PDF в HTML",
+    "llm": "Общие настройки для LLM провайдеров (Mistral, OpenAI и т.д.)"
   }
 }
 

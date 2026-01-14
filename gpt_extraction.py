@@ -71,6 +71,7 @@ def create_extraction_prompt(text: str, use_prompts_module: bool = True) -> str:
 Извлеки следующие поля:
 - title (название статьи на русском языке)
 - title_en (название статьи на английском языке, если есть)
+- IMPORTANT: Extract full information for all authors listed in the article. Do not omit any author under any circumstances.
 - authors (список авторов, каждый автор как объект с полями: surname, initials, organization, address, email, otherInfo - для русского и английского языков)
 - doi (DOI статьи, если есть)
 - udc (УДК, если есть)
@@ -300,7 +301,7 @@ def extract_metadata_from_pdf(
     Извлекает метаданные из PDF файла: читает текст и отправляет его в GPT.
     
     Автоматически сохраняет JSON файл в json_input с сохранением структуры папок:
-    - Если PDF находится в pdf_articles_input/2619-1601_2024_4/article.pdf,
+    - Если PDF находится в input_files/2619-1601_2024_4/article.pdf,
       то JSON будет сохранен в json_input/2619-1601_2024_4/article.json
     
     Args:
@@ -432,21 +433,21 @@ def extract_metadata_from_pdf(
         else:
             json_input_dir = Path("json_input")
         
-        # Определяем родительскую папку PDF (относительно pdf_articles_input)
+        # Определяем родительскую папку PDF (относительно input_files)
         pdf_path_abs = pdf_path.resolve()
         
-        # Пробуем найти pdf_articles_input в пути
+        # Пробуем найти input_files в пути
         if config:
             try:
-                pdf_input_dir = config.get_path("directories.pdf_articles_input")
+                pdf_input_dir = config.get_path("directories.input_files")
             except Exception:
-                pdf_input_dir = Path("pdf_articles_input")
+                pdf_input_dir = Path("input_files")
         else:
-            pdf_input_dir = Path("pdf_articles_input")
+            pdf_input_dir = Path("input_files")
         
         pdf_input_dir_abs = pdf_input_dir.resolve()
         
-        # Если PDF находится внутри pdf_articles_input, сохраняем структуру папок
+        # Если PDF находится внутри input_files, сохраняем структуру папок
         try:
             pdf_relative = pdf_path_abs.relative_to(pdf_input_dir_abs)
             # Получаем родительскую папку PDF (например, "2619-1601_2024_4")
@@ -460,7 +461,7 @@ def extract_metadata_from_pdf(
             json_filename = pdf_path.stem + ".json"
             json_output_path = output_folder / json_filename
         except ValueError:
-            # Если PDF не находится внутри pdf_articles_input, сохраняем в корень json_input
+            # Если PDF не находится внутри input_files, сохраняем в корень json_input
             json_input_dir.mkdir(parents=True, exist_ok=True)
             json_filename = pdf_path.stem + ".json"
             json_output_path = json_input_dir / json_filename
@@ -489,7 +490,7 @@ if __name__ == "__main__":
         description="Извлечение метаданных из PDF статей с помощью GPT",
         epilog="""
 Примеры использования:
-  # Обработка всех PDF файлов из pdf_articles_input (по умолчанию):
+  # Обработка всех PDF файлов из input_files (по умолчанию):
   python gpt_extraction.py
   
   # Обработка одного файла:
@@ -505,7 +506,7 @@ if __name__ == "__main__":
   python gpt_extraction.py --model gpt-4o --temperature 0.5
 
 Примечание: 
-  - По умолчанию обрабатываются все PDF файлы из pdf_articles_input (включая подпапки)
+  - По умолчанию обрабатываются все PDF файлы из input_files (включая подпапки)
   - API ключ можно установить через переменную окружения OPENAI_API_KEY
     или указать в config.json (gpt_extraction.api_key). Переменная окружения имеет приоритет.
   - JSON файлы сохраняются в json_input с сохранением структуры папок.
@@ -519,7 +520,7 @@ if __name__ == "__main__":
         type=Path,
         nargs="?",
         default=None,
-        help="Путь к PDF файлу (если не указан, обрабатываются все PDF из pdf_articles_input и подпапок)"
+        help="Путь к PDF файлу (если не указан, обрабатываются все PDF из input_files и подпапок)"
     )
     parser.add_argument(
         "--folder",
@@ -584,14 +585,14 @@ if __name__ == "__main__":
     # Определяем список PDF файлов для обработки
     pdf_files_to_process = []
     
-    # Определяем базовую папку pdf_articles_input
+    # Определяем базовую папку input_files
     if config:
         try:
-            pdf_input_dir = config.get_path("directories.pdf_articles_input")
+            pdf_input_dir = config.get_path("directories.input_files")
         except Exception:
-            pdf_input_dir = Path("pdf_articles_input")
+            pdf_input_dir = Path("input_files")
     else:
-        pdf_input_dir = Path("pdf_articles_input")
+        pdf_input_dir = Path("input_files")
     
     if args.folder:
         # Обрабатываем все PDF файлы из указанной подпапки
@@ -619,10 +620,10 @@ if __name__ == "__main__":
         pdf_files_to_process = [args.pdf_path]
         
     else:
-        # По умолчанию: обрабатываем все PDF файлы из pdf_articles_input (включая подпапки)
+        # По умолчанию: обрабатываем все PDF файлы из input_files (включая подпапки)
         if not pdf_input_dir.exists():
             print(f"❌ Папка не найдена: {pdf_input_dir}")
-            print("   Создайте папку pdf_articles_input и поместите туда PDF файлы в подпапках")
+            print("   Создайте папку input_files и поместите туда PDF файлы в подпапках")
             sys.exit(1)
         
         # Рекурсивно находим все PDF файлы во всех подпапках
@@ -630,7 +631,7 @@ if __name__ == "__main__":
         
         if not pdf_files_to_process:
             print(f"⚠️  PDF файлы не найдены в папке: {pdf_input_dir}")
-            print("   Поместите PDF файлы в подпапки внутри pdf_articles_input")
+            print("   Поместите PDF файлы в подпапки внутри input_files")
             sys.exit(0)
         
         print(f"📁 Найдено {len(pdf_files_to_process)} PDF файлов для обработки")

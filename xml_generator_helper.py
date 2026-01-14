@@ -297,9 +297,17 @@ def parse_folder_name(folder_name: str) -> Optional[Dict[str, Any]]:
     # issn_год_том_номер (например: 2619-1601_2024_10_6)
     # ISSN может быть в форматах: XXXX-XXXX, XXXX-XXX[X], XXXX-XXXX[X]
     # Поддерживаем: 4 цифры-3 цифрыX, 4 цифры-4 цифры, 4 цифры-4 цифрыX
-    pattern1 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)$'  # issn_год_номер
-    pattern2 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)_(\d+)$'  # issn_год_том_номер
-    
+    # Normalize Unicode dashes to ASCII hyphen for ISSN parsing.
+    folder_name = (
+        folder_name
+        .replace("\u2013", "-")
+        .replace("\u2014", "-")
+        .replace("\u2212", "-")
+    )
+
+    pattern1 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)$'  # issn_???_?????
+    pattern2 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)_(\d+)$'  # issn_???_???_?????
+
     match1 = re.match(pattern1, folder_name)
     if match1:
         return {

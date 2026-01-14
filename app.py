@@ -9,14 +9,17 @@
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import re
+import shutil
 import sys
 import threading
 import time
 import webbrowser
+import zipfile
 from pathlib import Path
-from typing import Optional
+from typing import Dict, Optional
 
 from flask import Flask, render_template_string, abort, jsonify, request, send_file
 
@@ -36,10 +39,18 @@ except ImportError:
     PDF_TO_HTML_AVAILABLE = False
     print("⚠ PDF поддержка недоступна. Установите: pip install pdfplumber или pip install pymupdf")
 
+# --- RTF -> DOCX conversion ---
+try:
+    from convert_rtf_to_docx import convert_rtf_to_docx, ConversionError
+    RTF_CONVERT_AVAILABLE = True
+except ImportError:
+    RTF_CONVERT_AVAILABLE = False
+
 # Импортируем функции для работы с метаданными
 try:
     from metadata_markup import (
         extract_text_from_html,
+        extract_text_from_pdf,
     )
     METADATA_MARKUP_AVAILABLE = True
 except ImportError:
@@ -66,6 +77,8 @@ except ImportError:
 
 SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf"}
 SUPPORTED_JSON_EXTENSIONS = {".json"}
+ARCHIVE_ROOT_DIRNAME = "processed_archives"
+ARCHIVE_RETENTION_DAYS = 7
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -114,6 +127,62 @@ HTML_TEMPLATE = """
       padding: 15px 20px;
       min-height: auto;
       height: auto;
+    }
+    .upload-panel {
+      background: #f6f8ff;
+      border: 1px solid #d8e0ff;
+      border-radius: 6px;
+      padding: 12px;
+      margin: 0 0 12px 0;
+    }
+    .upload-title {
+      font-weight: 600;
+      font-size: 13px;
+      color: #2c3e50;
+      margin-bottom: 8px;
+    }
+    .upload-form {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .upload-form input[type="file"] {
+      flex: 1 1 260px;
+      padding: 6px;
+      font-size: 12px;
+      border: 1px solid #ccd5ff;
+      border-radius: 4px;
+      background: #fff;
+    }
+    .upload-status {
+      font-size: 12px;
+      color: #555;
+      min-height: 18px;
+    }
+    .progress-bar {
+      position: relative;
+      width: 260px;
+      height: 10px;
+      background: #e0e0e0;
+      border-radius: 6px;
+      overflow: hidden;
+    }
+    .progress-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #64b5f6, #42a5f5);
+      transition: width 0.3s ease;
+    }
+    .upload-help {
+      margin-top: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #7a4b00;
+      background: #fff7e0;
+      border: 1px solid #ffd27d;
+      padding: 8px 10px;
+      border-radius: 4px;
     }
     .file-list {
       display: grid;
@@ -333,6 +402,20 @@ HTML_TEMPLATE = """
     .line-editor-header h2{margin:0;color:#333;font-size:18px;}
     .line-editor-textarea{width:100%;min-height:150px;max-height:400px;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;background:#f9f9f9;}
     .line-editor-textarea:focus{outline:none;border-color:#667eea;background:#fff;}
+    .annotation-editor-toolbar{display:flex;gap:8px;margin:0 0 10px 0;}
+    .annotation-editor-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;}
+    .annotation-editor-btn:hover{background:#e6e6e6;}
+    .annotation-editor{width:100%;min-height:300px;max-height:70vh;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;background:#f9f9f9;overflow-y:auto;}
+    .annotation-editor:focus{outline:none;border-color:#667eea;background:#fff;}
+    .annotation-editor sup{font-size:0.8em;vertical-align:super;}
+    .annotation-editor sub{font-size:0.8em;vertical-align:sub;}
+    .annotation-editor-toolbar{display:flex;gap:8px;margin:0 0 10px 0;}
+    .annotation-editor-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;}
+    .annotation-editor-btn:hover{background:#e6e6e6;}
+    .annotation-editor{width:100%;min-height:300px;max-height:70vh;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;background:#f9f9f9;overflow-y:auto;}
+    .annotation-editor:focus{outline:none;border-color:#667eea;background:#fff;}
+    .annotation-editor sup{font-size:0.8em;vertical-align:super;}
+    .annotation-editor sub{font-size:0.8em;vertical-align:sub;}
     .line-editor-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:15px;padding-top:15px;border-top:1px solid #e0e0e0;}
     .line {
       padding: 8px 12px;
@@ -458,13 +541,32 @@ HTML_TEMPLATE = """
     <div class="header">
       <h1>📄 Работа с метаданными статей</h1>
       <p>Выберите JSON файл для разметки</p>
-      <div style="margin-top: 20px;">
+      <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
         <button id="generateXmlBtn" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;">
           📄 Сгенерировать XML
         </button>
+        <a href="/pdf-select" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); transition: all 0.2s; display: inline-block;">
+          📄 Выделение областей в PDF
+        </a>
       </div>
     </div>
     <div class="content">
+      <div class="upload-panel">
+        <div class="upload-title">Загрузка архива input_files</div>
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data">
+          <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
+          <button type="submit" class="btn-primary">Загрузить ZIP</button>
+          <span id="inputArchiveStatus" class="upload-status"></span>
+        </form>
+        <div class="upload-help">Загрузите ZIP без папок внутри. Имя архива: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code>. В архиве должны быть PDF статей выпуска. Дополнительно можно загрузить файлы верстки в формате DOCX или RTF с теми же именами, что и PDF статьи, либо общий файл выпуска в формате DOCX/RTF с именем <code>full_issue</code>.</div>
+        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <button type="button" id="processArchiveBtn" class="btn-primary" disabled>Обработать архив</button>
+          <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
+            <div id="archiveProgressFill" class="progress-bar-fill"></div>
+          </div>
+          <span id="archiveProgress" class="upload-status"></span>
+        </div>
+      </div>
       {% if files %}
         <div class="file-list">
           {% for file in files %}
@@ -530,11 +632,21 @@ HTML_TEMPLATE = """
                   };
                   
                   // Скачиваем все файлы последовательно
-                  (async () => {
-                    for (const file of data.files) {
-                      await downloadFile(file.url, file.name);
+                  for (const file of data.files) {
+                    await downloadFile(file.url, file.name);
+                  }
+                  
+                  if (data.folders && data.folders.length > 0) {
+                    try {
+                      await fetch("/finalize-archive", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ folders: data.folders })
+                      });
+                    } catch (archiveError) {
+                      console.warn("Не удалось архивировать результаты:", archiveError);
                     }
-                  })();
+                  }
                 }
                 
                 // Показываем уведомление
@@ -646,7 +758,12 @@ HTML_TEMPLATE = """
                 <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
               </div>
             </div>
-            <textarea id="annotationModalTextarea" class="line-editor-textarea" style="min-height: 300px; max-height: 70vh; font-size: 14px; line-height: 1.6; resize: vertical;"></textarea>
+            <div class="annotation-editor-toolbar">
+              <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
+              <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
+            </div>
+            <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false"></div>
+            <textarea id="annotationModalTextarea" class="line-editor-textarea" style="display:none;"></textarea>
             <div class="modal-footer">
               <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
               <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
@@ -862,52 +979,481 @@ HTML_TEMPLATE = """
         }
         
         let currentAnnotationFieldId = null;
-        
-        function viewAnnotation(fieldId, title) {
-          const field = document.getElementById(fieldId);
-          if (!field) return;
-          
-          currentAnnotationFieldId = fieldId;
-          
-          const annotationText = field.value.trim();
-          
-          const modal = document.getElementById("annotationModal");
-          const modalTitle = document.getElementById("annotationModalTitle");
-          const modalTextarea = document.getElementById("annotationModalTextarea");
-          
-          if (!modal || !modalTitle || !modalTextarea) return;
-          
-          modalTitle.textContent = title;
-          modalTextarea.value = annotationText;
-          
-          modal.classList.add("active");
-          setTimeout(() => {
-            modalTextarea.focus();
-            modalTextarea.setSelectionRange(0, 0);
-          }, 100);
+
+function annotationTextToHtml(text) {
+  if (!text) return "";
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/&lt;(sup|sub)&gt;/gi, "<$1>")
+    .replace(/&lt;\/(sup|sub)&gt;/gi, "</$1>")
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+    .replace(/\n/g, "<br>");
+}
+
+function annotationHtmlToText(html) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  let output = "";
+
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      output += node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+
+    const tag = node.tagName;
+    const verticalAlign = node.style && node.style.verticalAlign;
+
+    if (verticalAlign === "super") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (verticalAlign === "sub") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    if (tag === "BR") {
+      output += "\n";
+      return;
+    }
+    if (tag === "DIV" || tag === "P") {
+      if (output && !output.endsWith("\n")) {
+        output += "\n";
+      }
+      node.childNodes.forEach(walk);
+      if (!output.endsWith("\n")) {
+        output += "\n";
+      }
+      return;
+    }
+    if (tag === "SUP") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (tag === "SUB") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    node.childNodes.forEach(walk);
+  };
+
+  container.childNodes.forEach(walk);
+  return output.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function wrapAnnotationRange(range, tag) {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  if (!range || !editor.contains(range.commonAncestorContainer)) return;
+  if (range.collapsed) return;
+
+  const selection = window.getSelection();
+  const wrapper = document.createElement(tag);
+
+  const content = range.extractContents();
+  wrapper.appendChild(content);
+  range.insertNode(wrapper);
+
+  const newRange = document.createRange();
+  newRange.selectNodeContents(wrapper);
+  if (selection) {
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+  }
+}
+
+
+
+let lastAnnotationSelection = null;
+let lastAnnotationOffsets = null;
+
+function getNodeTextLength(node) {
+  if (!node) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.nodeValue.length;
+  }
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    if (node.tagName === "BR") return 1;
+    let total = 0;
+    node.childNodes.forEach((child) => {
+      total += getNodeTextLength(child);
+    });
+    return total;
+  }
+  return 0;
+}
+
+function computeOffset(editor, container, offset) {
+  let total = 0;
+  let found = false;
+
+  const walk = (node) => {
+    if (found) return;
+    if (node === container) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        total += offset;
+      } else {
+        for (let i = 0; i < offset; i += 1) {
+          total += getNodeTextLength(node.childNodes[i]);
         }
-        
-        function saveEditedAnnotation() {
-          if (!currentAnnotationFieldId) return;
-          
-          const field = document.getElementById(currentAnnotationFieldId);
-          const modalTextarea = document.getElementById("annotationModalTextarea");
-          
-          if (!field || !modalTextarea) return;
-          
-          field.value = modalTextarea.value.trim();
-          closeAnnotationModal();
-          
-          const notification = document.createElement("div");
-          notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
-          notification.textContent = "Аннотация обновлена";
-          document.body.appendChild(notification);
-          setTimeout(() => {
-            notification.remove();
-          }, 2000);
+      }
+      found = true;
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      total += node.nodeValue.length;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === "BR") {
+        total += 1;
+        return;
+      }
+      node.childNodes.forEach(walk);
+    }
+  };
+
+  walk(editor);
+  return found ? total : null;
+}
+
+function resolveOffset(editor, target) {
+  let total = 0;
+  let result = null;
+
+  const walk = (node) => {
+    if (result) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.nodeValue.length;
+      if (total + len >= target) {
+        result = { node: node, offset: target - total };
+        return;
+      }
+      total += len;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === "BR") {
+        if (total + 1 >= target) {
+          const parent = node.parentNode || editor;
+          const idx = Array.prototype.indexOf.call(parent.childNodes, node);
+          result = { node: parent, offset: Math.max(0, idx) + 1 };
+          return;
         }
-        
-        function closeAnnotationModal() {
+        total += 1;
+        return;
+      }
+      node.childNodes.forEach(walk);
+    }
+  };
+
+  walk(editor);
+  if (!result) {
+    result = { node: editor, offset: editor.childNodes.length };
+  }
+  return result;
+}
+
+function saveAnnotationSelection() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const range = selection.getRangeAt(0);
+  if (range.collapsed) return;
+  if (!editor.contains(range.commonAncestorContainer)) return;
+
+  const start = computeOffset(editor, range.startContainer, range.startOffset);
+  const end = computeOffset(editor, range.endContainer, range.endOffset);
+  if (start === null || end === null) return;
+
+  lastAnnotationOffsets = { start: start, end: end };
+  lastAnnotationSelection = range.cloneRange();
+}
+
+function restoreAnnotationSelection() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  if (!lastAnnotationOffsets) return;
+
+  const selection = window.getSelection();
+  if (!selection) return;
+  const startPos = resolveOffset(editor, lastAnnotationOffsets.start);
+  const endPos = resolveOffset(editor, lastAnnotationOffsets.end);
+  const range = document.createRange();
+  range.setStart(startPos.node, startPos.offset);
+  range.setEnd(endPos.node, endPos.offset);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  lastAnnotationSelection = range.cloneRange();
+}
+function getAnnotationRangeFromOffsets() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return null;
+  if (!lastAnnotationOffsets) return null;
+  const startPos = resolveOffset(editor, lastAnnotationOffsets.start);
+  const endPos = resolveOffset(editor, lastAnnotationOffsets.end);
+  if (!startPos || !endPos) return null;
+  const range = document.createRange();
+  range.setStart(startPos.node, startPos.offset);
+  range.setEnd(endPos.node, endPos.offset);
+  return range;
+}
+
+
+
+function unwrapTag(node) {
+  if (!node || !node.parentNode) return;
+  const parent = node.parentNode;
+  const first = node.firstChild;
+  const last = node.lastChild;
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  if (first && last) {
+    range.setStartBefore(first);
+    range.setEndAfter(last);
+  } else {
+    range.selectNodeContents(parent);
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function unwrapTagInPlace(node) {
+  if (!node || !node.parentNode) return;
+  const parent = node.parentNode;
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+}
+
+
+function unwrapTagInPlace(node) {
+  if (!node || !node.parentNode) return;
+  const parent = node.parentNode;
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+}
+
+function findAncestorTag(node, tag, editor) {
+  let current = node;
+  const upper = tag.toUpperCase();
+  while (current && current !== editor) {
+    if (current.nodeType === Node.ELEMENT_NODE && current.tagName === upper) {
+      return current;
+    }
+    current = current.parentNode;
+  }
+  return null;
+}
+function applyAnnotationFormat(action, rangeOverride) {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+
+  let range = null;
+  if (rangeOverride) {
+    const node = rangeOverride.commonAncestorContainer;
+    if (!rangeOverride.collapsed && node && editor.contains(node)) {
+      range = rangeOverride.cloneRange();
+    }
+  }
+  if (!range) {
+    range = getAnnotationRangeFromOffsets();
+  }
+  if (!range) {
+    restoreAnnotationSelection();
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const candidate = selection.getRangeAt(0);
+      if (!candidate.collapsed && editor.contains(candidate.commonAncestorContainer)) {
+        range = candidate.cloneRange();
+      }
+    }
+  }
+  if (!range) return;
+
+  const tag = action === "sup" ? "sup" : "sub";
+  const startTag = findAncestorTag(range.startContainer, tag, editor);
+  const endTag = findAncestorTag(range.endContainer, tag, editor);
+  if (startTag && startTag === endTag) {
+    saveAnnotationSelection();
+    unwrapTagInPlace(startTag);
+    restoreAnnotationSelection();
+    return;
+  }
+
+  const candidates = Array.from(editor.querySelectorAll(tag));
+  const toUnwrap = candidates.filter((node) => {
+    try {
+      return range.intersectsNode(node);
+    } catch (e) {
+      return node.contains(range.startContainer) || node.contains(range.endContainer);
+    }
+  });
+
+  if (toUnwrap.length) {
+    saveAnnotationSelection();
+    toUnwrap.forEach(unwrapTagInPlace);
+    restoreAnnotationSelection();
+    return;
+  }
+
+  wrapAnnotationRange(range, tag);
+  saveAnnotationSelection();
+}
+
+
+
+
+
+
+
+
+
+if (!window.__annotationSelectionHandlerAdded) {
+  document.addEventListener("selectionchange", saveAnnotationSelection);
+  window.__annotationSelectionHandlerAdded = true;
+}
+
+if (!window.__annotationSelectionSyncAdded) {
+  document.addEventListener("mouseup", saveAnnotationSelection, true);
+  document.addEventListener("keyup", saveAnnotationSelection, true);
+  document.addEventListener("touchend", saveAnnotationSelection, true);
+  window.__annotationSelectionSyncAdded = true;
+}
+
+if (!window.__annotationEditorMouseDownAdded) {
+  const handler = (event) => {
+    const button = event.target.closest(".annotation-editor-btn");
+    if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = button.getAttribute("data-action") === "annotation-sup" ? "sup" : "sub";
+    const editor = document.getElementById("annotationModalEditor");
+    let range = null;
+    const selection = window.getSelection();
+    if (editor && selection && selection.rangeCount) {
+      const candidate = selection.getRangeAt(0);
+      if (!candidate.collapsed && editor.contains(candidate.commonAncestorContainer)) {
+        range = candidate.cloneRange();
+      }
+    }
+    applyAnnotationFormat(action, range);
+  };
+  document.addEventListener("pointerdown", handler, true);
+  document.addEventListener("mousedown", handler, true);
+  window.__annotationEditorMouseDownAdded = true;
+}
+if (!window.__annotationEditorHandlersAdded) {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".annotation-editor-btn");
+    if (!button) return;
+    const action = button.getAttribute("data-action");
+    if (action === "annotation-sup") {
+      applyAnnotationFormat("sup");
+    } else if (action === "annotation-sub") {
+      applyAnnotationFormat("sub");
+    }
+  });
+  window.__annotationEditorHandlersAdded = true;
+}
+
+function viewAnnotation(fieldId, title) {
+  const field = document.getElementById(fieldId);
+  if (!field) return;
+
+  currentAnnotationFieldId = fieldId;
+
+  const annotationText = field.value.trim();
+
+  const modal = document.getElementById("annotationModal");
+  const modalTitle = document.getElementById("annotationModalTitle");
+  const modalEditor = document.getElementById("annotationModalEditor");
+
+  if (!modal || !modalTitle || !modalEditor) return;
+
+  modalTitle.textContent = title;
+  modalEditor.innerHTML = annotationTextToHtml(annotationText);
+  modal.dataset.fieldId = fieldId;
+  if (fieldId === "annotation" || fieldId === "annotation_en") {
+    const lang = fieldId === "annotation_en" ? "en" : "ru";
+    const normalize = () => {
+      const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+      modalEditor.innerHTML = annotationTextToHtml(cleaned);
+    };
+    modalEditor.onpaste = () => {
+      setTimeout(normalize, 0);
+    };
+    modalEditor.onblur = normalize;
+  } else {
+    modalEditor.onpaste = null;
+    modalEditor.onblur = null;
+  }
+
+  modal.classList.add("active");
+  setTimeout(() => {
+    modalEditor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(modalEditor);
+    range.collapse(true);
+    const selection = window.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      saveAnnotationSelection();
+    }
+  }, 100);
+}
+
+function saveEditedAnnotation() {
+  const modal = document.getElementById("annotationModal");
+  const fallbackFieldId = modal?.dataset?.fieldId || null;
+  const targetFieldId = currentAnnotationFieldId || fallbackFieldId;
+  if (!targetFieldId) return;
+
+  const field = document.getElementById(targetFieldId);
+  const modalEditor = document.getElementById("annotationModalEditor");
+
+  if (!field || !modalEditor) return;
+
+  const lang = targetFieldId === "annotation_en" ? "en" : "ru";
+  const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+  field.value = cleaned;
+  closeAnnotationModal();
+
+  const notification = document.createElement("div");
+  notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
+  notification.textContent = "\u0410\u043d\u043d\u043e\u0442\u0430\u0446\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430";
+  document.body.appendChild(notification);
+  setTimeout(() => {
+    notification.remove();
+  }, 2000);
+}
+
+function closeAnnotationModal() {
           const modal = document.getElementById("annotationModal");
           const modalContent = document.getElementById("annotationModalContent");
           const expandBtn = document.getElementById("annotationModalExpandBtn");
@@ -1352,8 +1898,1072 @@ HTML_TEMPLATE = """
           </p>
         </div>
       {% endif %}
+      <script>
+        const inputArchiveForm = document.getElementById("inputArchiveForm");
+        const processArchiveBtn = document.getElementById("processArchiveBtn");
+        const archiveProgress = document.getElementById("archiveProgress");
+        const archiveProgressFill = document.getElementById("archiveProgressFill");
+        let currentArchive = null;
+        let archivePollTimer = null;
+        const archiveReloadKey = "archive_done_reloaded";
+
+        const stopArchivePolling = () => {
+          if (archivePollTimer) {
+            clearInterval(archivePollTimer);
+            archivePollTimer = null;
+          }
+        };
+
+        const updateArchiveUi = (data) => {
+          const status = data?.status || "idle";
+          const processed = Number(data?.processed || 0);
+          const total = Number(data?.total || 0);
+          if (status !== "done") {
+            sessionStorage.removeItem(archiveReloadKey);
+          }
+          if (data?.archive) {
+            currentArchive = data.archive;
+          }
+          if (processArchiveBtn) {
+            processArchiveBtn.disabled = !currentArchive || status === "running";
+          }
+          if (!archiveProgress) return;
+          if (archiveProgressFill) {
+            const safeTotal = total > 0 ? total : 1;
+            const pct = Math.max(0, Math.min(100, Math.round((processed / safeTotal) * 100)));
+            archiveProgressFill.style.width = `${pct}%`;
+          }
+          if (status === "running") {
+            archiveProgress.textContent = `Прогресс: ${processed}/${total}`;
+            archiveProgress.style.color = "#555";
+            if (!archivePollTimer) {
+              archivePollTimer = setInterval(fetchArchiveStatus, 1000);
+            }
+            return;
+          }
+          if (status === "done") {
+            archiveProgress.textContent = `Готово: ${processed}/${total}`;
+            archiveProgress.style.color = "#2e7d32";
+            stopArchivePolling();
+            if (!sessionStorage.getItem(archiveReloadKey)) {
+              sessionStorage.setItem(archiveReloadKey, "1");
+              setTimeout(() => window.location.reload(), 1200);
+            }
+            return;
+          }
+          if (status === "error") {
+            archiveProgress.textContent = data?.message || "Ошибка обработки.";
+            archiveProgress.style.color = "#c62828";
+            if (archiveProgressFill) {
+              archiveProgressFill.style.width = "0%";
+            }
+            stopArchivePolling();
+            return;
+          }
+          if (currentArchive) {
+            archiveProgress.textContent = `Готов к обработке: ${currentArchive}`;
+            archiveProgress.style.color = "#555";
+            if (archiveProgressFill && status !== "running") {
+              archiveProgressFill.style.width = "0%";
+            }
+          } else {
+            archiveProgress.textContent = "";
+            if (archiveProgressFill) {
+              archiveProgressFill.style.width = "0%";
+            }
+          }
+          stopArchivePolling();
+        };
+
+        const fetchArchiveStatus = async () => {
+          try {
+            const resp = await fetch("/process-archive-status");
+            const data = await resp.json().catch(() => ({}));
+            updateArchiveUi(data);
+          } catch (_) {
+            // ignore
+          }
+        };
+        fetchArchiveStatus();
+
+        if (processArchiveBtn) {
+          processArchiveBtn.addEventListener("click", async () => {
+            if (!currentArchive) {
+              updateArchiveUi({ status: "idle", archive: null });
+              return;
+            }
+            if (archiveProgress) {
+              archiveProgress.textContent = "Запуск обработки...";
+              archiveProgress.style.color = "#555";
+            }
+            try {
+              const resp = await fetch("/process-archive", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ archive: currentArchive })
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                if (archiveProgress) {
+                  archiveProgress.textContent = data.error || "Ошибка запуска обработки.";
+                  archiveProgress.style.color = "#c62828";
+                }
+                return;
+              }
+              fetchArchiveStatus();
+            } catch (_) {
+              if (archiveProgress) {
+                archiveProgress.textContent = "Ошибка запуска обработки.";
+                archiveProgress.style.color = "#c62828";
+              }
+            }
+          });
+        }
+
+        if (inputArchiveForm) {
+          inputArchiveForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            const fileInput = document.getElementById("inputArchiveFile");
+            const status = document.getElementById("inputArchiveStatus");
+            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+              if (status) {
+                status.textContent = "Выберите ZIP файл.";
+                status.style.color = "#c62828";
+              }
+              return;
+            }
+            const formData = new FormData();
+            formData.append("archive", fileInput.files[0]);
+            if (status) {
+              status.textContent = "Загрузка архива...";
+              status.style.color = "#555";
+            }
+            try {
+              const response = await fetch("/upload-input-archive", {
+                method: "POST",
+                body: formData
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok || !data.success) {
+                if (status) {
+                  status.textContent = data.error || "Ошибка загрузки архива.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              if (status) {
+                status.textContent = data.message || "Архив загружен.";
+                status.style.color = "#2e7d32";
+              }
+              const notice = document.createElement("div");
+              notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
+              notice.textContent = "Архив успешно загружен.";
+              inputArchiveForm.appendChild(notice);
+              setTimeout(() => {
+                window.location.reload();
+              }, 4000);
+            } catch (error) {
+              if (status) {
+                status.textContent = "Ошибка загрузки архива.";
+                status.style.color = "#c62828";
+              }
+            }
+          });
+        }
+      </script>
     </div>
   </div>
+</body>
+</html>
+"""
+
+PDF_BBOX_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Поиск блоков в PDF (bbox)</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      padding: 30px;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 30px;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    .header-actions {
+      margin-top: 15px;
+    }
+    .header-btn {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 14px;
+      display: inline-block;
+      margin: 0 5px;
+      transition: all 0.2s;
+    }
+    .header-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    .form-section {
+      margin-bottom: 30px;
+      padding: 20px;
+      background: #f8f9fa;
+      border-radius: 6px;
+    }
+    .form-group {
+      margin-bottom: 20px;
+    }
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #333;
+      font-size: 14px;
+    }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      outline: none;
+      border-color: #667eea;
+      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+    }
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .checkbox-group input[type="checkbox"] {
+      width: auto;
+    }
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #667eea;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #5568d3;
+    }
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+    .btn-secondary:hover {
+      background: #d0d0d0;
+    }
+    .results-section {
+      margin-top: 30px;
+      display: none;
+    }
+    .results-section.active {
+      display: block;
+    }
+    .block-item {
+      background: white;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      padding: 20px;
+      margin-bottom: 15px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    }
+    .block-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 15px;
+      padding-bottom: 10px;
+      border-bottom: 2px solid #667eea;
+    }
+    .block-title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #667eea;
+    }
+    .block-meta {
+      font-size: 12px;
+      color: #666;
+    }
+    .bbox-info {
+      background: #f8f9fa;
+      padding: 15px;
+      border-radius: 4px;
+      margin: 10px 0;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+    }
+    .bbox-coords {
+      display: flex;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .bbox-coord {
+      flex: 1;
+      background: white;
+      padding: 8px;
+      border-radius: 4px;
+      border: 1px solid #ddd;
+    }
+    .copy-btn {
+      background: #4caf50;
+      color: white;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      margin-left: 10px;
+    }
+    .copy-btn:hover {
+      background: #45a049;
+    }
+    .block-text {
+      margin-top: 15px;
+      padding: 15px;
+      background: #fff;
+      border-left: 4px solid #667eea;
+      border-radius: 4px;
+      max-height: 200px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.6;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    .error {
+      background: #ffebee;
+      border: 1px solid #f44336;
+      color: #c62828;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+    .success {
+      background: #e8f5e9;
+      border: 1px solid #4caf50;
+      color: #2e7d32;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🔍 Поиск блоков в PDF (bbox)</h1>
+      <p>Найдите текстовые блоки по ключевым словам и получите их координаты</p>
+      <div class="header-actions">
+        <a href="/" class="header-btn">← К списку</a>
+      </div>
+    </div>
+
+    <div class="form-section">
+      <form id="bboxForm">
+        <div class="form-group">
+          <label for="pdfFile">Выберите PDF файл из папки input_files:</label>
+          <select id="pdfFile" name="pdf_file" required>
+            <option value="">-- Выберите файл --</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="findAnnotation" name="find_annotation">
+            <label for="findAnnotation" style="margin: 0;">Автоматически найти аннотацию/резюме</label>
+          </div>
+        </div>
+
+        <div class="form-group" id="termsGroup">
+          <label for="searchTerms">Ключевые слова для поиска (по одному на строку):</label>
+          <textarea 
+            id="searchTerms" 
+            name="search_terms" 
+            rows="4" 
+            placeholder="Резюме&#10;Аннотация&#10;Abstract&#10;Annotation&#10;Ключевые слова&#10;Keywords"
+            style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: inherit; resize: vertical;"
+          ></textarea>
+          <small style="color: #666; font-size: 12px; margin-top: 5px; display: block;">
+            Оставьте пустым для использования стандартных ключевых слов
+          </small>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+          <button type="submit" class="btn btn-primary">🔍 Найти блоки</button>
+          <button type="button" class="btn btn-secondary" onclick="clearResults()">Очистить</button>
+        </div>
+      </form>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+      <p>⏳ Поиск блоков в PDF...</p>
+    </div>
+
+    <div id="error" class="error" style="display: none;"></div>
+
+    <div id="results" class="results-section">
+      <h2 style="margin-bottom: 20px; color: #333;">Найденные блоки:</h2>
+      <div id="blocksContainer"></div>
+    </div>
+  </div>
+
+  <script>
+    // Загружаем список PDF файлов при загрузке страницы
+
+    document.addEventListener('DOMContentLoaded', function() {
+      loadPdfFiles();
+      
+      // Обработчик для чекбокса "найти аннотацию"
+      document.getElementById('findAnnotation').addEventListener('change', function() {
+        const termsGroup = document.getElementById('termsGroup');
+        if (this.checked) {
+          termsGroup.style.opacity = '0.5';
+          termsGroup.style.pointerEvents = 'none';
+        } else {
+          termsGroup.style.opacity = '1';
+          termsGroup.style.pointerEvents = 'auto';
+        }
+      });
+    });
+
+    // Делаем функцию доступной глобально для onclick
+    window.loadPdfFiles = async function loadPdfFiles() {
+      const select = document.getElementById('pdfFile');
+      if (!select) {
+        console.error('Элемент select#pdfFile не найден');
+        return;
+      }
+      
+      try {
+        console.log('Загрузка списка PDF файлов...');
+        const response = await fetch('/api/pdf-files');
+        console.log('Ответ получен, статус:', response.status);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Получены данные:', data);
+          
+          // Проверяем, что data - это массив
+          const files = Array.isArray(data) ? data : [];
+          
+          if (files.length === 0) {
+            console.warn('PDF файлы не найдены');
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = '-- PDF файлы не найдены --';
+            option.disabled = true;
+            select.appendChild(option);
+            return;
+          }
+          
+          files.forEach(file => {
+            // file уже содержит путь с подпапками (например, "1605-7880_2025_84_6")
+            const option = document.createElement('option');
+            option.value = file;
+            // Отображаем полный путь для удобства
+            option.textContent = file;
+            select.appendChild(option);
+          });
+          
+          console.log(`Загружено ${files.length} PDF файлов`);
+        } else {
+          const errorData = await response.json().catch(() => ({ error: 'Неизвестная ошибка' }));
+          console.error('Ошибка при загрузке файлов:', errorData);
+          const option = document.createElement('option');
+          option.value = '';
+          option.textContent = '-- Ошибка загрузки: ' + (errorData.error || 'Неизвестная ошибка') + ' --';
+          option.disabled = true;
+          select.appendChild(option);
+        }
+      } catch (e) {
+        console.error('Ошибка при загрузке списка файлов:', e);
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = '-- Ошибка: ' + e.message + ' --';
+        option.disabled = true;
+        select.appendChild(option);
+      }
+    }
+
+    document.getElementById('bboxForm').addEventListener('submit', async function(e) {
+      e.preventDefault();
+      
+      const pdfFile = document.getElementById('pdfFile').value;
+      const findAnnotation = document.getElementById('findAnnotation').checked;
+      const searchTermsText = document.getElementById('searchTerms').value;
+      
+      if (!pdfFile) {
+        showError('Выберите PDF файл');
+        return;
+      }
+      
+      const searchTerms = searchTermsText
+        .split('\\n')
+        .map(t => t.trim())
+        .filter(t => t);
+      
+      // Показываем загрузку
+      document.getElementById('loading').style.display = 'block';
+      document.getElementById('error').style.display = 'none';
+      document.getElementById('results').classList.remove('active');
+      
+      try {
+        const response = await fetch('/api/pdf-bbox', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            pdf_file: pdfFile,
+            terms: searchTerms,
+            annotation: findAnnotation
+          })
+        });
+        
+        const data = await response.json();
+        
+        document.getElementById('loading').style.display = 'none';
+        
+        if (!response.ok) {
+          showError(data.error || 'Ошибка при поиске блоков');
+          return;
+        }
+        
+        if (data.success) {
+          if (data.blocks && data.blocks.length > 0) {
+            displayResults(data.blocks);
+          } else {
+            showError(data.message || 'Блоки не найдены');
+          }
+        } else {
+          showError(data.message || 'Блоки не найдены');
+        }
+      } catch (error) {
+        document.getElementById('loading').style.display = 'none';
+        showError('Ошибка при отправке запроса: ' + error.message);
+      }
+    });
+
+    function displayResults(blocks) {
+      const container = document.getElementById('blocksContainer');
+      container.innerHTML = '';
+      
+      blocks.forEach((block, index) => {
+        const blockDiv = document.createElement('div');
+        blockDiv.className = 'block-item';
+        
+        const bbox = block.expanded_bbox || block.bbox;
+        const bboxStr = `(${bbox[0].toFixed(2)}, ${bbox[1].toFixed(2)}, ${bbox[2].toFixed(2)}, ${bbox[3].toFixed(2)})`;
+        
+        const blockTitle = block.term || ('Блок ' + (index + 1));
+        const blockTextHtml = block.text ? 
+          '<div class="block-text"><strong>Текст блока:</strong><br>' + escapeHtml(block.text) + '</div>' : '';
+        
+        blockDiv.innerHTML = 
+          '<div class="block-header">' +
+            '<div>' +
+              '<div class="block-title">' + blockTitle + '</div>' +
+              '<div class="block-meta">Страница: ' + block.page + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="bbox-info">' +
+            '<strong>Координаты bbox (расширенный):</strong>' +
+            '<div style="margin-top: 10px; display: flex; align-items: center;">' +
+              '<code id="bbox-' + index + '" style="flex: 1; padding: 8px; background: white; border-radius: 4px; border: 1px solid #ddd;">' + bboxStr + '</code>' +
+              '<button class="copy-btn" onclick="copyToClipboard(&quot;bbox-' + index + '&quot;)">📋 Копировать</button>' +
+            '</div>' +
+            '<div class="bbox-coords" style="margin-top: 10px;">' +
+              '<div class="bbox-coord"><strong>x0:</strong> ' + bbox[0].toFixed(2) + '</div>' +
+              '<div class="bbox-coord"><strong>y0 (top):</strong> ' + bbox[1].toFixed(2) + '</div>' +
+              '<div class="bbox-coord"><strong>x1:</strong> ' + bbox[2].toFixed(2) + '</div>' +
+              '<div class="bbox-coord"><strong>y1 (bottom):</strong> ' + bbox[3].toFixed(2) + '</div>' +
+            '</div>' +
+          '</div>' +
+          blockTextHtml;
+        
+        container.appendChild(blockDiv);
+      });
+      
+      document.getElementById('results').classList.add('active');
+    }
+
+    function copyToClipboard(elementId) {
+      const element = document.getElementById(elementId);
+      const text = element.textContent;
+      
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = event.target;
+        const originalText = btn.textContent;
+        btn.textContent = '✓ Скопировано';
+        btn.style.background = '#4caf50';
+        setTimeout(() => {
+          btn.textContent = originalText;
+          btn.style.background = '#4caf50';
+        }, 2000);
+      }).catch(err => {
+        alert('Не удалось скопировать: ' + err);
+      });
+    }
+
+    function showError(message) {
+      const errorDiv = document.getElementById('error');
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+    }
+
+    function clearResults() {
+      document.getElementById('results').classList.remove('active');
+      document.getElementById('blocksContainer').innerHTML = '';
+      document.getElementById('error').style.display = 'none';
+      document.getElementById('bboxForm').reset();
+      document.getElementById('termsGroup').style.opacity = '1';
+      document.getElementById('termsGroup').style.pointerEvents = 'auto';
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+  </script>
+</body>
+</html>
+"""
+
+PDF_SELECT_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Выделение областей в PDF</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      padding: 20px;
+      min-height: 100vh;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 8px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      padding: 20px;
+    }
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 20px;
+      border-radius: 8px;
+      margin-bottom: 20px;
+      text-align: center;
+    }
+    .header h1 {
+      font-size: 24px;
+      margin-bottom: 10px;
+    }
+    .header-actions {
+      margin-top: 15px;
+    }
+    .header-btn {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 8px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 14px;
+      display: inline-block;
+      margin: 0 5px;
+      transition: all 0.2s;
+    }
+    .header-btn:hover {
+      background: rgba(255,255,255,0.3);
+    }
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 20px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .btn {
+      padding: 10px 20px;
+      border: none;
+      border-radius: 4px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-primary {
+      background: #2196f3;
+      color: white;
+    }
+    .btn-primary:hover {
+      background: #1976d2;
+    }
+    .btn-success {
+      background: #4caf50;
+      color: white;
+    }
+    .btn-success:hover {
+      background: #45a049;
+    }
+    .btn-warning {
+      background: #ff9800;
+      color: white;
+    }
+    .btn-warning:hover {
+      background: #f57c00;
+    }
+    .btn-secondary {
+      background: #e0e0e0;
+      color: #333;
+    }
+    .btn-secondary:hover {
+      background: #d0d0d0;
+    }
+    .main-content {
+      display: flex;
+      gap: 20px;
+      min-height: 600px;
+    }
+    .pdf-panel {
+      flex: 1;
+      background: #f5f5f5;
+      border-radius: 6px;
+      padding: 15px;
+      position: relative;
+    }
+    .pdf-viewer-container {
+      position: relative;
+      border: 2px solid #ddd;
+      border-radius: 4px;
+      overflow: auto;
+      background: #e5e5e5;
+      max-height: 80vh;
+      min-height: 600px;
+    }
+    #pdfViewer {
+      width: 100%;
+      min-height: 600px;
+      display: block;
+    }
+    .pdf-page {
+      margin: 10px auto;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+      background: white;
+      position: relative;
+    }
+    .pdf-page canvas {
+      display: block;
+      cursor: crosshair;
+    }
+    .selection-overlay {
+      position: absolute;
+      border: 2px dashed red;
+      background: rgba(255, 0, 0, 0.1);
+      pointer-events: none;
+    }
+    .results-panel {
+      width: 400px;
+      background: #fafafa;
+      border-radius: 6px;
+      padding: 15px;
+      display: flex;
+      flex-direction: column;
+    }
+    .results-panel h3 {
+      margin-bottom: 15px;
+      color: #333;
+      font-size: 16px;
+    }
+    .text-output {
+      flex: 1;
+      min-height: 300px;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+      font-family: 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .selections-list {
+      margin-top: 15px;
+      max-height: 200px;
+      overflow-y: auto;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      background: white;
+    }
+    .selection-item {
+      padding: 8px;
+      border-bottom: 1px solid #eee;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .selection-item:hover {
+      background: #f0f0f0;
+    }
+    .selection-item:last-child {
+      border-bottom: none;
+    }
+    .instructions {
+      background: #fff3cd;
+      border: 1px solid #ffc107;
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .instructions h4 {
+      margin-bottom: 8px;
+      color: #856404;
+      font-size: 14px;
+    }
+    .instructions ul {
+      margin-left: 18px;
+      color: #856404;
+      font-size: 12px;
+    }
+    .instructions li {
+      margin: 4px 0;
+    }
+    .search-box {
+      margin-bottom: 12px;
+    }
+    .search-box input {
+      width: 100%;
+      padding: 8px 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+    .field-panel {
+      margin-top: 15px;
+      border-top: 1px solid #e0e0e0;
+      padding-top: 15px;
+    }
+    .field-buttons {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .field-btn {
+      padding: 6px 10px;
+      border: 1px solid #667eea;
+      background: #fff;
+      color: #667eea;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.2s;
+    }
+    .field-btn.active {
+      background: #667eea;
+      color: #fff;
+    }
+    .field-blocks {
+      max-height: 260px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .field-block {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .field-block label {
+      font-size: 12px;
+      color: #333;
+      font-weight: 600;
+    }
+    .field-block textarea {
+      width: 100%;
+      min-height: 60px;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 12px;
+      font-family: inherit;
+      resize: vertical;
+      background: #fff;
+    }
+    .status-bar {
+      margin-top: 15px;
+      padding: 10px;
+      background: #e3f2fd;
+      border-radius: 4px;
+      font-size: 12px;
+      color: #1976d2;
+    }
+    .loading {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+    }
+    .error {
+      background: #ffebee;
+      border: 1px solid #f44336;
+      color: #c62828;
+      padding: 15px;
+      border-radius: 4px;
+      margin-top: 20px;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    .form-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: #333;
+      font-size: 14px;
+    }
+    .form-group select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+      font-family: inherit;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>📄 Выделение областей в PDF</h1>
+      <p>Выделите области мышью и извлеките текст напрямую из PDF</p>
+      <div class="header-actions">
+        <a href="/" class="header-btn">← К списку</a>
+      </div>
+    </div>
+
+    <div class="toolbar">
+      <div class="form-group" style="margin: 0; min-width: 300px;">
+        <label for="pdfFile" style="margin-bottom: 5px;">Выберите PDF файл:</label>
+        <div style="display: flex; gap: 5px; align-items: center;">
+          <select id="pdfFile" name="pdf_file" style="flex: 1; padding: 5px; font-size: 14px; cursor: pointer;">
+            {% if pdf_files %}
+              <option value="">-- Выберите PDF файл --</option>
+              {% for file in pdf_files %}
+                <option value="{{ file|e }}">{{ file }}</option>
+              {% endfor %}
+            {% else %}
+              <option value="" disabled>-- PDF файлы не найдены --</option>
+            {% endif %}
+          </select>
+          <button type="button" id="btnReloadPdfFiles" style="padding: 5px 10px; background: #007bff; color: white; border: none; border-radius: 3px; cursor: pointer; white-space: nowrap;" title="Обновить список файлов">
+            🔄
+          </button>
+        </div>
+      </div>
+      <button class="btn btn-primary" onclick="window.loadPdf && window.loadPdf()">📁 Загрузить PDF</button>
+      <button class="btn btn-secondary" onclick="window.prevPage && window.prevPage()">◀ Предыдущая</button>
+      <span id="pageLabel" style="padding: 0 10px; line-height: 38px;">Страница: 0/0</span>
+      <button class="btn btn-secondary" onclick="window.nextPage && window.nextPage()">Следующая ▶</button>
+      <button class="btn btn-success" onclick="window.extractText && window.extractText()">📝 Извлечь текст</button>
+      <button class="btn btn-warning" onclick="window.saveCoordinates && window.saveCoordinates()">💾 Сохранить координаты</button>
+      <button class="btn btn-secondary" onclick="window.clearSelections && window.clearSelections()">🗑 Очистить</button>
+    </div>
+
+    <div id="loading" class="loading" style="display: none;">
+      <p>⏳ Загрузка PDF...</p>
+    </div>
+
+    <div id="error" class="error" style="display: none;"></div>
+
+    <div id="mainContent" class="main-content" style="display: none;">
+      <div class="pdf-panel">
+        <div class="pdf-viewer-container" id="pdfViewerContainer">
+          <div id="pdfViewer"></div>
+        </div>
+      </div>
+      <div class="results-panel">
+        <div class="instructions">
+          <h4>&#1048;&#1085;&#1089;&#1090;&#1088;&#1091;&#1082;&#1094;&#1080;&#1103;:</h4>
+          <ul>
+            <li><strong>&#1057;&#1087;&#1086;&#1089;&#1086;&#1073; 1:</strong> &#1050;&#1083;&#1080;&#1082;&#1085;&#1080;&#1090;&#1077; &#1085;&#1072; &#1087;&#1086;&#1083;&#1077; &#8594; &#1074;&#1099;&#1076;&#1077;&#1083;&#1080;&#1090;&#1077; &#1089;&#1090;&#1088;&#1086;&#1082;&#1080; &#1074; &#1090;&#1077;&#1082;&#1089;&#1090;&#1077;</li>
+            <li><strong>&#1057;&#1087;&#1086;&#1089;&#1086;&#1073; 2:</strong> &#1042;&#1099;&#1076;&#1077;&#1083;&#1080;&#1090;&#1077; &#1089;&#1090;&#1088;&#1086;&#1082;&#1080; &#8594; &#1074;&#1099;&#1073;&#1077;&#1088;&#1080;&#1090;&#1077; &#1087;&#1086;&#1083;&#1077; &#1080;&#1079; &#1087;&#1072;&#1085;&#1077;&#1083;&#1080; &#1074;&#1085;&#1080;&#1079;&#1091;</li>
+            <li>&#1052;&#1086;&#1078;&#1085;&#1086; &#1088;&#1077;&#1076;&#1072;&#1082;&#1090;&#1080;&#1088;&#1086;&#1074;&#1072;&#1090;&#1100; &#1090;&#1077;&#1082;&#1089;&#1090; &#1074; &#1087;&#1086;&#1083;&#1103;&#1093; &#1074;&#1088;&#1091;&#1095;&#1085;&#1091;&#1102;</li>
+            <li>&#1048;&#1089;&#1087;&#1086;&#1083;&#1100;&#1079;&#1091;&#1081;&#1090;&#1077; &#1087;&#1086;&#1080;&#1089;&#1082; &#1076;&#1083;&#1103; &#1073;&#1099;&#1089;&#1090;&#1088;&#1086;&#1075;&#1086; &#1085;&#1072;&#1093;&#1086;&#1078;&#1076;&#1077;&#1085;&#1080;&#1103; &#1090;&#1077;&#1082;&#1089;&#1090;&#1072;</li>
+          </ul>
+        </div>
+        <div class="search-box">
+          <input id="fieldSearch" type="text" placeholder="????? ?? ?????">
+        </div>
+        
+        <h3>Извлеченный текст:</h3>
+        <div class="field-panel">
+          <h3>?????</h3>
+          <div id="fieldButtons" class="field-buttons"></div>
+          <div id="fieldBlocks" class="field-blocks"></div>
+        </div>
+        <h3 style="margin-top: 15px;">Выделенные области:</h3>
+        <div id="selectionsList" class="selections-list"></div>
+        <div id="statusBar" class="status-bar">Готов к работе</div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/pdf-select.js"></script>
 </body>
 </html>
 """
@@ -1480,6 +3090,9 @@ MARKUP_TEMPLATE = r"""
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Разметка метаданных - {{ filename }}</title>
+  <!-- PDF.js для отображения PDF -->
+  <script src="/static/pdf.min.js" 
+          onerror="console.error('Ошибка загрузки PDF.js из CDN')"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;background:#f5f5f5;padding:20px;}
@@ -1491,8 +3104,22 @@ MARKUP_TEMPLATE = r"""
     .header-btn{background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;border-radius:6px;text-decoration:none;font-size:14px;transition:all 0.2s;}
     .header-btn:hover{background:rgba(255,255,255,0.3);}
     .content{display:flex;min-height:calc(100vh - 200px);}
-    .text-panel{flex:1;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);border-right:1px solid #e0e0e0;}
-    .form-panel{width:400px;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);background:#fafafa;}
+    .pdf-panel{flex:1;min-width:0;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);border-right:1px solid #e0e0e0;background:#f5f5f5;display:flex;flex-direction:column;}
+    .pdf-viewer-container{flex:1;border:2px solid #ddd;border-radius:4px;overflow:auto;background:#e5e5e5;min-height:400px;position:relative;}
+    .pdf-tabs{display:flex;gap:8px;margin-bottom:10px;}
+    .pdf-tab-btn{padding:6px 12px;border:1px solid #667eea;background:#fff;color:#667eea;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;}
+    .pdf-tab-btn.active{background:#667eea;color:#fff;}
+    .pdf-tab-content{display:block;}
+    .pdf-tab-content.hidden{display:none;}
+    .pdf-iframe{width:100%;height:80vh;border:none;background:#fff;border-radius:4px;}
+
+    #pdfViewerIframe{width:100%;height:80vh;border:none;display:block;}
+    .pdf-page-markup{margin:10px auto;box-shadow:0 2px 8px rgba(0,0,0,0.2);background:white;position:relative;overflow:hidden;}
+    .pdf-page-markup canvas{display:block;cursor:default;}
+    .pdf-page-markup .textLayer{position:absolute;inset:0;opacity:1;pointer-events:auto;color:transparent;}
+    .pdf-page-markup .textLayer span{position:absolute;transform-origin:0 0;white-space:pre;}
+    .text-panel{flex:1;min-width:0;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);border-right:1px solid #e0e0e0;}
+    .form-panel{width:420px;flex:0 0 420px;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);background:#fafafa;}
 
     .search-box{margin-bottom:20px;}
     .search-box input{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;}
@@ -1615,6 +3242,20 @@ MARKUP_TEMPLATE = r"""
   </div>
 
   <div class="content">
+    {% if show_pdf_viewer and pdf_path %}
+    <div class="pdf-panel">
+      <h3 style="margin-bottom: 10px; color: #333;">PDF просмотр:</h3>
+      <div class="pdf-viewer-container">
+        <iframe
+          id="pdfViewerIframe"
+          src="/static/pdfjs/web/viewer.html?file=/pdf/{{ pdf_path|urlencode }}"
+          style="width: 100%; height: 80vh; border: none;"
+          title="PDF viewer"
+        ></iframe>
+      </div>
+    </div>
+    {% endif %}
+    {% if show_text_panel is sameas true %}
     <div class="text-panel">
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="Поиск в тексте...">
@@ -1629,6 +3270,7 @@ MARKUP_TEMPLATE = r"""
         {% endfor %}
       </div>
     </div>
+    {% endif %}
 
     <div class="form-panel">
       <div class="instructions">
@@ -1643,6 +3285,12 @@ MARKUP_TEMPLATE = r"""
 
       <form id="metadataForm">
         <div class="field-group">
+          <label>УДК</label>
+          <input type="text" id="udc" name="udc" value="{% if form_data %}{{ form_data.get('udc', '')|e }}{% endif %}">
+          <div class="selected-lines" id="udc-lines"></div>
+        </div>
+
+        <div class="field-group">
           <label>Название (русский) *</label>
           <textarea id="title" name="title" required>{% if form_data %}{{ form_data.get('title', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="title-lines"></div>
@@ -1655,14 +3303,9 @@ MARKUP_TEMPLATE = r"""
         </div>
 
         <div class="field-group">
-          <label>УДК</label>
-          <input type="text" id="udc" name="udc" value="{% if form_data %}{{ form_data.get('udc', '')|e }}{% endif %}">
-          <div class="selected-lines" id="udc-lines"></div>
-        </div>
-
-        <div class="field-group">
-          <label>ББК</label>
-          <input type="text" id="bbk" name="bbk" value="{% if form_data %}{{ form_data.get('bbk', '')|e }}{% endif %}">
+          <label>DOI</label>
+          <input type="text" id="doi" name="doi" value="{% if form_data %}{{ form_data.get('doi', '')|e }}{% endif %}">
+          <div class="selected-lines" id="doi-lines"></div>
         </div>
 
         <div class="field-group">
@@ -1671,29 +3314,61 @@ MARKUP_TEMPLATE = r"""
         </div>
 
         <div class="field-group">
-          <label>DOI</label>
-          <input type="text" id="doi" name="doi" value="{% if form_data %}{{ form_data.get('doi', '')|e }}{% endif %}">
-          <div class="selected-lines" id="doi-lines"></div>
+          <label>ББК</label>
+          <input type="text" id="bbk" name="bbk" value="{% if form_data %}{{ form_data.get('bbk', '')|e }}{% endif %}">
         </div>
 
         <div class="field-group">
-          <label>Дата получения</label>
-          <input type="text" id="received_date" name="received_date" value="{% if form_data %}{{ form_data.get('received_date', '')|e }}{% endif %}">
+          <label>Тип статьи</label>
+          <select id="art_type" name="art_type" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
+            {% set current_art_type = (form_data.get('art_type') if form_data and form_data.get('art_type') else 'RAR') %}
+            <option value="RAR" {% if current_art_type == 'RAR' %}selected{% endif %}>RAR - Исследовательская статья (по умолчанию)</option>
+            <option value="REV" {% if current_art_type == 'REV' %}selected{% endif %}>REV - Обзорная статья</option>
+            <option value="BRV" {% if current_art_type == 'BRV' %}selected{% endif %}>BRV - Рецензия</option>
+            <option value="SCO" {% if current_art_type == 'SCO' %}selected{% endif %}>SCO - Краткое сообщение</option>
+            <option value="REP" {% if current_art_type == 'REP' %}selected{% endif %}>REP - Отчет</option>
+            <option value="CNF" {% if current_art_type == 'CNF' %}selected{% endif %}>CNF - Конференция</option>
+            <option value="EDI" {% if current_art_type == 'EDI' %}selected{% endif %}>EDI - Редакционная статья</option>
+            <option value="COR" {% if current_art_type == 'COR' %}selected{% endif %}>COR - Корреспонденция</option>
+            <option value="ABS" {% if current_art_type == 'ABS' %}selected{% endif %}>ABS - Аннотация</option>
+            <option value="RPR" {% if current_art_type == 'RPR' %}selected{% endif %}>RPR - Отчет о проекте</option>
+            <option value="MIS" {% if current_art_type == 'MIS' %}selected{% endif %}>MIS - Разное</option>
+            <option value="PER" {% if current_art_type == 'PER' %}selected{% endif %}>PER - Персоналия</option>
+            <option value="UNK" {% if current_art_type == 'UNK' %}selected{% endif %}>UNK - Не определён (устаревший)</option>
+          </select>
         </div>
 
         <div class="field-group">
-          <label>Дата доработки</label>
-          <input type="text" id="reviewed_date" name="reviewed_date" value="{% if form_data %}{{ form_data.get('reviewed_date', '')|e }}{% endif %}">
+          <label>Язык публикации</label>
+          <select id="publ_lang" name="publ_lang" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
+            {% set current_publ_lang = (form_data.get('publ_lang') if form_data and form_data.get('publ_lang') else 'RUS') %}
+            <option value="RUS" {% if current_publ_lang == 'RUS' %}selected{% endif %}>RUS - Русский</option>
+            <option value="ENG" {% if current_publ_lang == 'ENG' %}selected{% endif %}>ENG - Английский</option>
+          </select>
         </div>
 
         <div class="field-group">
-          <label>Дата принятия</label>
-          <input type="text" id="accepted_date" name="accepted_date" value="{% if form_data %}{{ form_data.get('accepted_date', '')|e }}{% endif %}">
-        </div>
-
-        <div class="field-group">
-          <label>Дата публикации</label>
-          <input type="text" id="date_publication" name="date_publication" value="{% if form_data %}{{ form_data.get('date_publication', '')|e }}{% endif %}">
+          <details>
+            <summary>Даты публикации</summary>
+            <div style="margin-top: 10px;">
+              <div class="field-group">
+                <label>Дата получения</label>
+                <input type="text" id="received_date" name="received_date" value="{% if form_data %}{{ form_data.get('received_date', '')|e }}{% endif %}">
+              </div>
+              <div class="field-group">
+                <label>Дата доработки</label>
+                <input type="text" id="reviewed_date" name="reviewed_date" value="{% if form_data %}{{ form_data.get('reviewed_date', '')|e }}{% endif %}">
+              </div>
+              <div class="field-group">
+                <label>Дата принятия</label>
+                <input type="text" id="accepted_date" name="accepted_date" value="{% if form_data %}{{ form_data.get('accepted_date', '')|e }}{% endif %}">
+              </div>
+              <div class="field-group">
+                <label>Дата публикации</label>
+                <input type="text" id="date_publication" name="date_publication" value="{% if form_data %}{{ form_data.get('date_publication', '')|e }}{% endif %}">
+              </div>
+            </div>
+          </details>
         </div>
 
         <div class="field-group">
@@ -1862,34 +3537,6 @@ MARKUP_TEMPLATE = r"""
           <small style="color:#666;font-size:12px;">Каждая ссылка с новой строки</small>
         </div>
 
-        <div class="field-group">
-          <label>Тип статьи</label>
-          <select id="art_type" name="art_type" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
-            {% set current_art_type = (form_data.get('art_type') if form_data and form_data.get('art_type') else 'RAR') %}
-            <option value="RAR" {% if current_art_type == 'RAR' %}selected{% endif %}>RAR - Исследовательская статья (по умолчанию)</option>
-            <option value="REV" {% if current_art_type == 'REV' %}selected{% endif %}>REV - Обзорная статья</option>
-            <option value="BRV" {% if current_art_type == 'BRV' %}selected{% endif %}>BRV - Рецензия</option>
-            <option value="SCO" {% if current_art_type == 'SCO' %}selected{% endif %}>SCO - Краткое сообщение</option>
-            <option value="REP" {% if current_art_type == 'REP' %}selected{% endif %}>REP - Отчет</option>
-            <option value="CNF" {% if current_art_type == 'CNF' %}selected{% endif %}>CNF - Конференция</option>
-            <option value="EDI" {% if current_art_type == 'EDI' %}selected{% endif %}>EDI - Редакционная статья</option>
-            <option value="COR" {% if current_art_type == 'COR' %}selected{% endif %}>COR - Корреспонденция</option>
-            <option value="ABS" {% if current_art_type == 'ABS' %}selected{% endif %}>ABS - Аннотация</option>
-            <option value="RPR" {% if current_art_type == 'RPR' %}selected{% endif %}>RPR - Отчет о проекте</option>
-            <option value="MIS" {% if current_art_type == 'MIS' %}selected{% endif %}>MIS - Разное</option>
-            <option value="PER" {% if current_art_type == 'PER' %}selected{% endif %}>PER - Персоналия</option>
-            <option value="UNK" {% if current_art_type == 'UNK' %}selected{% endif %}>UNK - Не определён (устаревший)</option>
-          </select>
-        </div>
-
-        <div class="field-group">
-          <label>Язык публикации</label>
-          <select id="publ_lang" name="publ_lang" style="width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;background:#fff;">
-            {% set current_publ_lang = (form_data.get('publ_lang') if form_data and form_data.get('publ_lang') else 'RUS') %}
-            <option value="RUS" {% if current_publ_lang == 'RUS' %}selected{% endif %}>RUS - Русский</option>
-            <option value="ENG" {% if current_publ_lang == 'ENG' %}selected{% endif %}>ENG - Английский</option>
-          </select>
-        </div>
 
         <div class="field-group">
           <label>Финансирование (русский)</label>
@@ -1984,7 +3631,12 @@ MARKUP_TEMPLATE = r"""
         <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
       </div>
     </div>
-    <textarea id="annotationModalTextarea" class="line-editor-textarea" style="min-height: 300px; max-height: 70vh; font-size: 14px; line-height: 1.6; resize: vertical;"></textarea>
+    <div class="annotation-editor-toolbar">
+      <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
+      <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
+    </div>
+    <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false"></div>
+    <textarea id="annotationModalTextarea" class="line-editor-textarea" style="display:none;"></textarea>
     <div class="modal-footer">
       <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
       <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
@@ -2274,44 +3926,436 @@ function toggleRefsModalSize() {
 
 let currentAnnotationFieldId = null;
 
+function annotationTextToHtml(text) {
+  if (!text) return "";
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/&lt;(sup|sub)&gt;/gi, "<$1>")
+    .replace(/&lt;\/(sup|sub)&gt;/gi, "</$1>")
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+    .replace(/\n/g, "<br>");
+}
+
+function annotationHtmlToText(html) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  let output = "";
+
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      output += node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+
+    const tag = node.tagName;
+    const verticalAlign = node.style && node.style.verticalAlign;
+
+    if (verticalAlign === "super") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (verticalAlign === "sub") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    if (tag === "BR") {
+      output += "\n";
+      return;
+    }
+    if (tag === "DIV" || tag === "P") {
+      if (output && !output.endsWith("\n")) {
+        output += "\n";
+      }
+      node.childNodes.forEach(walk);
+      if (!output.endsWith("\n")) {
+        output += "\n";
+      }
+      return;
+    }
+    if (tag === "SUP") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (tag === "SUB") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    node.childNodes.forEach(walk);
+  };
+
+  container.childNodes.forEach(walk);
+  return output.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function wrapAnnotationRange(range, tag) {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  if (!range || !editor.contains(range.commonAncestorContainer)) return;
+  if (range.collapsed) return;
+
+  const selection = window.getSelection();
+  const wrapper = document.createElement(tag);
+
+  const content = range.extractContents();
+  wrapper.appendChild(content);
+  range.insertNode(wrapper);
+
+  const newRange = document.createRange();
+  newRange.selectNodeContents(wrapper);
+  if (selection) {
+    selection.removeAllRanges();
+    selection.addRange(newRange);
+  }
+}
+
+
+
+let lastAnnotationSelection = null;
+let lastAnnotationOffsets = null;
+
+function getNodeTextLength(node) {
+  if (!node) return 0;
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.nodeValue.length;
+  }
+  if (node.nodeType === Node.ELEMENT_NODE) {
+    if (node.tagName === "BR") return 1;
+    let total = 0;
+    node.childNodes.forEach((child) => {
+      total += getNodeTextLength(child);
+    });
+    return total;
+  }
+  return 0;
+}
+
+function computeOffset(editor, container, offset) {
+  let total = 0;
+  let found = false;
+
+  const walk = (node) => {
+    if (found) return;
+    if (node === container) {
+      if (node.nodeType === Node.TEXT_NODE) {
+        total += offset;
+      } else {
+        for (let i = 0; i < offset; i += 1) {
+          total += getNodeTextLength(node.childNodes[i]);
+        }
+      }
+      found = true;
+      return;
+    }
+
+    if (node.nodeType === Node.TEXT_NODE) {
+      total += node.nodeValue.length;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === "BR") {
+        total += 1;
+        return;
+      }
+      node.childNodes.forEach(walk);
+    }
+  };
+
+  walk(editor);
+  return found ? total : null;
+}
+
+function resolveOffset(editor, target) {
+  let total = 0;
+  let result = null;
+
+  const walk = (node) => {
+    if (result) return;
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = node.nodeValue.length;
+      if (total + len >= target) {
+        result = { node: node, offset: target - total };
+        return;
+      }
+      total += len;
+      return;
+    }
+    if (node.nodeType === Node.ELEMENT_NODE) {
+      if (node.tagName === "BR") {
+        if (total + 1 >= target) {
+          const parent = node.parentNode || editor;
+          const idx = Array.prototype.indexOf.call(parent.childNodes, node);
+          result = { node: parent, offset: Math.max(0, idx) + 1 };
+          return;
+        }
+        total += 1;
+        return;
+      }
+      node.childNodes.forEach(walk);
+    }
+  };
+
+  walk(editor);
+  if (!result) {
+    result = { node: editor, offset: editor.childNodes.length };
+  }
+  return result;
+}
+
+function saveAnnotationSelection() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return;
+  const range = selection.getRangeAt(0);
+  if (range.collapsed) return;
+  if (!editor.contains(range.commonAncestorContainer)) return;
+
+  const start = computeOffset(editor, range.startContainer, range.startOffset);
+  const end = computeOffset(editor, range.endContainer, range.endOffset);
+  if (start === null || end === null) return;
+
+  lastAnnotationOffsets = { start: start, end: end };
+  lastAnnotationSelection = range.cloneRange();
+}
+
+function restoreAnnotationSelection() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  if (!lastAnnotationOffsets) return;
+
+  const selection = window.getSelection();
+  if (!selection) return;
+  const startPos = resolveOffset(editor, lastAnnotationOffsets.start);
+  const endPos = resolveOffset(editor, lastAnnotationOffsets.end);
+  const range = document.createRange();
+  range.setStart(startPos.node, startPos.offset);
+  range.setEnd(endPos.node, endPos.offset);
+  selection.removeAllRanges();
+  selection.addRange(range);
+  lastAnnotationSelection = range.cloneRange();
+}
+
+function getAnnotationRangeFromOffsets() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return null;
+  if (!lastAnnotationOffsets) return null;
+  const startPos = resolveOffset(editor, lastAnnotationOffsets.start);
+  const endPos = resolveOffset(editor, lastAnnotationOffsets.end);
+  if (!startPos || !endPos) return null;
+  const range = document.createRange();
+  range.setStart(startPos.node, startPos.offset);
+  range.setEnd(endPos.node, endPos.offset);
+  return range;
+}
+
+
+
+function unwrapTag(node) {
+  if (!node || !node.parentNode) return;
+  const parent = node.parentNode;
+  const first = node.firstChild;
+  const last = node.lastChild;
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+
+  const selection = window.getSelection();
+  if (!selection) return;
+  const range = document.createRange();
+  if (first && last) {
+    range.setStartBefore(first);
+    range.setEndAfter(last);
+  } else {
+    range.selectNodeContents(parent);
+  }
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function unwrapTagInPlace(node) {
+  if (!node || !node.parentNode) return;
+  const parent = node.parentNode;
+  while (node.firstChild) {
+    parent.insertBefore(node.firstChild, node);
+  }
+  parent.removeChild(node);
+}
+
+
+function findAncestorTag(node, tag, editor) {
+  let current = node;
+  const upper = tag.toUpperCase();
+  while (current && current !== editor) {
+    if (current.nodeType === Node.ELEMENT_NODE && current.tagName === upper) {
+      return current;
+    }
+    current = current.parentNode;
+  }
+  return null;
+}
+
+function applyAnnotationFormat(action, rangeOverride) {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+
+  let range = null;
+  if (rangeOverride) {
+    const node = rangeOverride.commonAncestorContainer;
+    if (!rangeOverride.collapsed && node && editor.contains(node)) {
+      range = rangeOverride.cloneRange();
+    }
+  }
+  if (!range) {
+    range = getAnnotationRangeFromOffsets();
+  }
+  if (!range) {
+    restoreAnnotationSelection();
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount > 0) {
+      const candidate = selection.getRangeAt(0);
+      if (!candidate.collapsed && editor.contains(candidate.commonAncestorContainer)) {
+        range = candidate.cloneRange();
+      }
+    }
+  }
+  if (!range) return;
+
+  const tag = action === "sup" ? "sup" : "sub";
+  const startTag = findAncestorTag(range.startContainer, tag, editor);
+  const endTag = findAncestorTag(range.endContainer, tag, editor);
+  if (startTag && startTag === endTag) {
+    saveAnnotationSelection();
+    unwrapTagInPlace(startTag);
+    restoreAnnotationSelection();
+    return;
+  }
+
+  const candidates = Array.from(editor.querySelectorAll(tag));
+  const toUnwrap = candidates.filter((node) => {
+    try {
+      return range.intersectsNode(node);
+    } catch (e) {
+      return node.contains(range.startContainer) || node.contains(range.endContainer);
+    }
+  });
+
+  if (toUnwrap.length) {
+    saveAnnotationSelection();
+    toUnwrap.forEach(unwrapTagInPlace);
+    restoreAnnotationSelection();
+    return;
+  }
+
+  wrapAnnotationRange(range, tag);
+  saveAnnotationSelection();
+}
+
+
+
+
+
+
+
+
+
+if (!window.__annotationSelectionHandlerAdded) {
+  document.addEventListener("selectionchange", saveAnnotationSelection);
+  window.__annotationSelectionHandlerAdded = true;
+}
+if (!window.__annotationEditorHandlersAdded) {
+  document.addEventListener("click", (event) => {
+    const button = event.target.closest(".annotation-editor-btn");
+    if (!button) return;
+    const action = button.getAttribute("data-action");
+    if (action === "annotation-sup") {
+      applyAnnotationFormat("sup");
+    } else if (action === "annotation-sub") {
+      applyAnnotationFormat("sub");
+    }
+  });
+  window.__annotationEditorHandlersAdded = true;
+}
+
 function viewAnnotation(fieldId, title) {
   const field = document.getElementById(fieldId);
   if (!field) return;
-  
+
   currentAnnotationFieldId = fieldId;
-  
+
   const annotationText = field.value.trim();
-  
+
   const modal = document.getElementById("annotationModal");
   const modalTitle = document.getElementById("annotationModalTitle");
-  const modalTextarea = document.getElementById("annotationModalTextarea");
-  
-  if (!modal || !modalTitle || !modalTextarea) return;
-  
+  const modalEditor = document.getElementById("annotationModalEditor");
+
+  if (!modal || !modalTitle || !modalEditor) return;
+
   modalTitle.textContent = title;
-  modalTextarea.value = annotationText;
-  
+  modalEditor.innerHTML = annotationTextToHtml(annotationText);
+  modal.dataset.fieldId = fieldId;
+  if (fieldId === "annotation" || fieldId === "annotation_en") {
+    const lang = fieldId === "annotation_en" ? "en" : "ru";
+    const normalize = () => {
+      const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+      modalEditor.innerHTML = annotationTextToHtml(cleaned);
+    };
+    modalEditor.onpaste = () => {
+      setTimeout(normalize, 0);
+    };
+    modalEditor.onblur = normalize;
+  } else {
+    modalEditor.onpaste = null;
+    modalEditor.onblur = null;
+  }
+
   modal.classList.add("active");
   setTimeout(() => {
-    modalTextarea.focus();
-    modalTextarea.setSelectionRange(0, 0);
+    modalEditor.focus();
+    const range = document.createRange();
+    range.selectNodeContents(modalEditor);
+    range.collapse(true);
+    const selection = window.getSelection();
+    if (selection) {
+      selection.removeAllRanges();
+      selection.addRange(range);
+      saveAnnotationSelection();
+    }
   }, 100);
 }
 
 function saveEditedAnnotation() {
-  if (!currentAnnotationFieldId) return;
-  
-  const field = document.getElementById(currentAnnotationFieldId);
-  const modalTextarea = document.getElementById("annotationModalTextarea");
-  
-  if (!field || !modalTextarea) return;
-  
-  field.value = modalTextarea.value.trim();
+  const modal = document.getElementById("annotationModal");
+  const fallbackFieldId = modal?.dataset?.fieldId || null;
+  const targetFieldId = currentAnnotationFieldId || fallbackFieldId;
+  if (!targetFieldId) return;
+
+  const field = document.getElementById(targetFieldId);
+  const modalEditor = document.getElementById("annotationModalEditor");
+
+  if (!field || !modalEditor) return;
+
+  const lang = targetFieldId === "annotation_en" ? "en" : "ru";
+  const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+  field.value = cleaned;
   closeAnnotationModal();
-  
+
   const notification = document.createElement("div");
   notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
-  notification.textContent = "Аннотация обновлена";
+  notification.textContent = "\u0410\u043d\u043d\u043e\u0442\u0430\u0446\u0438\u044f \u0441\u043e\u0445\u0440\u0430\u043d\u0435\u043d\u0430";
   document.body.appendChild(notification);
   setTimeout(() => {
     notification.remove();
@@ -3125,9 +5169,6 @@ function collectAuthorsData() {
     if (cleaned.includes(";")) {
       return cleaned.split(";").map(s => s.trim()).filter(Boolean).length;
     }
-    if (cleaned.includes(",")) {
-      return cleaned.split(",").map(s => s.trim()).filter(Boolean).length;
-    }
     // Если нет разделителей, считаем как одно слово
     return cleaned ? 1 : 0;
   }
@@ -3141,17 +5182,22 @@ function collectAuthorsData() {
     countEl.textContent = `Количество: ${count}`;
   }
 
-  window.countOrganizations = function(text) {
+  window.countOrganizations = function(text, lang) {
     if (!text || !text.trim()) return 0;
     const cleaned = text.trim();
-    // Подсчитываем количество организаций, разделенных точкой с запятой или запятой
+    const langNorm = (lang || "").toLowerCase();
+    // ? ?????????? ????????? ?????? ??????????? ";" (??????? ????? ???? ?????? ??????)
+    if (langNorm.startsWith("en")) {
+      return cleaned.includes(";")
+        ? cleaned.split(";").map(s => s.trim()).filter(Boolean).length
+        : 1;
+    }
     if (cleaned.includes(";")) {
       return cleaned.split(";").map(s => s.trim()).filter(Boolean).length;
     }
     if (cleaned.includes(",")) {
       return cleaned.split(",").map(s => s.trim()).filter(Boolean).length;
     }
-    // Если нет разделителей, считаем как одну организацию
     return cleaned ? 1 : 0;
   };
 
@@ -3160,7 +5206,7 @@ function collectAuthorsData() {
     const countEl = document.getElementById(`org-count-${lang.toLowerCase()}-${authorIndex}`);
     if (!field || !countEl) return;
     
-    const count = window.countOrganizations(field.value);
+    const count = window.countOrganizations(field.value, lang);
     countEl.textContent = `Количество организаций: ${count}`;
   };
 
@@ -3182,16 +5228,82 @@ function collectAuthorsData() {
     countEl.textContent = `Количество источников: ${count}`;
   };
 
-  function processFunding(text) {
+  function processFunding(text, lang) {
     if (!text) return "";
-    return text.replace(/^(Финансирование|Funding)\s*[.:]?\s*/i, "").replace(/^(Финансирование|Funding)\s*/i, "").trim();
+    const hasCyr = /[А-Яа-яЁё]/.test(text);
+    const detected = hasCyr ? "ru" : "en";
+    const langToUse = lang || detected;
+    const prefixRe = /^(Финансирование|Funding)\s*[.:]?\s*/i;
+    let cleaned = String(text).replace(prefixRe, "");
+    cleaned = cleaned.replace(/\r\n?/g, "\n");
+    cleaned = cleaned.replace(/\u00ad/g, "");
+    cleaned = cleaned.replace(/([A-Za-zА-Яа-яЁё'])[-‑–—]\s*\n\s*([A-Za-zА-Яа-яЁё'])/g, "$1$2");
+    cleaned = cleaned.replace(/[ \t]*\n[ \t]*/g, " ");
+    cleaned = cleaned.replace(/[ \t]+/g, " ");
+    cleaned = repairBrokenWords(cleaned, langToUse);
+    return cleaned.trim();
   }
 
-  function processAnnotation(text) {
-    if (!text) return "";
-    // Удаляем префикс "Аннотация", "Annotation" или "Abstract" в начале текста (с возможными двоеточиями и пробелами)
-    return text.replace(/^(Аннотация|Annotation|Abstract)\s*[.:]?\s*/i, "").trim();
+  function repairBrokenWords(text, lang) {
+    const stopRu = new Set([
+      "и","в","во","на","к","с","со","у","о","об","от","до","по","за","из",
+      "не","ни","но","ли","же","бы","мы","вы","я","он","она","они","это","то",
+      "как","при","для","без","над","под","про","так","или","а"
+    ]);
+    const suffixesRu = new Set([
+      "го","ому","ыми","ый","ая","ое","ые","ого","овой","овке","овки","овка",
+      "ении","ение","ения","ению","ением","ность","ности","ностью",
+      "ский","ского","ская","ские","ских","ческим","ческой","ческих","ческого",
+      "тельный","тельного","тельная","тельные","тельным","тельными",
+      "дательный","дательного","дательной","дательным","дательными"
+    ]);
+    const stopEn = new Set([
+      "a","an","the","and","or","but","if","then","of","to","in","on","at","by","for",
+      "with","as","is","are","was","were","be","been","being","this","that","these",
+      "those","it","its","from","into","not","no","so"
+    ]);
+    const suffixesEn = new Set([
+      "tion","tions","ing","ed","ly","al","ment","ence","ance","ous","able","ible",
+      "ity","ize","izes","ized","ization","ative","ness","less","ful","ical","ically",
+      "sion","sions","ious","ably","ist","ists","ism","isms"
+    ]);
+    const prefixesEn = new Set([
+      "inter","multi","micro","macro","post","pre","sub","super","trans","poly",
+      "mono","neo","auto","meta","socio","eco"
+    ]);
+    const stop = lang === "en" ? stopEn : stopRu;
+    const suffixes = lang === "en" ? suffixesEn : suffixesRu;
+    const prefixes = lang === "en" ? prefixesEn : null;
+    return text.replace(/\b([A-Za-zА-Яа-яЁё]+)\s+([A-Za-zА-Яа-яЁё]+)\b/g, (m, a, b) => {
+      const aLower = a.toLowerCase();
+      const bLower = b.toLowerCase();
+      if (aLower.length <= 2 && !stop.has(aLower)) return a + b;
+      if (bLower.length <= 2 && !stop.has(bLower)) return a + b;
+      if (prefixes && prefixes.has(aLower)) return a + b;
+      if (bLower.startsWith("дователь")) return a + b;
+      if (suffixes.has(bLower)) return a + b;
+      return m;
+    });
   }
+
+  window.processAnnotation = function processAnnotation(text, lang) {
+    if (!text) return "";
+    const hasCyr = /[А-Яа-яЁё]/.test(text);
+    const detected = hasCyr ? "ru" : "en";
+    const langToUse = lang || detected;
+    // Удаляем префикс и чистим переносы/разрывы слов из PDF
+    const prefixRe = langToUse === "en"
+      ? /^(Annotation|Abstract|Summary|Resume|Résumé)\s*[.:]?\s*/i
+      : /^(Аннотация|Резюме|Аннот\.|Рез\.|Annotation|Abstract|Summary)\s*[.:]?\s*/i;
+    let cleaned = String(text).replace(prefixRe, "");
+    cleaned = cleaned.replace(/\r\n?/g, "\n");
+    cleaned = cleaned.replace(/\u00ad/g, "");
+    cleaned = cleaned.replace(/([A-Za-zА-Яа-яЁё])[-‑–—]\s*\n\s*([A-Za-zА-Яа-яЁё])/g, "$1$2");
+    cleaned = cleaned.replace(/[ \t]*\n[ \t]*/g, " ");
+    cleaned = cleaned.replace(/[ \t]+/g, " ");
+    cleaned = repairBrokenWords(cleaned, langToUse);
+    return cleaned.trim();
+  };
 
   function processReferences(texts) {
     const processed = [];
@@ -3446,11 +5558,11 @@ function collectAuthorsData() {
       const udc = extractUDC(fullText);
       value = udc ? udc : fullText.trim();
     } else if (fieldId === "funding" || fieldId === "funding_en") {
-      const funding = processFunding(fullText);
+      const funding = processFunding(fullText, fieldId === "funding_en" ? "en" : "ru");
       value = funding;
     } else if (fieldId === "annotation" || fieldId === "annotation_en") {
       // Обрабатываем аннотацию: удаляем префикс "Аннотация" или "Annotation" если он есть
-      const annotation = processAnnotation(fullText);
+      const annotation = window.processAnnotation(fullText, fieldId === "annotation_en" ? "en" : "ru");
       // Если поле уже содержит текст, добавляем через пробел
       value = field.value.trim() ? (field.value.trim() + " " + annotation) : annotation;
     } else if (fieldId === "year") {
@@ -3475,18 +5587,74 @@ function collectAuthorsData() {
     // Очищаем префикс "Аннотация" из полей аннотации при загрузке страницы
     const annotationField = document.getElementById("annotation");
     if (annotationField && annotationField.value) {
-      const cleaned = processAnnotation(annotationField.value);
+      const cleaned = window.processAnnotation(annotationField.value, "ru");
       if (cleaned !== annotationField.value) {
         annotationField.value = cleaned;
       }
     }
+    if (annotationField) {
+      annotationField.addEventListener("paste", () => {
+        setTimeout(() => {
+          annotationField.value = window.processAnnotation(annotationField.value, "ru");
+        }, 0);
+      });
+      annotationField.addEventListener("blur", () => {
+        annotationField.value = window.processAnnotation(annotationField.value, "ru");
+      });
+    }
     
     const annotationEnField = document.getElementById("annotation_en");
     if (annotationEnField && annotationEnField.value) {
-      const cleaned = processAnnotation(annotationEnField.value);
+      const cleaned = window.processAnnotation(annotationEnField.value, "en");
       if (cleaned !== annotationEnField.value) {
         annotationEnField.value = cleaned;
       }
+    }
+    if (annotationEnField) {
+      annotationEnField.addEventListener("paste", () => {
+        setTimeout(() => {
+          annotationEnField.value = window.processAnnotation(annotationEnField.value, "en");
+        }, 0);
+      });
+      annotationEnField.addEventListener("blur", () => {
+        annotationEnField.value = window.processAnnotation(annotationEnField.value, "en");
+      });
+    }
+
+    const fundingField = document.getElementById("funding");
+    if (fundingField && fundingField.value) {
+      const cleaned = processFunding(fundingField.value, "ru");
+      if (cleaned !== fundingField.value) {
+        fundingField.value = cleaned;
+      }
+    }
+    if (fundingField) {
+      fundingField.addEventListener("paste", () => {
+        setTimeout(() => {
+          fundingField.value = processFunding(fundingField.value, "ru");
+        }, 0);
+      });
+      fundingField.addEventListener("blur", () => {
+        fundingField.value = processFunding(fundingField.value, "ru");
+      });
+    }
+
+    const fundingEnField = document.getElementById("funding_en");
+    if (fundingEnField && fundingEnField.value) {
+      const cleaned = processFunding(fundingEnField.value, "en");
+      if (cleaned !== fundingEnField.value) {
+        fundingEnField.value = cleaned;
+      }
+    }
+    if (fundingEnField) {
+      fundingEnField.addEventListener("paste", () => {
+        setTimeout(() => {
+          fundingEnField.value = processFunding(fundingEnField.value, "en");
+        }, 0);
+      });
+      fundingEnField.addEventListener("blur", () => {
+        fundingEnField.value = processFunding(fundingEnField.value, "en");
+      });
     }
     
     // Автоматическая прокрутка к началу статьи, если используется общий файл
@@ -3854,6 +6022,78 @@ def get_json_files(json_input_dir: Path) -> list[dict]:
     return files
 
 
+def _sanitize_folder_names(names: list[str]) -> list[str]:
+    """Keep only safe folder names (no path separators)."""
+    safe = []
+    for name in names:
+        if not name or not isinstance(name, str):
+            continue
+        if "/" in name or "\\" in name:
+            continue
+        if name in {".", ".."}:
+            continue
+        safe.append(name.strip())
+    return [n for n in safe if n]
+
+
+def cleanup_old_archives(archive_root_dir: Path, retention_days: int) -> int:
+    """Remove archive runs older than retention_days (based on mtime)."""
+    if retention_days <= 0:
+        return 0
+    if not archive_root_dir.exists():
+        return 0
+    cutoff = time.time() - (retention_days * 86400)
+    removed = 0
+    for entry in archive_root_dir.iterdir():
+        try:
+            if entry.is_dir() and entry.stat().st_mtime < cutoff:
+                shutil.rmtree(entry)
+                removed += 1
+        except Exception as exc:
+            print(f"WARNING: failed to remove old archive {entry}: {exc}")
+    return removed
+
+
+def archive_processed_folders(
+    folder_names: list[str],
+    archive_root_dir: Path,
+    input_files_dir: Path,
+    json_input_dir: Path,
+    xml_output_dir: Path,
+) -> dict:
+    """Move processed folders into a time-stamped archive run folder."""
+    folder_names = _sanitize_folder_names(folder_names)
+    if not folder_names:
+        return {"archive_dir": "", "moved": []}
+    archive_root_dir.mkdir(parents=True, exist_ok=True)
+    stamp = time.strftime("%Y%m%d_%H%M%S")
+    run_dir = archive_root_dir / stamp
+    if run_dir.exists():
+        run_dir = archive_root_dir / f"{stamp}_{int(time.time())}"
+    moved = []
+    for folder_name in folder_names:
+        for base_dir, subdir in (
+            (input_files_dir, "input_files"),
+            (json_input_dir, "json_input"),
+            (xml_output_dir, "xml_output"),
+        ):
+            src = base_dir / folder_name
+            if not src.exists():
+                continue
+            dest_base = run_dir / subdir
+            dest_base.mkdir(parents=True, exist_ok=True)
+            dest = dest_base / folder_name
+            try:
+                if dest.exists():
+                    suffix = str(int(time.time()))
+                    dest = dest_base / f"{folder_name}_{suffix}"
+                shutil.move(str(src), str(dest))
+                moved.append(str(dest))
+            except Exception as exc:
+                print(f"WARNING: failed to archive {src}: {exc}")
+    return {"archive_dir": str(run_dir), "moved": moved}
+
+
 def get_source_files(input_dir: Path) -> list[dict]:
     """
     Получает список DOCX/RTF файлов из указанной директории и всех подпапок.
@@ -3978,13 +6218,20 @@ def merge_doi_url_in_html(html_content: str) -> str:
     return ''.join(result_parts)
 
 
-def convert_file_to_html(file_path: Path, use_word_reader: bool = False) -> tuple[str, list[str]]:
+def convert_file_to_html(
+    file_path: Path,
+    use_word_reader: bool = False,
+    use_mistral: bool = False,
+    config: Optional[Dict] = None
+) -> tuple[str, list[str]]:
     """
     Конвертирует файл (DOCX/RTF/PDF) в HTML.
     
     Args:
         file_path: Путь к исходному файлу
         use_word_reader: Использовать ли word_reader для конвертации (только для Word файлов)
+        use_mistral: Использовать ли Mistral AI для улучшения PDF конвертации
+        config: Конфигурация (для получения настроек Mistral)
         
     Returns:
         Кортеж (HTML содержимое, список предупреждений)
@@ -4002,7 +6249,16 @@ def convert_file_to_html(file_path: Path, use_word_reader: bool = False) -> tupl
                 "Установите одну из библиотек: pip install pdfplumber или pip install pymupdf"
             )
         try:
-            html_body, warnings = convert_pdf_to_html(file_path, prefer_pdfplumber=True)
+            # Определяем, использовать ли Mistral из конфига
+            if config and not use_mistral:
+                use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
+            
+            html_body, warnings = convert_pdf_to_html(
+                file_path,
+                prefer_pdfplumber=True,
+                use_mistral=use_mistral,
+                mistral_config=config
+            )
             # Объединяем параграфы с DOI/URL с предыдущими (как для Word файлов)
             html_body = merge_doi_url_in_html(html_body)
             return html_body, warnings
@@ -4037,7 +6293,7 @@ def convert_file_to_html(file_path: Path, use_word_reader: bool = False) -> tupl
 # Flask приложение
 # ----------------------------
 
-def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: bool = False, xml_output_dir: Path = None, list_of_journals_path: Path = None) -> Flask:
+def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: bool = False, xml_output_dir: Path = None, list_of_journals_path: Path = None, input_files_dir: Path = None) -> Flask:
     """
     Создает Flask приложение для работы с JSON метаданными.
     
@@ -4047,6 +6303,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         use_word_reader: Использовать ли word_reader для конвертации
         xml_output_dir: Путь к директории для сохранения XML файлов
         list_of_journals_path: Путь к файлу list_of_journals.json
+        input_files_dir: Путь к единой директории с входными файлами (PDF, DOCX, RTF и т.д.)
         
     Returns:
         Flask приложение
@@ -4054,19 +6311,990 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
     app = Flask(__name__)
     
     # Определяем пути по умолчанию, если не указаны
+    script_dir = Path(__file__).parent.absolute()
+    
     if xml_output_dir is None:
-        script_dir = Path(__file__).parent.absolute()
         xml_output_dir = script_dir / "xml_output"
     
     if list_of_journals_path is None:
-        script_dir = Path(__file__).parent.absolute()
         list_of_journals_path = script_dir / "list_of_journals.json"
     
+    # Определяем путь к input_files, если не указан
+    if input_files_dir is None:
+        input_files_dir = script_dir / "input_files"
+    
+    archive_root_dir = script_dir / ARCHIVE_ROOT_DIRNAME
+    archive_retention_days = ARCHIVE_RETENTION_DAYS
+    try:
+        config_path = script_dir / "config.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            retention_cfg = config.get("archive", {}).get("retention_days")
+            if isinstance(retention_cfg, int) and retention_cfg >= 0:
+                archive_retention_days = retention_cfg
+    except Exception as exc:
+        print(f"WARNING: failed to read archive retention from config.json: {exc}")
+    
+    # Сохраняем путь для использования в endpoint (замыкание)
+    _input_files_dir = input_files_dir
+    _words_input_dir = words_input_dir
+
+    progress_state = {
+        "status": "idle",
+        "processed": 0,
+        "total": 0,
+        "message": "",
+        "archive": None
+    }
+    last_archive = {"name": None}
+    progress_lock = threading.Lock()
+    
+    print(f"DEBUG create_app: input_files_dir = {_input_files_dir}")
+    print(f"DEBUG create_app: input_files_dir.exists() = {_input_files_dir.exists()}")
+
+    def find_files_for_json(json_path: Path, input_dir: Path, json_input_dir: Path) -> tuple[Optional[Path], Optional[Path]]:
+        """
+        Find matching article files inside input_files/<issue>/ based on the JSON path.
+
+        Returns (pdf_path_for_gpt, file_path_for_html):
+        - If a matching DOCX/RTF exists, return (None, word_file) and skip PDF viewer.
+        - If only a matching PDF exists, return (pdf_file, pdf_file).
+        """
+        json_stem = json_path.stem
+        subdir_name = None
+
+        try:
+            relative_path = json_path.relative_to(json_input_dir)
+            if len(relative_path.parts) > 1:
+                subdir_name = relative_path.parts[0]
+        except ValueError:
+            return None, None
+
+        if not subdir_name:
+            return None, None
+
+        issue_dir = input_dir / subdir_name
+        if not issue_dir.exists() or not issue_dir.is_dir():
+            return None, None
+
+        pdf_files = list(issue_dir.glob("*.pdf"))
+        word_files = list(issue_dir.glob("*.docx")) + list(issue_dir.glob("*.rtf"))
+
+        pdf_for_article = next((p for p in pdf_files if p.stem == json_stem), None)
+        word_for_article = next((w for w in word_files if w.stem == json_stem), None)
+        word_full_issue = next((w for w in word_files if w.stem == "full_issue"), None)
+
+        if word_full_issue:
+            return pdf_for_article, word_full_issue
+        if word_for_article:
+            return None, word_for_article
+        if pdf_for_article:
+            return pdf_for_article, pdf_for_article
+
+        return None, None
+
+    def validate_zip_members(zf: zipfile.ZipFile, dest_dir: Path) -> tuple[bool, str | None]:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            member_path = Path(info.filename)
+            if member_path.is_absolute() or ".." in member_path.parts:
+                return False, info.filename
+            if len(member_path.parts) > 1:
+                return False, info.filename
+            try:
+                (dest_dir / member_path).resolve().relative_to(dest_dir.resolve())
+            except ValueError:
+                return False, info.filename
+        return True, None
+
     @app.route("/")
+
+
     def index():
         """Главная страница со списком JSON файлов."""
         files = get_json_files(json_input_dir)
         return render_template_string(HTML_TEMPLATE, files=files)
+    
+    @app.route("/upload-input-archive", methods=["POST"])
+    def upload_input_archive():
+        if "archive" not in request.files:
+            return jsonify({"success": False, "error": "Файл архива не найден в запросе."}), 400
+        archive_file = request.files["archive"]
+        if not archive_file or not archive_file.filename:
+            return jsonify({"success": False, "error": "Файл архива не выбран."}), 400
+
+        data = archive_file.read()
+        if not data:
+            return jsonify({"success": False, "error": "Файл архива пуст."}), 400
+
+        buffer = io.BytesIO(data)
+        if not zipfile.is_zipfile(buffer):
+            return jsonify({"success": False, "error": "Загруженный файл не является ZIP архивом."}), 400
+
+        buffer.seek(0)
+        with zipfile.ZipFile(buffer) as zf:
+            is_valid, bad_name = validate_zip_members(zf, _input_files_dir)
+            if not is_valid:
+                return jsonify({
+                    "success": False,
+                    "error": f"Недопустимая структура архива: {bad_name}"
+                }), 400
+
+            _input_files_dir.mkdir(parents=True, exist_ok=True)
+            archive_stem = Path(archive_file.filename).stem.strip()
+            if not archive_stem:
+                return jsonify({"success": False, "error": "Не удалось определить имя архива."}), 400
+            archive_dir = (_input_files_dir / archive_stem).resolve()
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            last_archive["name"] = archive_stem
+            with progress_lock:
+                progress_state.update({
+                    "status": "idle",
+                    "processed": 0,
+                    "total": 0,
+                    "message": "",
+                    "archive": archive_stem
+                })
+            extracted = 0
+            converted = 0
+            for info in zf.infolist():
+                if info.is_dir():
+                    continue
+                member_name = Path(info.filename).name
+                target_path = (archive_dir / member_name).resolve()
+                with zf.open(info) as src, open(target_path, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                extracted += 1
+                if target_path.suffix.lower() == ".rtf":
+                    if not RTF_CONVERT_AVAILABLE:
+                        return jsonify({
+                            "success": False,
+                            "error": "Конвертация RTF недоступна. Установите зависимости для convert_rtf_to_docx."
+                        }), 500
+                    try:
+                        docx_path = convert_rtf_to_docx(target_path)
+                        target_path.unlink(missing_ok=True)
+                        if docx_path.exists():
+                            converted += 1
+                    except Exception as e:
+                        return jsonify({
+                            "success": False,
+                            "error": f"Ошибка конвертации RTF файла {member_name}: {e}"
+                        }), 500
+
+        return jsonify({
+            "success": True,
+            "message": f"Архив распакован в папку {archive_stem}, файлов: {extracted}, RTF->DOCX: {converted}.",
+            "archive": archive_stem,
+        })
+
+    @app.route("/process-archive", methods=["POST"])
+    def process_archive():
+        data = request.get_json(silent=True) or {}
+        archive_name = data.get("archive") or last_archive.get("name")
+        if not archive_name:
+            return jsonify({"success": False, "error": "Архив не выбран."}), 400
+        archive_dir = (_input_files_dir / archive_name).resolve()
+        if not archive_dir.exists() or not archive_dir.is_dir():
+            return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
+        with progress_lock:
+            if progress_state.get("status") == "running":
+                return jsonify({"success": False, "error": "Обработка уже выполняется."}), 409
+            progress_state.update({
+                "status": "running",
+                "processed": 0,
+                "total": 0,
+                "message": "Подготовка...",
+                "archive": archive_name
+            })
+
+        def worker():
+            try:
+                from gpt_extraction import extract_metadata_from_pdf
+                from config import get_config
+            except Exception as e:
+                with progress_lock:
+                    progress_state.update({
+                        "status": "error",
+                        "message": f"Не удалось запустить обработку: {e}"
+                    })
+                return
+            try:
+                config = None
+                try:
+                    config = get_config()
+                except Exception:
+                    config = None
+                pdf_files = sorted(archive_dir.glob("*.pdf"))
+                total = len(pdf_files)
+                with progress_lock:
+                    progress_state["total"] = total
+                    progress_state["message"] = "Запуск обработки..."
+                if total == 0:
+                    with progress_lock:
+                        progress_state.update({
+                            "status": "error",
+                            "message": "В архиве не найдено PDF файлов."
+                        })
+                    return
+                for idx, pdf_path in enumerate(pdf_files, 1):
+                    with progress_lock:
+                        progress_state["processed"] = idx - 1
+                        progress_state["message"] = f"Обработка: {pdf_path.name}"
+                    extract_metadata_from_pdf(pdf_path, config=config)
+                    with progress_lock:
+                        progress_state["processed"] = idx
+                with progress_lock:
+                    progress_state.update({
+                        "status": "done",
+                        "message": "Обработка завершена."
+                    })
+            except Exception as e:
+                with progress_lock:
+                    progress_state.update({
+                        "status": "error",
+                        "message": f"Ошибка обработки: {e}"
+                    })
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        return jsonify({"success": True})
+
+    @app.route("/process-archive-status")
+    def process_archive_status():
+        with progress_lock:
+            return jsonify({
+                "status": progress_state.get("status"),
+                "processed": progress_state.get("processed", 0),
+                "total": progress_state.get("total", 0),
+                "message": progress_state.get("message", ""),
+                "archive": progress_state.get("archive") or last_archive.get("name")
+            })
+
+    @app.route("/api/pdf-files")
+    def api_pdf_files():
+        """API endpoint для получения списка PDF файлов из input_files (рекурсивно во всех подпапках)."""
+        try:
+            pdf_files = []
+            
+            # Проверяем input_files_dir (используем сохраненную переменную из замыкания)
+            try:
+                input_dir = _input_files_dir
+                print(f"DEBUG: Проверяем input_files_dir: {input_dir}")
+                print(f"DEBUG: input_files_dir type: {type(input_dir)}")
+                print(f"DEBUG: input_files_dir exists: {input_dir.exists() if input_dir else 'None'}")
+                print(f"DEBUG: input_files_dir is_dir: {input_dir.is_dir() if input_dir else 'None'}")
+                
+                if not input_dir or not input_dir.exists() or not input_dir.is_dir():
+                    error_msg = f"Директория input_files не найдена или недоступна: {input_dir}"
+                    print(f"ERROR: {error_msg}")
+                    return jsonify({
+                        "error": error_msg,
+                        "input_files_dir": str(input_dir) if input_dir else "не определен"
+                    }), 404
+                
+                # Проверяем, есть ли файлы
+                pdf_count = len(list(input_dir.rglob("*.pdf")))
+                print(f"DEBUG: ✅ Найдено PDF файлов в input_files: {pdf_count}")
+                
+            except NameError as ne:
+                error_msg = f"input_files_dir не определен: {ne}"
+                print(f"ERROR: {error_msg}")
+                return jsonify({"error": error_msg}), 500
+            except Exception as e:
+                error_msg = f"Ошибка при проверке input_files_dir: {e}"
+                print(f"ERROR: {error_msg}")
+                import traceback
+                print(traceback.format_exc())
+                return jsonify({"error": error_msg}), 500
+            
+            # Ищем PDF файлы в input_files
+            print(f"DEBUG: 🔍 Ищем PDF файлы в input_files: {input_dir}")
+            print(f"DEBUG: Абсолютный путь: {input_dir.resolve()}")
+            file_count = 0
+            for file_path in input_dir.rglob("*.pdf"):
+                try:
+                    file_count += 1
+                    # Получаем относительный путь от корневой директории
+                    relative = file_path.relative_to(input_dir)
+                    file_entry = str(relative.as_posix())
+                    pdf_files.append(file_entry)
+                    print(f"DEBUG: ✅ Найден файл #{file_count}: {file_entry} (полный путь: {file_path})")
+                except ValueError as ve:
+                    print(f"DEBUG: ❌ Пропущен файл {file_path} из-за ValueError: {ve}")
+                    continue
+            
+            print(f"DEBUG: 📊 В input_files найдено {file_count} PDF файлов")
+            
+            print(f"DEBUG: 🎯 Всего найдено {len(pdf_files)} PDF файлов")
+            if len(pdf_files) == 0:
+                print(f"DEBUG: ⚠️ ВНИМАНИЕ: Файлы не найдены! Проверьте путь:")
+                print(f"DEBUG:   - input_files: {input_dir} (exists={input_dir.exists()}, is_dir={input_dir.is_dir()})")
+            # Сортируем для удобства
+            result = sorted(pdf_files)
+            print(f"DEBUG: 📤 Отправляем список из {len(result)} файлов")
+            return jsonify(result)
+        except Exception as e:
+            import traceback
+            error_msg = f"Ошибка при получении списка PDF файлов: {str(e)}\n{traceback.format_exc()}"
+            print(f"ERROR: {error_msg}")
+            return jsonify({"error": str(e), "details": traceback.format_exc()}), 500
+    
+    @app.route("/pdf-bbox")
+    def pdf_bbox_form():
+        """Веб-форма для поиска bbox в PDF файлах."""
+        return render_template_string(PDF_BBOX_TEMPLATE)
+    
+    @app.route("/api/pdf-bbox", methods=["POST"])
+    def api_pdf_bbox():
+        """API endpoint для поиска блоков в PDF по ключевым словам."""
+        try:
+            data = request.get_json()
+            pdf_filename = data.get("pdf_file")
+            search_terms = data.get("terms", [])
+            find_annotation = data.get("annotation", False)
+            
+            if not pdf_filename:
+                return jsonify({"error": "Не указан файл PDF"}), 400
+            
+            # Безопасность: проверяем путь
+            if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            # Файл из input_files
+            pdf_path = _input_files_dir / pdf_filename
+            base_dir = _input_files_dir
+            
+            if not pdf_path.exists() or not pdf_path.is_file():
+                return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
+            
+            if pdf_path.suffix.lower() != ".pdf":
+                return jsonify({"error": "Файл должен быть PDF"}), 400
+            
+            # Проверяем, что файл находится внутри базовой директории
+            try:
+                pdf_path.resolve().relative_to(base_dir.resolve())
+            except ValueError:
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            # Импортируем функции для работы с bbox
+            try:
+                from pdf_to_html import find_text_blocks_with_bbox, find_annotation_bbox_auto
+            except ImportError:
+                return jsonify({"error": "Функции для работы с bbox недоступны"}), 500
+            
+            if find_annotation:
+                # Автоматический поиск аннотации
+                result = find_annotation_bbox_auto(pdf_path)
+                if result:
+                    return jsonify({
+                        "success": True,
+                        "blocks": [result]
+                    })
+                else:
+                    return jsonify({
+                        "success": False,
+                        "message": "Аннотация не найдена"
+                    })
+            else:
+                # Поиск по ключевым словам
+                if not search_terms:
+                    search_terms = ["Резюме", "Аннотация", "Abstract", "Annotation", "Ключевые слова", "Keywords"]
+                
+                blocks = find_text_blocks_with_bbox(
+                    pdf_path,
+                    search_terms=search_terms,
+                    expand_bbox=(0, -10, 0, 100)
+                )
+                
+                return jsonify({
+                    "success": True,
+                    "blocks": blocks
+                })
+        
+        except Exception as e:
+            return jsonify({"error": f"Ошибка при обработке: {str(e)}"}), 500
+    
+    @app.route("/pdf-select")
+    def pdf_select_form():
+        """Веб-форма для выделения областей в PDF и извлечения текста."""
+        pdf_files = []
+        try:
+            input_dir = _input_files_dir
+            if input_dir and input_dir.exists() and input_dir.is_dir():
+                for file_path in input_dir.rglob('*.pdf'):
+                    try:
+                        relative = file_path.relative_to(input_dir)
+                        pdf_files.append(str(relative.as_posix()))
+                    except ValueError:
+                        continue
+        except Exception as e:
+            print(f"ERROR: ?????? ??? ?????? input_files ??? pdf-select: {e}")
+        pdf_files = sorted(pdf_files)
+        return render_template_string(PDF_SELECT_TEMPLATE, pdf_files=pdf_files)
+    
+    @app.route("/api/pdf-info", methods=["POST"])
+    def api_pdf_info():
+        """API endpoint для получения информации о PDF (количество страниц, размеры)."""
+        try:
+            data = request.get_json()
+            pdf_filename = data.get("pdf_file")
+            
+            if not pdf_filename:
+                return jsonify({"error": "Не указан файл PDF"}), 400
+            
+            # Безопасность: проверяем путь
+            if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            # Файл из input_files
+            pdf_path = _input_files_dir / pdf_filename
+            base_dir = _input_files_dir
+            
+            if not pdf_path.exists() or not pdf_path.is_file():
+                return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
+            
+            if pdf_path.suffix.lower() != ".pdf":
+                return jsonify({"error": "Файл должен быть PDF"}), 400
+            
+            # Проверяем, что файл находится внутри базовой директории
+            try:
+                pdf_path.resolve().relative_to(base_dir.resolve())
+            except ValueError:
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            # Получаем информацию о PDF через pdfplumber
+            try:
+                import pdfplumber
+                print(f"DEBUG: Открываю PDF: {pdf_path}")
+                with pdfplumber.open(str(pdf_path)) as pdf:
+                    pages_info = []
+                    for page in pdf.pages:
+                        pages_info.append({
+                            "width": page.width,
+                            "height": page.height
+                        })
+                    
+                    print(f"DEBUG: PDF содержит {len(pages_info)} страниц")
+                    return jsonify({
+                        "success": True,
+                        "pdf_file": pdf_filename,
+                        "total_pages": len(pages_info),
+                        "pages": pages_info
+                    })
+            except ImportError as e:
+                print(f"ERROR: pdfplumber не установлен: {e}")
+                return jsonify({"error": "pdfplumber не установлен"}), 500
+            except Exception as e:
+                import traceback
+                error_msg = f"Ошибка при чтении PDF: {str(e)}\n{traceback.format_exc()}"
+                print(f"ERROR: {error_msg}")
+                return jsonify({"error": f"Ошибка при чтении PDF: {str(e)}"}), 500
+        
+        except Exception as e:
+            return jsonify({"error": f"Ошибка: {str(e)}"}), 500
+    
+    @app.route("/api/pdf-image/<path:pdf_filename>")
+    def api_pdf_image(pdf_filename: str):
+        """API endpoint для получения изображения страницы PDF."""
+        try:
+            # Безопасность: проверяем путь
+            if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
+                print(f"ERROR: Недопустимый путь: {pdf_filename}")
+                abort(404)
+            
+            # Файл из input_files
+            pdf_path = _input_files_dir / pdf_filename
+            base_dir = _input_files_dir
+            
+            if not pdf_path.exists() or not pdf_path.is_file():
+                print(f"ERROR: Файл не найден: {pdf_path}")
+                abort(404)
+            
+            if pdf_path.suffix.lower() != ".pdf":
+                print(f"ERROR: Не PDF файл: {pdf_path}")
+                abort(404)
+            
+            # Проверяем, что файл находится внутри базовой директории
+            try:
+                pdf_path.resolve().relative_to(base_dir.resolve())
+            except ValueError:
+                print(f"ERROR: Файл вне базовой директории: {pdf_path}")
+                abort(404)
+            
+            # Получаем номер страницы из query параметра
+            page_num = request.args.get('page', '0')
+            try:
+                page_num = int(page_num)
+            except ValueError:
+                page_num = 0
+            
+            print(f"DEBUG: Запрос изображения страницы {page_num} из {pdf_filename}")
+            
+            # Конвертируем страницу PDF в изображение
+            try:
+                from pdf2image import convert_from_path
+                print(f"DEBUG: pdf2image доступен, конвертирую страницу {page_num + 1}")
+                images = convert_from_path(
+                    str(pdf_path),
+                    first_page=page_num + 1,
+                    last_page=page_num + 1,
+                    dpi=150
+                )
+                
+                if not images:
+                    print(f"ERROR: Не удалось получить изображение для страницы {page_num + 1}")
+                    abort(404)
+                
+                print(f"DEBUG: Получено изображение размером {images[0].size}")
+                
+                # Сохраняем изображение во временный буфер
+                from io import BytesIO
+                img_buffer = BytesIO()
+                images[0].save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                
+                return send_file(img_buffer, mimetype='image/png')
+            except ImportError as e:
+                print(f"ERROR: pdf2image не установлен: {e}")
+                # Возвращаем пустое изображение 1x1 пиксель вместо ошибки
+                from io import BytesIO
+                from PIL import Image
+                img = Image.new('RGB', (1, 1), color='white')
+                img_buffer = BytesIO()
+                img.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                return send_file(img_buffer, mimetype='image/png')
+            except Exception as e:
+                import traceback
+                error_msg = f"Ошибка при конвертации: {str(e)}\n{traceback.format_exc()}"
+                print(f"ERROR: {error_msg}")
+                # Возвращаем пустое изображение вместо ошибки
+                from io import BytesIO
+                from PIL import Image
+                img = Image.new('RGB', (1, 1), color='white')
+                img_buffer = BytesIO()
+                img.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                return send_file(img_buffer, mimetype='image/png')
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Ошибка: {str(e)}\n{traceback.format_exc()}"
+            print(f"ERROR: {error_msg}")
+            # Возвращаем пустое изображение вместо ошибки
+            try:
+                from io import BytesIO
+                from PIL import Image
+                img = Image.new('RGB', (1, 1), color='white')
+                img_buffer = BytesIO()
+                img.save(img_buffer, format='PNG')
+                img_buffer.seek(0)
+                return send_file(img_buffer, mimetype='image/png')
+            except:
+                abort(500)
+    
+    @app.route("/api/pdf-extract-text", methods=["POST"])
+    def api_pdf_extract_text():
+        """API endpoint для извлечения текста из выделенных областей PDF."""
+        try:
+            data = request.get_json()
+            pdf_filename = data.get("pdf_file")
+            selections = data.get("selections", [])
+            
+            print(f"DEBUG: Запрос извлечения текста из {len(selections)} областей")
+            print(f"DEBUG: PDF файл: {pdf_filename}")
+            
+            if not pdf_filename:
+                return jsonify({"error": "Не указан файл PDF"}), 400
+            
+            if not selections:
+                return jsonify({"error": "Нет выделенных областей"}), 400
+            
+            # Безопасность: проверяем путь
+            if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            pdf_path = _input_files_dir / pdf_filename
+            
+            if not pdf_path.exists() or not pdf_path.is_file():
+                print(f"ERROR: Файл не найден: {pdf_path}")
+                return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
+            
+            # Проверяем, что файл находится внутри input_files_dir
+            try:
+                pdf_path.resolve().relative_to(_input_files_dir.resolve())
+            except ValueError:
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
+            
+            # Извлекаем текст из выделенных областей
+            try:
+                import pdfplumber
+                extracted = []
+                
+                print(f"DEBUG: Открываю PDF: {pdf_path}")
+                with pdfplumber.open(str(pdf_path)) as pdf:
+                    print(f"DEBUG: PDF содержит {len(pdf.pages)} страниц")
+                    
+                    for idx, selection in enumerate(selections):
+                        page_num = selection.get("page", 0)
+                        field_id = selection.get("field_id")
+                        is_rus_field = field_id in {
+                            "title",
+                            "annotation",
+                            "keywords",
+                            "references_ru",
+                            "funding",
+                            "author_surname_rus",
+                            "author_initials_rus",
+                            "author_org_rus",
+                            "author_address_rus",
+                            "author_other_rus",
+                        }
+                        is_eng_field = field_id in {
+                            "title_en",
+                            "annotation_en",
+                            "keywords_en",
+                            "references_en",
+                            "funding_en",
+                            "author_surname_eng",
+                            "author_initials_eng",
+                            "author_org_eng",
+                            "author_address_eng",
+                            "author_other_eng",
+                        }
+                        print(f"DEBUG: Обработка выделения {idx + 1}: страница {page_num}")
+                        print(f"DEBUG: Координаты: x1={selection.get('pdf_x1')}, y1={selection.get('pdf_y1')}, x2={selection.get('pdf_x2')}, y2={selection.get('pdf_y2')}")
+                        
+                        if page_num >= len(pdf.pages):
+                            print(f"WARNING: Страница {page_num} не существует (всего страниц: {len(pdf.pages)})")
+                            continue
+                        
+                        page = pdf.pages[page_num]
+                        page_height = page.height
+                        print(f"DEBUG: Размер страницы: {page.width}x{page_height}")
+                        
+                        # Проверяем координаты
+                        pdf_x1 = float(selection.get("pdf_x1", 0))
+                        pdf_y1 = float(selection.get("pdf_y1", 0))  # Это уже инвертированная координата (top)
+                        pdf_x2 = float(selection.get("pdf_x2", 0))
+                        pdf_y2 = float(selection.get("pdf_y2", 0))  # Это уже инвертированная координата (bottom)
+                        
+                        # Нормализуем координаты
+                        pdf_x1, pdf_x2 = min(pdf_x1, pdf_x2), max(pdf_x1, pdf_x2)
+                        # pdf_y1 и pdf_y2 уже инвертированы в JavaScript, поэтому используем их напрямую
+                        # Но нужно убедиться, что top < bottom
+                        top = min(pdf_y1, pdf_y2)
+                        bottom = max(pdf_y1, pdf_y2)
+                        
+                        # Ограничиваем координаты границами страницы
+                        pdf_x1 = max(0, min(pdf_x1, page.width))
+                        pdf_x2 = max(0, min(pdf_x2, page.width))
+                        top = max(0, min(top, page.height))
+                        bottom = max(0, min(bottom, page.height))
+                        
+                        # Убеждаемся, что x1 < x2 и top < bottom
+                        if pdf_x1 >= pdf_x2:
+                            pdf_x1, pdf_x2 = 0, page.width
+                        if top >= bottom:
+                            top, bottom = 0, page.height
+                        
+                        print(f"DEBUG: Область crop: x1={pdf_x1}, top={top}, x2={pdf_x2}, bottom={bottom}")
+                        print(f"DEBUG: Размер страницы: {page.width}x{page.height}")
+                        
+                        # Используем crop для извлечения текста из области
+                        try:
+                            cropped = page.crop((pdf_x1, top, pdf_x2, bottom))
+                            
+                            # Извлекаем текст разными способами для диагностики
+                            text_simple = cropped.extract_text()
+                            
+                            # Также пробуем извлечь через слова (words) для более точного контроля
+                            words = cropped.extract_words()
+                            
+                            print(f"DEBUG: Извлеченный текст (простой метод): {text_simple[:100] if text_simple else '(пусто)'}")
+                            print(f"DEBUG: Найдено слов: {len(words)}")
+                            
+                            # Если есть слова, можем собрать текст из них
+                            if words:
+                                # Сортируем слова по координатам (сверху вниз, слева направо)
+                                words_sorted = sorted(words, key=lambda w: (w['top'], w['x0']))
+                                text_from_words = ' '.join([w['text'] for w in words_sorted])
+                                print(f"DEBUG: Текст из слов (первые 100 символов): {text_from_words[:100]}")
+                                
+                                # Пробуем определить, какой текст нужен (русский или английский)
+                                # Если есть кириллица, предпочитаем русский текст
+                                has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_from_words)
+                                has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text_from_words)
+                                
+                                print(f"DEBUG: Есть кириллица: {has_cyrillic}, есть латиница: {has_latin}")
+                                
+                                # Если есть и русский, и английский текст, определяем, какой преобладает
+                                if has_cyrillic and has_latin:
+                                    # Разделяем на русские и английские слова
+                                    cyrillic_words = [w for w in words_sorted if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text'])]
+                                    latin_words = [w for w in words_sorted if not any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text']) and any(c.isalpha() for c in w['text'])]
+                                    
+                                    # Подсчитываем количество символов в каждом языке
+                                    cyrillic_chars = sum(len(w['text']) for w in cyrillic_words)
+                                    latin_chars = sum(len(w['text']) for w in latin_words)
+                                    
+                                    print(f"DEBUG: Кириллица: {len(cyrillic_words)} слов, {cyrillic_chars} символов")
+                                    print(f"DEBUG: Латиница: {len(latin_words)} слов, {latin_chars} символов")
+                                    
+                                    # Выбираем язык с большим количеством символов
+                                    if cyrillic_chars >= latin_chars:
+                                        if cyrillic_words:
+                                            text_from_words = ' '.join([w['text'] for w in cyrillic_words])
+                                            print(f"DEBUG: Выбран русский текст (преобладает кириллица: {cyrillic_chars} > {latin_chars}): {text_from_words[:100]}")
+                                    else:
+                                        if latin_words:
+                                            text_from_words = ' '.join([w['text'] for w in latin_words])
+                                            print(f"DEBUG: Выбран английский текст (преобладает латиница: {latin_chars} > {cyrillic_chars}): {text_from_words[:100]}")
+                            
+                            # Используем текст из слов, если он есть, иначе простой метод
+                            if words and len(words) > 0:
+                                # Проверяем, есть ли кириллица в извлеченном тексте
+                                has_cyrillic_in_simple = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_simple) if text_simple else False
+                                
+                                if has_cyrillic_in_simple:
+                                    # Если в простом методе есть кириллица, используем его
+                                    text = text_simple
+                                    print(f"DEBUG: Используется простой метод (есть кириллица)")
+                                elif 'text_from_words' in locals() and text_from_words:
+                                    # Используем текст из слов
+                                    text = text_from_words
+                                    print(f"DEBUG: Используется метод из слов")
+                                else:
+                                    text = text_simple
+                            else:
+                                text = text_simple
+                            
+                            if is_rus_field:
+                                ru_text = None
+                                if words:
+                                    cyrillic_words = [
+                                        w for w in words_sorted
+                                        if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w["text"])
+                                    ]
+                                    if cyrillic_words:
+                                        ru_text = " ".join([w["text"] for w in cyrillic_words])
+                                if not ru_text and text_simple and any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_simple):
+                                    ru_text = text_simple
+                                if ru_text:
+                                    text = ru_text
+                                    print(f"DEBUG: ??????? ????????? ??? ???? {field_id}: {text[:100]}")
+
+                            if is_eng_field:
+                                en_text = None
+                                if words:
+                                    latin_words = [
+                                        w for w in words_sorted
+                                        if any(c.isalpha() and ord(c) < 0x0400 for c in w["text"])
+                                    ]
+                                    if latin_words:
+                                        en_text = " ".join([w["text"] for w in latin_words])
+                                if not en_text and text_simple and any(c.isalpha() and ord(c) < 0x0400 for c in text_simple):
+                                    en_text = text_simple
+                                if en_text:
+                                    text = en_text
+                                    print(f"DEBUG: ??????? ????????? ??? ???? {field_id}: {text[:100]}")
+
+                            if text:
+                                text = text.strip()
+                            else:
+                                text = "(Текст не найден)"
+                            
+                            print(f"DEBUG: Финальный извлеченный текст (первые 100 символов): {text[:100]}")
+                            
+                            # Дополнительная проверка: если в тексте есть и русский, и английский,
+                            # определяем преобладающий язык и выбираем соответствующий текст
+                            if text and text != "(Текст не найден)":
+                                has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text)
+                                has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text)
+                                
+                                if has_cyrillic and has_latin:
+                                    # Подсчитываем общее количество символов каждого языка
+                                    total_cyrillic = sum(1 for c in text if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
+                                    total_latin = sum(1 for c in text if c.isalpha() and ord(c) < 0x0400)
+                                    
+                                    print(f"DEBUG: Финальная проверка - кириллица: {total_cyrillic} символов, латиница: {total_latin} символов")
+                                    
+                                    # Разделяем текст на слова для более точного анализа
+                                    import re
+                                    # Разбиваем на слова, сохраняя пробелы и переносы строк
+                                    words_list = re.findall(r'\S+|\s+', text)
+                                    
+                                    # Определяем язык каждого слова
+                                    cyrillic_parts = []
+                                    latin_parts = []
+                                    current_cyrillic = []
+                                    current_latin = []
+                                    
+                                    for word in words_list:
+                                        word_cyrillic = sum(1 for c in word if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
+                                        word_latin = sum(1 for c in word if c.isalpha() and ord(c) < 0x0400)
+                                        
+                                        if word_cyrillic > word_latin:
+                                            # Преимущественно кириллица
+                                            if current_latin:
+                                                latin_parts.append(''.join(current_latin))
+                                                current_latin = []
+                                            current_cyrillic.append(word)
+                                        elif word_latin > 0:
+                                            # Преимущественно латиница
+                                            if current_cyrillic:
+                                                cyrillic_parts.append(''.join(current_cyrillic))
+                                                current_cyrillic = []
+                                            current_latin.append(word)
+                                        else:
+                                            # Пробелы, знаки препинания - добавляем к текущей группе
+                                            if current_cyrillic:
+                                                current_cyrillic.append(word)
+                                            elif current_latin:
+                                                current_latin.append(word)
+                                    
+                                    # Добавляем оставшиеся части
+                                    if current_cyrillic:
+                                        cyrillic_parts.append(''.join(current_cyrillic))
+                                    if current_latin:
+                                        latin_parts.append(''.join(current_latin))
+                                    
+                                    # Выбираем преобладающий язык
+                                    cyrillic_text = ' '.join(cyrillic_parts).strip()
+                                    latin_text = ' '.join(latin_parts).strip()
+                                    
+                                    print(f"DEBUG: Русские части: {len(cyrillic_parts)}, Английские части: {len(latin_parts)}")
+                                    
+                                    if total_cyrillic > total_latin:
+                                        # Преобладает русский - используем русские части
+                                        if cyrillic_text:
+                                            text = cyrillic_text
+                                            print(f"DEBUG: Выбран русский текст (преобладает кириллица: {total_cyrillic} > {total_latin})")
+                                    else:
+                                        # Преобладает английский - используем английские части
+                                        if latin_text:
+                                            text = latin_text
+                                            print(f"DEBUG: Выбран английский текст (преобладает латиница: {total_latin} > {total_cyrillic})")
+                                    
+                                    # Если разделение не помогло, используем старый метод по строкам
+                                    if not text or text == "(Текст не найден)":
+                                        lines = text.split('\\n') if text else []
+                                        filtered_lines = []
+                                        for line in lines:
+                                            line_cyrillic = sum(1 for c in line if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
+                                            line_latin = sum(1 for c in line if c.isalpha() and ord(c) < 0x0400)
+                                            
+                                            # Выбираем строки с преобладающим языком
+                                            if total_latin > total_cyrillic:
+                                                # Преобладает английский - выбираем строки с латиницей
+                                                if line_latin > line_cyrillic or (line_latin > 0 and line_cyrillic == 0):
+                                                    filtered_lines.append(line)
+                                            else:
+                                                # Преобладает русский - выбираем строки с кириллицей
+                                                if line_cyrillic > line_latin or (line_cyrillic > 0 and line_latin == 0):
+                                                    filtered_lines.append(line)
+                                        
+                                        if filtered_lines:
+                                            text = '\n'.join(filtered_lines).strip()
+                            
+                            extracted.append({
+                                "bbox": {
+                                    "x1": pdf_x1,
+                                    "y1": pdf_y1,
+                                    "x2": pdf_x2,
+                                    "y2": pdf_y2
+                                },
+                                "text": text
+                            })
+                        except Exception as crop_error:
+                            import traceback
+                            error_msg = f"Ошибка при crop: {str(crop_error)}\n{traceback.format_exc()}"
+                            print(f"ERROR: {error_msg}")
+                            extracted.append({
+                                "bbox": {
+                                    "x1": pdf_x1,
+                                    "y1": pdf_y1,
+                                    "x2": pdf_x2,
+                                    "y2": pdf_y2
+                                },
+                                "text": f"(Ошибка извлечения: {str(crop_error)})"
+                            })
+                
+                print(f"DEBUG: Извлечено текста из {len(extracted)} областей")
+                return jsonify({
+                    "success": True,
+                    "extracted": extracted
+                })
+            except ImportError as e:
+                print(f"ERROR: pdfplumber не установлен: {e}")
+                return jsonify({"error": "pdfplumber не установлен"}), 500
+            except Exception as e:
+                import traceback
+                error_msg = f"Ошибка при извлечении текста: {str(e)}\n{traceback.format_exc()}"
+                print(f"ERROR: {error_msg}")
+                return jsonify({"error": f"Ошибка при извлечении текста: {str(e)}"}), 500
+        
+        except Exception as e:
+            import traceback
+            error_msg = f"Ошибка: {str(e)}\n{traceback.format_exc()}"
+            print(f"ERROR: {error_msg}")
+            return jsonify({"error": f"Ошибка: {str(e)}"}), 500
+    
+    @app.route("/api/pdf-save-coordinates", methods=["POST"])
+    def api_pdf_save_coordinates():
+        """API endpoint для сохранения координат выделенных областей в JSON файл."""
+        try:
+            data = request.get_json()
+            pdf_filename = data.get("pdf_file")
+            total_pages = data.get("total_pages", 0)
+            selections = data.get("selections", [])
+            
+            if not pdf_filename:
+                return jsonify({"error": "Не указан файл PDF"}), 400
+            
+            if not selections:
+                return jsonify({"error": "Нет выделенных областей для сохранения"}), 400
+            
+            # Создаем имя файла для сохранения координат
+            pdf_path = Path(pdf_filename)
+            output_filename = pdf_path.stem + "_bbox.json"
+            output_path = json_input_dir / output_filename
+            
+            # Подготавливаем данные для сохранения
+            output_data = {
+                "pdf_file": pdf_filename,
+                "total_pages": total_pages,
+                "selections": []
+            }
+            
+            for selection in selections:
+                output_data["selections"].append({
+                    "page": selection["page"],
+                    "bbox": {
+                        "x1": round(selection["pdf_x1"], 2),
+                        "y1": round(selection["pdf_y1"], 2),
+                        "x2": round(selection["pdf_x2"], 2),
+                        "y2": round(selection["pdf_y2"], 2)
+                    },
+                    "text": selection.get("text", ""),
+                    "field_id": selection.get("field_id")
+                })
+            
+            # Сохраняем в JSON
+            with open(output_path, 'w', encoding='utf-8') as f:
+                json.dump(output_data, f, ensure_ascii=False, indent=2)
+            
+            return jsonify({
+                "success": True,
+                "file_path": str(output_path),
+                "file_name": output_filename
+            })
+        
+        except Exception as e:
+            return jsonify({"error": f"Ошибка при сохранении: {str(e)}"}), 500
     
     @app.route("/generate-xml", methods=["POST"])
     def generate_xml():
@@ -4116,7 +7344,8 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             return jsonify({
                 "success": True,
                 "message": f"Успешно сгенерировано XML файлов: {len(files_info)}",
-                "files": files_info
+                "files": files_info,
+                "folders": sorted({Path(item["name"]).stem for item in files_info})
             })
                 
         except ImportError as e:
@@ -4129,6 +7358,44 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
                 "success": False,
                 "error": f"Ошибка при генерации XML: {str(e)}"
             }), 500
+
+    @app.route("/finalize-archive", methods=["POST"])
+    def finalize_archive():
+        """Move processed folders to archive storage and clean old runs."""
+        data = request.get_json(silent=True) or {}
+        folders = data.get("folders") or []
+        retention_days = data.get("retention_days")
+        if isinstance(retention_days, (int, float)):
+            retention_days = int(retention_days)
+        else:
+            retention_days = archive_retention_days
+        if retention_days < 0:
+            retention_days = archive_retention_days
+        folder_names = _sanitize_folder_names(folders)
+        if not folder_names:
+            last_name = last_archive.get("name")
+            if last_name:
+                folder_names = [last_name]
+        
+        if not folder_names:
+            return jsonify({"success": False, "error": "Не указаны папки для архивации."}), 400
+        
+        result = archive_processed_folders(
+            folder_names=folder_names,
+            archive_root_dir=archive_root_dir,
+            input_files_dir=_input_files_dir,
+            json_input_dir=json_input_dir,
+            xml_output_dir=xml_output_dir
+        )
+        removed_old = cleanup_old_archives(archive_root_dir, retention_days)
+        
+        return jsonify({
+            "success": True,
+            "archive_dir": result.get("archive_dir"),
+            "moved": result.get("moved", []),
+            "removed_old": removed_old,
+            "folders": folder_names
+        })
     
     @app.route("/download-xml/<path:xml_filename>")
     def download_xml(xml_filename: str):
@@ -4165,9 +7432,19 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
             abort(404)
         
-        file_path = words_input_dir / filename
+        base_dirs = [_input_files_dir, words_input_dir]
+        file_path = None
+        base_dir = None
+        for candidate_base in base_dirs:
+            if not candidate_base:
+                continue
+            candidate_path = candidate_base / filename
+            if candidate_path.exists() and candidate_path.is_file():
+                file_path = candidate_path
+                base_dir = candidate_base
+                break
         
-        if not file_path.exists() or not file_path.is_file():
+        if not file_path:
             abort(404)
         
         # Проверяем расширение
@@ -4176,7 +7453,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         
         # Проверяем, что файл находится внутри words_input_dir
         try:
-            file_path.resolve().relative_to(words_input_dir.resolve())
+            file_path.resolve().relative_to(base_dir.resolve())
         except ValueError:
             abort(404)
         
@@ -4192,6 +7469,30 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             error_msg = f"Ошибка при конвертации файла: {e}"
             print(error_msg)
             return error_msg, 500
+    
+    @app.route("/pdf/<path:pdf_filename>")
+    def serve_pdf(pdf_filename: str):
+        """Маршрут для отдачи PDF файлов."""
+        # Безопасность: проверяем, что путь не содержит опасные символы
+        if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
+            abort(404)
+        
+        pdf_path = input_files_dir / pdf_filename
+        
+        if not pdf_path.exists() or not pdf_path.is_file():
+            abort(404)
+        
+        # Проверяем расширение
+        if pdf_path.suffix.lower() != ".pdf":
+            abort(404)
+        
+        # Проверяем, что файл находится внутри input_files_dir
+        try:
+            pdf_path.resolve().relative_to(_input_files_dir.resolve())
+        except ValueError:
+            abort(404)
+        
+        return send_file(pdf_path, mimetype='application/pdf')
     
     @app.route("/markup/<path:json_filename>")
     def markup_file(json_filename: str):
@@ -4225,45 +7526,79 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             # Преобразуем JSON в данные для формы
             form_data = json_structure_to_form_data(json_data)
             
-            # Находим соответствующий файл (DOCX/RTF/PDF)
-            # Передаем json_input_dir для поиска в той же подпапке
-            docx_path = find_docx_for_json(json_path, words_input_dir, json_input_dir)
+            # Находим соответствующие файлы в input_files
+            # Логика: PDF для GPT, Word для HTML (если есть), иначе PDF для HTML
+            pdf_for_gpt, file_for_html = find_files_for_json(json_path, _input_files_dir, json_input_dir)
             
-            if not docx_path:
+            if not file_for_html:
                 # Определяем подпапку для более информативного сообщения
                 try:
                     relative_path = json_path.relative_to(json_input_dir)
                     if len(relative_path.parts) > 1:
                         subdir_name = relative_path.parts[0]
                         error_msg = (
-                            f"Ошибка: не найден файл (DOCX/RTF/PDF) для статьи {json_filename}<br><br>"
-                            f"Искали:<br>"
-                            f"1. Отдельный файл: {json_path.stem}.docx, {json_path.stem}.rtf или {json_path.stem}.pdf<br>"
-                            f"2. Общий файл выпуска в папке '{subdir_name}':<br>"
-                            f"   - {subdir_name}.docx/rtf/pdf<br>"
-                            f"   - issue.docx/rtf/pdf<br>"
-                            f"   - выпуск.docx/rtf/pdf<br><br>"
-                            f"Поместите файл в папку: words_input/{subdir_name}/"
+                            f"??????: ?? ?????? ???? ??? {json_filename}<br><br>"
+                            f"?????? ? ????? input_files/{subdir_name}/:<br>"
+                            f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf<br><br>"
+                            f"????????? ???? ?: input_files/{subdir_name}/"
                         )
                     else:
-                        error_msg = f"Ошибка: не найден соответствующий файл (DOCX/RTF/PDF) для {json_filename}"
+                        error_msg = f"Ошибка: не найден соответствующий файл для {json_filename}"
                 except ValueError:
-                    error_msg = f"Ошибка: не найден соответствующий файл (DOCX/RTF/PDF) для {json_filename}"
+                    error_msg = f"Ошибка: не найден соответствующий файл для {json_filename}"
                 return error_msg, 404
             
-            # Проверяем, является ли найденный файл общим файлом выпуска
-            # (не совпадает с именем JSON файла)
-            is_common_file = docx_path.stem != json_path.stem
+            # Проверяем, является ли файл для HTML PDF или Word
+            is_pdf_for_html = file_for_html.suffix.lower() == ".pdf"
+            is_common_file = file_for_html.stem != json_path.stem
             
-            # Конвертируем файл (DOCX/RTF/PDF) в HTML
-            html_body, warnings = convert_file_to_html(docx_path, use_word_reader=use_word_reader)
+            # Для HTML: используем Word файл если есть, иначе PDF
+            if is_pdf_for_html:
+                # Для PDF файлов извлекаем текст для разметки
+                pdf_path_for_html = file_for_html
+                warnings = []
+                html_body = ""
+                # Извлекаем текст из PDF для разметки
+                lines = extract_text_from_pdf(pdf_path_for_html)
+            else:
+                # Загружаем конфигурацию для определения использования Mistral
+                config = None
+                try:
+                    config_path = Path("config.json")
+                    if config_path.exists():
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            config = json.load(f)
+                except Exception:
+                    pass
+                
+                # Определяем, использовать ли Mistral из конфига
+                use_mistral = False
+                if config:
+                    use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
+                
+                # Конвертируем Word файл в HTML
+                html_body, warnings = convert_file_to_html(
+                    file_for_html,
+                    use_word_reader=use_word_reader,
+                    use_mistral=use_mistral,
+                    config=config
+                )
+                
+                # Извлекаем текст из HTML для разметки
+                lines = extract_text_from_html(html_body)
+                pdf_path_for_html = None
             
-            # Извлекаем текст из HTML для разметки
-            lines = extract_text_from_html(html_body)
+            # Для GPT используем PDF файл (если есть), иначе None
+            pdf_path = None
+            if pdf_for_gpt:
+                try:
+                    pdf_path = pdf_for_gpt.resolve().relative_to(_input_files_dir.resolve())
+                except ValueError:
+                    pdf_path = pdf_for_gpt
             
             # Опциональный отладочный вывод (можно включить через переменную окружения DEBUG_LITERATURE=1)
             import os
-            if os.getenv("DEBUG_LITERATURE") == "1" and ("Литература" in html_body or "литература" in html_body.lower()):
+            if not is_pdf_for_html and os.getenv("DEBUG_LITERATURE") == "1" and ("Литература" in html_body or "литература" in html_body.lower()):
                 lit_pos = html_body.lower().find("литература")
                 if lit_pos != -1:
                     debug_html = html_body[max(0, lit_pos-100):lit_pos+2000]
@@ -4421,14 +7756,51 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             
             # Передаем данные формы в шаблон для предзаполнения
             # Добавляем информацию о том, используется ли общий файл
+            # Определяем, что показывать:
+            # - Если есть только PDF (is_pdf_for_html == True) → показываем только PDF viewer
+            # - Если есть Word файл (is_pdf_for_html == False) → показываем только HTML (текстовую панель)
+            if is_pdf_for_html:
+                # Если file_for_html - это PDF, показываем только PDF viewer
+                show_pdf_viewer = True
+                show_text_panel = False
+            else:
+                # Если file_for_html - это Word, показываем только текстовую панель
+                show_pdf_viewer = False
+                show_text_panel = True
+            
+            # Отладочный вывод
+            print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, type(show_text_panel)={type(show_text_panel)}")
+            
+            # Определяем путь к PDF для отображения (только если нужно показывать PDF viewer)
+            pdf_path_for_viewer = None
+            if show_pdf_viewer:
+                if pdf_for_gpt:
+                    # Получаем относительный путь от input_files_dir
+                    try:
+                        pdf_relative = pdf_for_gpt.relative_to(_input_files_dir)
+                        pdf_path_for_viewer = str(pdf_relative.as_posix())
+                    except ValueError:
+                        # Если не удалось получить относительный путь, используем имя файла
+                        pdf_path_for_viewer = pdf_for_gpt.name
+                elif pdf_path_for_html:
+                    # Если нет PDF для GPT, но есть PDF для HTML, используем его
+                    try:
+                        pdf_relative = pdf_path_for_html.relative_to(_input_files_dir)
+                        pdf_path_for_viewer = str(pdf_relative.as_posix())
+                    except ValueError:
+                        pdf_path_for_viewer = pdf_path_for_html.name
+            
             return render_template_string(
                 MARKUP_TEMPLATE, 
                 filename=json_filename, 
                 lines=lines,
                 form_data=form_data or {},
                 is_common_file=is_common_file,
-                common_file_name=docx_path.name if is_common_file else None,
-                article_start_line=article_start_line
+                common_file_name=file_for_html.name if is_common_file else None,
+                article_start_line=article_start_line,
+                pdf_path=pdf_path_for_viewer,
+                show_pdf_viewer=show_pdf_viewer,
+                show_text_panel=show_text_panel
             )
         except Exception as e:
             error_msg = f"Ошибка при подготовке разметки: {e}"
@@ -4470,19 +7842,53 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
             form_data = json_structure_to_form_data(json_data)
             
             # Находим соответствующий DOCX файл
-            docx_path = find_docx_for_json(json_path, words_input_dir, json_input_dir)
-            
-            if not docx_path:
-                return jsonify(error="DOCX файл не найден"), 404
+            pdf_for_gpt, file_for_html = find_files_for_json(json_path, _input_files_dir, json_input_dir)
+
+            if not file_for_html:
+                return jsonify(error="???? ?????? ?? ?????? ? input_files"), 404
+
+            docx_path = file_for_html
             
             # Проверяем, является ли найденный файл общим файлом выпуска
             is_common_file = docx_path.stem != json_path.stem
             
-            # Конвертируем файл (DOCX/RTF/PDF) в HTML
-            html_body, warnings = convert_file_to_html(docx_path, use_word_reader=use_word_reader)
+            # Проверяем, является ли файл PDF
+            is_pdf = docx_path.suffix.lower() == ".pdf"
             
-            # Извлекаем текст из HTML для разметки
-            lines = extract_text_from_html(html_body)
+            if is_pdf:
+                # Для PDF файлов извлекаем текст для разметки
+                pdf_path = docx_path  # Сохраняем путь к PDF
+                warnings = []  # Пустой список предупреждений для PDF
+                html_body = ""  # Пустое тело HTML для PDF
+                # Извлекаем текст из PDF для разметки
+                lines = extract_text_from_pdf(pdf_path)
+            else:
+                # Загружаем конфигурацию для определения использования Mistral
+                config = None
+                try:
+                    config_path = Path("config.json")
+                    if config_path.exists():
+                        with open(config_path, "r", encoding="utf-8") as f:
+                            config = json.load(f)
+                except Exception:
+                    pass
+                
+                # Определяем, использовать ли Mistral из конфига
+                use_mistral = False
+                if config:
+                    use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
+                
+                # Конвертируем файл (DOCX/RTF) в HTML
+                html_body, warnings = convert_file_to_html(
+                    docx_path,
+                    use_word_reader=use_word_reader,
+                    use_mistral=use_mistral,
+                    config=config
+                )
+                
+                # Извлекаем текст из HTML для разметки
+                lines = extract_text_from_html(html_body)
+                pdf_path = None
             
             # Если используется общий файл, пытаемся найти начало статьи
             article_start_line = None
@@ -4878,12 +8284,21 @@ def main() -> int:
     xml_output_dir = script_dir / "xml_output"
     list_of_journals_path = script_dir / "list_of_journals.json"
     
+    # Определяем единую директорию с входными файлами (PDF, DOCX, RTF и т.д.)
+    input_files_dir = script_dir / "input_files"
+    
+    if not input_files_dir.exists():
+        input_files_dir.mkdir(parents=True, exist_ok=True)
+        print(f"⚠ Создана папка: {input_files_dir}")
+        print("   Поместите файлы (PDF, DOCX, RTF) в подпапки вида: issn_год_том_номер или issn_год_номер")
+    
     app = create_app(
         json_input_dir, 
         words_input_dir, 
         use_word_reader=args.use_word_reader,
         xml_output_dir=xml_output_dir,
-        list_of_journals_path=list_of_journals_path
+        list_of_journals_path=list_of_journals_path,
+        input_files_dir=input_files_dir
     )
     
     # Формируем URL главной страницы
@@ -4897,6 +8312,7 @@ def main() -> int:
     print("=" * 80)
     print(f"📁 Папка с JSON файлами: {json_input_dir}")
     print(f"📁 Папка с DOCX/RTF файлами: {words_input_dir}")
+    print(f"📁 Единая папка с входными файлами (PDF, DOCX, RTF): {input_files_dir}")
     if args.use_word_reader:
         print("🔧 Используется word_reader для конвертации")
     print(f"🔗 URL: {url}")

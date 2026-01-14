@@ -32,6 +32,7 @@ artType: RAR (default), REV, BRV, SCO, REP, CNF, EDI, COR, ABS, RPR, MIS, PER, U
 ## Data Extraction Rules
 
 ### Authors
+- **STRICT REQUIREMENT**: Extract full information for **all** authors listed in the article. Do not omit any author under any circumstances.
 - **Full Name and Patronymic (Полное имя и отчество)**: 
   - **IMPORTANT**: If the full first name and patronymic (middle name) are available in the source text, use them completely (e.g., "Иван Петрович", "Ivan Petrovich").
   - **If full names are NOT available**, only then use initials (e.g., "И. П.", "I. P.").
@@ -49,6 +50,7 @@ artType: RAR (default), REV, BRV, SCO, REP, CNF, EDI, COR, ABS, RPR, MIS, PER, U
     - **Apply this email to ALL authors** (add the same email address to all authors' email fields)
     - This ensures all authors have contact information while clearly identifying the corresponding author
 - **Identifiers**: Extract SPIN, ORCID, Scopus ID, ResearcherID if present.
+  - **ORCID format**: Extract only the identifier (e.g., "0000-0001-6816-0260"). Do not include full URLs like "http://orcid.org/0000-0001-6816-0260".
 - **Corresponding Author**: Determine if author is the corresponding author using the following criteria:
   - **Explicit markers** (set "correspondence": true if any of these are found):
     - English: "corresponding author", "author for correspondence", "correspondence to", "correspondence:", "for correspondence", "corresponding", "correspondence should be addressed to"

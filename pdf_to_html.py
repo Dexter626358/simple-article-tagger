@@ -15,9 +15,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 from collections import Counter
 import re
+import os
 
 # Попытка импорта библиотек для работы с PDF
 PDFPLUMBER_AVAILABLE = False
@@ -622,6 +623,162 @@ def _extract_lines_pymupdf(pdf_path: Path) -> List[str]:
 
 
 # ----------------------------
+# Функции для работы с bbox (bounding box)
+# ----------------------------
+
+def find_text_blocks_with_bbox(
+    pdf_path: Path,
+    search_terms: Optional[List[str]] = None,
+    expand_bbox: Tuple[float, float, float, float] = (0, 0, 0, 0)
+) -> List[Dict[str, Any]]:
+    """
+    Находит текстовые блоки в PDF по ключевым словам и возвращает их bbox.
+    
+    Args:
+        pdf_path: Путь к PDF файлу
+        search_terms: Список ключевых слов для поиска (по умолчанию: ["Резюме", "Аннотация", "Abstract", "Annotation"])
+        expand_bbox: Расширение bbox (left, top, right, bottom) в пунктах
+        
+    Returns:
+        Список словарей с информацией о найденных блоках:
+        {
+            "term": "Резюме",
+            "page": 1,
+            "bbox": (x0, y0, x1, y1),
+            "text": "текст блока",
+            "expanded_bbox": (x0, y0, x1, y1)
+        }
+    """
+    if not PDFPLUMBER_AVAILABLE:
+        raise ImportError("pdfplumber не установлен. Установите: pip install pdfplumber")
+    
+    if search_terms is None:
+        search_terms = ["Резюме", "Аннотация", "Abstract", "Annotation", "Ключевые слова", "Keywords"]
+    
+    results = []
+    
+    with pdfplumber.open(pdf_path) as pdf:
+        for page_num, page in enumerate(pdf.pages, start=1):
+            # Получаем все слова с их координатами
+            words = page.extract_words()
+            
+            if not words:
+                continue
+            
+            # Получаем текст страницы для поиска
+            page_text = page.extract_text() or ""
+            page_text_lower = page_text.lower()
+            
+            # Ищем каждое ключевое слово
+            for term in search_terms:
+                term_lower = term.lower()
+                
+                # Проверяем, есть ли слово на странице
+                if term_lower not in page_text_lower:
+                    continue
+                
+                # Находим все вхождения слова
+                for word in words:
+                    word_text = word.get("text", "").lower()
+                    if term_lower in word_text:
+                        # Получаем bbox слова
+                        x0, top, x1, bottom = word["x0"], word["top"], word["x1"], word["bottom"]
+                        
+                        # Расширяем bbox для захвата всего блока
+                        expanded_x0 = max(0, x0 - expand_bbox[0])
+                        expanded_top = max(0, top - expand_bbox[1])
+                        expanded_x1 = min(page.width, x1 + expand_bbox[2])
+                        expanded_bottom = min(page.height, bottom + expand_bbox[3])
+                        
+                        # Извлекаем текст из расширенной области
+                        try:
+                            cropped = page.crop((expanded_x0, expanded_top, expanded_x1, expanded_bottom))
+                            block_text = cropped.extract_text() or ""
+                        except Exception:
+                            # Если не удалось извлечь из области, используем текст после слова
+                            block_text = page_text[page_text.lower().find(term_lower) + len(term):][:500]
+                        
+                        results.append({
+                            "term": term,
+                            "page": page_num,
+                            "bbox": (x0, top, x1, bottom),
+                            "expanded_bbox": (expanded_x0, expanded_top, expanded_x1, expanded_bottom),
+                            "text": block_text.strip()
+                        })
+                        
+                        # Находим только первое вхождение каждого термина на странице
+                        break
+    
+    return results
+
+
+def find_annotation_bbox_auto(pdf_path: Path) -> Optional[Dict[str, Any]]:
+    """
+    Автоматически находит bbox для аннотации/резюме в PDF.
+    Ищет ключевые слова и возвращает координаты блока.
+    
+    Args:
+        pdf_path: Путь к PDF файлу
+        
+    Returns:
+        Словарь с информацией о найденном блоке или None
+    """
+    search_terms = ["Резюме", "Аннотация", "Abstract", "Annotation"]
+    
+    blocks = find_text_blocks_with_bbox(
+        pdf_path,
+        search_terms=search_terms,
+        expand_bbox=(0, -10, 0, 100)  # Расширяем вниз на 100 пунктов
+    )
+    
+    if blocks:
+        # Возвращаем первый найденный блок
+        return blocks[0]
+    
+    return None
+
+
+def print_bbox_info(pdf_path: Path, search_terms: Optional[List[str]] = None):
+    """
+    Печатает информацию о bbox для найденных блоков.
+    Удобно для отладки и получения координат.
+    
+    Args:
+        pdf_path: Путь к PDF файлу
+        search_terms: Список ключевых слов для поиска (опционально)
+    """
+    blocks = find_text_blocks_with_bbox(pdf_path, search_terms=search_terms)
+    
+    if not blocks:
+        print(f"Блоки не найдены в PDF: {pdf_path}")
+        return
+    
+    print(f"\n{'='*80}")
+    print(f"Найдено блоков: {len(blocks)}")
+    print(f"{'='*80}\n")
+    
+    for i, block in enumerate(blocks, 1):
+        print(f"Блок {i}:")
+        print(f"  Ключевое слово: {block['term']}")
+        print(f"  Страница: {block['page']}")
+        print(f"  Bbox (оригинал): ({block['bbox'][0]:.2f}, {block['bbox'][1]:.2f}, {block['bbox'][2]:.2f}, {block['bbox'][3]:.2f})")
+        print(f"  Bbox (расширенный): ({block['expanded_bbox'][0]:.2f}, {block['expanded_bbox'][1]:.2f}, {block['expanded_bbox'][2]:.2f}, {block['expanded_bbox'][3]:.2f})")
+        text_preview = block['text'][:100].replace('\n', ' ')
+        print(f"  Текст (первые 100 символов): {text_preview}...")
+        print()
+    
+    # Выводим координаты в формате для копирования
+    print(f"{'='*80}")
+    print("Координаты для использования:")
+    print(f"{'='*80}\n")
+    for block in blocks:
+        bbox = block['expanded_bbox']
+        print(f"# {block['term']} (страница {block['page']})")
+        print(f"bbox = ({bbox[0]:.2f}, {bbox[1]:.2f}, {bbox[2]:.2f}, {bbox[3]:.2f})")
+        print()
+
+
+# ----------------------------
 # Публичный API
 # ----------------------------
 
@@ -635,13 +792,217 @@ def _to_html_paragraphs(paragraphs: Iterable[str]) -> str:
     return "\n".join(html_lines) if html_lines else "<div></div>"
 
 
-def convert_pdf_to_html(pdf_path: Path, prefer_pdfplumber: bool = True) -> Tuple[str, List[str]]:
+def convert_pdf_to_html_with_mistral(
+    pdf_path: Path,
+    prefer_pdfplumber: bool = True,
+    api_key: Optional[str] = None,
+    model: str = "mistral-large-latest",
+    base_url: str = "https://api.mistral.ai/v1",
+    config: Optional[Dict] = None
+) -> Tuple[str, List[str]]:
+    """
+    Конвертирует PDF в HTML с помощью Mistral AI для улучшения структуры и форматирования.
+
+    Args:
+        pdf_path: путь к PDF
+        prefer_pdfplumber: предпочитать pdfplumber для извлечения текста
+        api_key: API ключ Mistral AI (если не указан, берется из переменной окружения или config)
+        model: модель Mistral AI для использования
+        base_url: базовый URL API Mistral
+        config: конфигурация (опционально)
+
+    Returns:
+        (html_content, warnings)
+    """
+    warnings: List[str] = []
+    
+    # Получаем настройки из конфига
+    # Приоритет: pdf_to_html (специфичные настройки) > llm (общие настройки) > mistral (старый формат)
+    if config:
+        # Проверяем ключ, исключая значения-заглушки
+        def is_valid_key(key):
+            if not key:
+                return False
+            key_str = str(key).strip()
+            return key_str and key_str not in ("YOUR_MISTRAL_API_KEY_HERE", "YOUR_OPENAI_API_KEY_HERE", "")
+        
+        # Сначала проверяем специфичные настройки для PDF to HTML
+        if not api_key or not is_valid_key(api_key):
+            api_key = config.get("pdf_to_html", {}).get("mistral_api_key")
+            if not is_valid_key(api_key):
+                api_key = config.get("llm", {}).get("api_key")
+                if not is_valid_key(api_key):
+                    api_key = config.get("mistral", {}).get("api_key")
+        
+        # Аналогично для модели и base_url
+        pdf_model = config.get("pdf_to_html", {}).get("mistral_model")
+        llm_model = config.get("llm", {}).get("model")
+        mistral_model = config.get("mistral", {}).get("model")
+        model = pdf_model or llm_model or mistral_model or model
+        
+        pdf_base_url = config.get("pdf_to_html", {}).get("mistral_base_url")
+        llm_base_url = config.get("llm", {}).get("base_url")
+        mistral_base_url = config.get("mistral", {}).get("base_url")
+        base_url = pdf_base_url or llm_base_url or mistral_base_url or base_url
+    
+    # Получаем API ключ из переменной окружения, если не указан
+    if not api_key:
+        api_key = os.getenv('MISTRAL_API_KEY')
+    
+    if not api_key:
+        warnings.append("API ключ Mistral AI не указан. Используется стандартная конвертация без Mistral.")
+        return convert_pdf_to_html(pdf_path, prefer_pdfplumber=prefer_pdfplumber)
+    
+    # Отладочный вывод (можно убрать после проверки)
+    if api_key:
+        # Показываем только первые и последние 4 символа ключа для безопасности
+        key_preview = f"{api_key[:4]}...{api_key[-4:]}" if len(api_key) > 8 else "***"
+        print(f"DEBUG Mistral: Используется API ключ: {key_preview}, модель: {model}, base_url: {base_url}")
+    
+    # Проверяем доступность OpenAI клиента (Mistral использует совместимый API)
+    try:
+        from openai import OpenAI
+    except ImportError:
+        warnings.append("Библиотека openai не установлена. Используется стандартная конвертация. Установите: pip install openai")
+        return convert_pdf_to_html(pdf_path, prefer_pdfplumber=prefer_pdfplumber)
+    
+    # Сначала извлекаем текст из PDF стандартным способом
+    try:
+        extractor: Optional[Callable[[Path], List[str]]] = None
+        if prefer_pdfplumber and PDFPLUMBER_AVAILABLE:
+            extractor = _extract_lines_pdfplumber
+        elif PYMUPDF_AVAILABLE:
+            extractor = _extract_lines_pymupdf
+        elif PDFPLUMBER_AVAILABLE:
+            extractor = _extract_lines_pdfplumber
+        
+        if extractor is None:
+            raise ImportError(
+                "Не установлена ни одна библиотека для работы с PDF. "
+                "Установите одну из: pip install pdfplumber или pip install pymupdf"
+            )
+        
+        raw_lines = extractor(pdf_path)
+        paragraphs = _merge_lines_into_paragraphs(raw_lines)
+        initial_html = _to_html_paragraphs(paragraphs)
+        
+        # Извлекаем текст для отправки в Mistral (без HTML тегов)
+        text_content = "\n".join(paragraphs)
+        
+        # Если текст слишком длинный, разбиваем на части
+        # Уменьшено до 30k символов для избежания таймаутов
+        max_chunk_size = 30000  # Примерно 30k символов (было 50k, изначально 100k)
+        if len(text_content) > max_chunk_size:
+            warnings.append(f"Текст PDF слишком длинный ({len(text_content)} символов). Обрабатывается первая часть ({max_chunk_size} символов) для избежания таймаутов.")
+            text_content = text_content[:max_chunk_size]
+        
+    except Exception as e:
+        warnings.append(f"Ошибка при извлечении текста из PDF: {e}")
+        return "<div></div>", warnings
+    
+    # Логируем начало обработки
+    import time
+    start_time = time.time()
+    text_length = len(text_content)
+    print(f"DEBUG Mistral: Начинаем обработку через Mistral AI. Размер текста: {text_length} символов")
+    
+    # Создаем упрощённый промпт для более быстрой обработки
+    prompt = f"""Преобразуй текст научной статьи в HTML. Правила:
+1. Сохрани всё содержимое без изменений
+2. Исправь форматирование: убери лишние пробелы в словах, объедини разорванные строки
+3. Каждый абзац в теге <p>
+4. Верни только HTML код без комментариев
+
+Текст:
+{text_content}
+
+HTML:"""
+    
+    try:
+        # Создаем клиент Mistral AI (использует OpenAI-совместимый API)
+        # Увеличен таймаут до 180 секунд (3 минуты) для больших документов
+        client = OpenAI(
+            api_key=api_key,
+            base_url=base_url,
+            timeout=180.0  # Таймаут 180 секунд (3 минуты)
+        )
+        
+        print(f"DEBUG Mistral: Отправляем запрос к API (модель: {model})...")
+        
+        # Отправляем запрос
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "Ты помощник для конвертации текста научных статей в HTML. Всегда возвращай валидный HTML код."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            temperature=0.2,  # Низкая температура для более детерминированного результата
+            max_tokens=8000,  # Ограничиваем размер ответа для ускорения
+        )
+        
+        elapsed_time = time.time() - start_time
+        print(f"DEBUG Mistral: Получен ответ от API за {elapsed_time:.2f} секунд")
+        
+        improved_html = response.choices[0].message.content.strip()
+        
+        # Извлекаем HTML из ответа (может быть обернут в markdown код блоки)
+        import re
+        # Убираем markdown код блоки, если есть
+        html_match = re.search(r'```(?:html)?\s*(.*?)\s*```', improved_html, re.DOTALL)
+        if html_match:
+            improved_html = html_match.group(1)
+        
+        # Проверяем, что результат валидный HTML
+        if not improved_html.strip().startswith('<'):
+            warnings.append("Mistral AI вернул неожиданный формат, используется исходный HTML")
+            return initial_html, warnings
+        
+        return improved_html, warnings
+        
+    except Exception as e:
+        error_msg = str(e)
+        elapsed_time = time.time() - start_time
+        
+        # Более детальная обработка различных ошибок
+        if "401" in error_msg or "Unauthorized" in error_msg:
+            warnings.append(
+                f"Ошибка авторизации Mistral AI (401 Unauthorized). "
+                f"Проверьте правильность API ключа в config.json. "
+                f"Используется исходный HTML. Ошибка: {e}"
+            )
+        elif "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
+            warnings.append(
+                f"Таймаут при обработке через Mistral AI (обработка заняла {elapsed_time:.1f} сек, превышен лимит 180 сек). "
+                f"Документ слишком большой или API медленно отвечает. Используется исходный HTML. "
+                f"Рекомендуется отключить Mistral (use_mistral: false) для быстрой обработки."
+            )
+            print(f"DEBUG Mistral: Таймаут после {elapsed_time:.2f} секунд обработки")
+        else:
+            warnings.append(f"Ошибка при обработке через Mistral AI: {e}, используется исходный HTML")
+        
+        return initial_html, warnings
+
+
+def convert_pdf_to_html(
+    pdf_path: Path,
+    prefer_pdfplumber: bool = True,
+    use_mistral: bool = False,
+    mistral_config: Optional[Dict] = None
+) -> Tuple[str, List[str]]:
     """
     Конвертирует PDF в HTML, используя доступную библиотеку.
 
     Args:
         pdf_path: путь к PDF
         prefer_pdfplumber: предпочитать pdfplumber (часто лучше сохраняет "структуру")
+        use_mistral: использовать ли Mistral AI для улучшения результата
+        mistral_config: конфигурация для Mistral AI
 
     Returns:
         (html_content, warnings)
@@ -649,6 +1010,13 @@ def convert_pdf_to_html(pdf_path: Path, prefer_pdfplumber: bool = True) -> Tuple
     Raises:
         ImportError: если не установлена ни одна библиотека
     """
+    if use_mistral:
+        return convert_pdf_to_html_with_mistral(
+            pdf_path,
+            prefer_pdfplumber=prefer_pdfplumber,
+            config=mistral_config
+        )
+    
     warnings: List[str] = []
 
     extractor: Optional[Callable[[Path], List[str]]] = None

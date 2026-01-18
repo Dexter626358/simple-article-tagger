@@ -176,25 +176,6 @@ def register_pdf_routes(app, ctx):
             return jsonify({"error": f"Ошибка при обработке: {str(e)}"}), 500
     
 
-    @app.route("/pdf-select")
-    def pdf_select_form():
-        """Веб-форма для выделения областей в PDF и извлечения текста."""
-        pdf_files = []
-        try:
-            input_dir = _input_files_dir
-            if input_dir and input_dir.exists() and input_dir.is_dir():
-                for file_path in input_dir.rglob('*.pdf'):
-                    try:
-                        relative = file_path.relative_to(input_dir)
-                        pdf_files.append(str(relative.as_posix()))
-                    except ValueError:
-                        continue
-        except Exception as e:
-            print(f"ERROR: ?????? ??? ?????? input_files ??? pdf-select: {e}")
-        pdf_files = sorted(pdf_files)
-        return render_template_string(PDF_SELECT_TEMPLATE, pdf_files=pdf_files)
-    
-
     @app.route("/api/pdf-info", methods=["POST"])
     def api_pdf_info():
         """API endpoint для получения информации о PDF (количество страниц, размеры)."""

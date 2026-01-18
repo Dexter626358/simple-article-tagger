@@ -31,7 +31,7 @@ from app.routes.markup_routes import register_markup_routes
 # Константы
 # ----------------------------
 
-SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf"}
+SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html"}
 SUPPORTED_JSON_EXTENSIONS = {".json"}
 ARCHIVE_ROOT_DIRNAME = "processed_archives"
 ARCHIVE_RETENTION_DAYS = 7
@@ -111,7 +111,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         Find matching article files inside input_files/<issue>/ based on the JSON path.
 
         Returns (pdf_path_for_gpt, file_path_for_html):
-        - If a matching DOCX/RTF exists, return (None, word_file) and skip PDF viewer.
+        - If a matching DOCX/RTF/IDML exists, return (None or pdf, file) and skip PDF viewer.
         - If only a matching PDF exists, return (pdf_file, pdf_file).
         """
         json_stem = json_path.stem
@@ -133,13 +133,24 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
 
         pdf_files = list(issue_dir.glob("*.pdf"))
         word_files = list(issue_dir.glob("*.docx")) + list(issue_dir.glob("*.rtf"))
+        idml_files = list(issue_dir.glob("*.idml"))
+        html_files = list(issue_dir.glob("*.html"))
 
         pdf_for_article = next((p for p in pdf_files if p.stem == json_stem), None)
         word_for_article = next((w for w in word_files if w.stem == json_stem), None)
+        idml_for_article = next((w for w in idml_files if w.stem == json_stem), None)
         word_full_issue = next((w for w in word_files if w.stem == "full_issue"), None)
+        html_for_article = next((h for h in html_files if h.stem == json_stem), None)
+        html_full_issue = next((h for h in html_files if h.stem == "full_issue"), None)
 
+        if idml_for_article:
+            return pdf_for_article, idml_for_article
+        if html_full_issue:
+            return pdf_for_article, html_full_issue
         if word_full_issue:
             return pdf_for_article, word_full_issue
+        if html_for_article:
+            return None, html_for_article
         if word_for_article:
             return None, word_for_article
         if pdf_for_article:

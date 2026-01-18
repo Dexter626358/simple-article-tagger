@@ -669,7 +669,8 @@ def xml_validator(xml_file: Path, schema_file: Optional[Path] = None) -> Tuple[b
         Tuple[bool, List[str]]: (валиден ли файл, список ошибок)
     """
     if schema_file is None:
-        schema_file = Path("data/xml_schema.xsd")
+        project_root = Path(__file__).resolve().parents[1]
+        schema_file = project_root / "data" / "xml_schema.xsd"
     
     errors = []
     

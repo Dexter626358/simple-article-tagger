@@ -272,6 +272,10 @@ HTML_TEMPLATE = """
     .author-toggle{color:#666;font-size:12px;transition:transform .2s;}
     .author-item.expanded .author-toggle{transform:rotate(180deg);}
     .author-actions{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;}
+    .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
+    .author-collapse-actions{display:flex;justify-content:flex-end;margin-top:12px;}
+    .author-collapse-btn{background:#e0e0e0;color:#333;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;}
+    .author-collapse-btn:hover{background:#d0d0d0;}
     .author-actions label{margin:0;flex:1;}
     .add-author-btn{background:#667eea;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
     .add-author-btn:hover{background:#5568d3;}
@@ -289,10 +293,14 @@ HTML_TEMPLATE = """
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
     .toggle-text{font-size:14px;color:#333;}
-    .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);overflow:auto;}
+    .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:transparent;overflow:auto;pointer-events:none;}
     .modal.active{display:flex;align-items:center;justify-content:center;}
-    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
-    .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;}
+    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;}
+    .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
+    .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
+    .refs-modal-content{overflow-y:auto;}
+    .annotation-modal-content{height:80vh;min-height:0;}
+    .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
@@ -308,6 +316,77 @@ HTML_TEMPLATE = """
     .modal-btn-save:hover{background:#45a049;}
     .modal-btn-cancel{background:#e0e0e0;color:#333;}
     .modal-btn-cancel:hover{background:#d0d0d0;}
+    .annotation-editor-toolbar{display:flex;flex-direction:column;gap:8px;margin:0 0 12px 0;flex-shrink:0;}
+    .annotation-toolbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+    .annotation-toolbar-label{font-size:12px;color:#666;font-weight:600;}
+    .annotation-select{background:#fff;border:1px solid #ddd;padding:6px 8px;border-radius:4px;font-size:12px;color:#333;}
+    .annotation-select:focus{outline:2px solid rgba(102,126,234,0.3);outline-offset:1px;}
+    .annotation-divider{width:1px;height:22px;background:#e0e0e0;display:inline-block;margin:0 2px;}
+    .annotation-editor-btn{background:#f5f5f7;border:1px solid #d7d7d7;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;min-width:30px;display:inline-flex;align-items:center;justify-content:center;}
+    .annotation-editor-btn:hover{background:#eaeaea;}
+    .annotation-color-input{width:28px;height:28px;border:1px solid #d7d7d7;border-radius:4px;padding:0;background:#fff;cursor:pointer;}
+    .annotation-editor{width:100%;min-height:0;flex:1;padding:24px;border:2px solid #ddd;border-radius:6px;font-size:14px;font-family:inherit;line-height:1.7;background:#fff;overflow-y:scroll;white-space:pre-wrap;box-sizing:border-box;scrollbar-gutter:stable;}
+    .annotation-modal-body{position:relative;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;}
+    .annotation-editor:focus{outline:none;border-color:#667eea;box-shadow:0 0 0 3px rgba(102,126,234,0.15);}
+    .annotation-editor.preview{background:#f9f9f9;}
+    .annotation-editor sup{font-size:0.8em;vertical-align:super;}
+    .annotation-editor sub{font-size:0.8em;vertical-align:sub;}
+    .annotation-editor table.annotation-table{border-collapse:collapse;width:100%;margin:8px 0;}
+    .annotation-editor table.annotation-table td,.annotation-editor table.annotation-table th{border:1px solid #d5d5d5;padding:6px 8px;font-size:13px;}
+    .annotation-editor .annotation-code-block{background:#f4f6f8;border:1px solid #d9e1ea;border-radius:4px;padding:8px;font-family:Consolas,Monaco,monospace;font-size:12px;white-space:pre-wrap;}
+    .annotation-bookmark{background:#fff7e6;border:1px solid #ffe2a8;border-radius:4px;padding:2px 6px;font-size:12px;color:#7a4b00;display:inline-flex;align-items:center;gap:4px;}
+    .annotation-code-view{font-family:Consolas,Monaco,monospace;padding:24px;box-sizing:border-box;}
+    .annotation-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:14px;border-top:2px solid #e0e0e0;flex-shrink:0;}
+    .annotation-editor-stats{display:flex;align-items:center;gap:12px;font-size:12px;color:#666;}
+    .annotation-word-count{font-weight:600;color:#333;}
+    .annotation-lang-indicator{padding:3px 8px;border-radius:12px;background:#eef2ff;color:#3f51b5;font-weight:600;font-size:11px;letter-spacing:.4px;}
+    .annotation-editor-actions{display:flex;align-items:center;gap:10px;}
+    .annotation-modal-body{position:relative;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;}
+    .annotation-symbols-panel{position:absolute;right:0;top:52px;width:min(520px,90%);background:#fff;border:1px solid #d8d8d8;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px;z-index:50;display:none;}
+    .annotation-symbols-panel.active{display:block;}
+    .annotation-symbols-header{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+    .annotation-symbols-search{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;}
+    .annotation-symbols-category{padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;background:#fff;}
+    .annotation-symbols-toggles{display:flex;gap:12px;align-items:center;font-size:12px;color:#555;margin-bottom:8px;}
+    .annotation-symbols-toggles label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+    .annotation-symbols-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+    .annotation-symbol-cell{position:relative;}
+    .annotation-symbol-btn{width:100%;border:1px solid #e1e1e1;border-radius:6px;background:#f9f9f9;padding:10px 6px;font-size:18px;cursor:pointer;}
+    .annotation-symbol-btn:hover{background:#f0f0f0;}
+    .annotation-symbol-btn:focus{outline:2px solid rgba(102,126,234,0.4);outline-offset:1px;}
+    .annotation-symbol-fav{position:absolute;top:4px;right:4px;background:transparent;border:none;font-size:12px;cursor:pointer;color:#aaa;}
+    .annotation-symbol-fav.active{color:#f4b400;}
+    .annotation-symbols-footer{border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#666;}
+    .annotation-symbols-section{margin-bottom:6px;}
+    .annotation-symbols-title{font-weight:600;color:#333;margin-right:6px;}
+    .annotation-symbols-recent,.annotation-symbols-favorites{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+    .annotation-symbol-chip{border:1px solid #e1e1e1;border-radius:6px;background:#fff;padding:4px 6px;cursor:pointer;}
+    .annotation-symbols-info{font-size:11px;color:#777;margin-top:6px;}
+    @media (max-width:900px){.annotation-symbols-grid{grid-template-columns:repeat(6,minmax(0,1fr));}}
+    @media (max-width:600px){.annotation-symbols-grid{grid-template-columns:repeat(4,minmax(0,1fr));}}
+    .annotation-modal-body{position:relative;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;}
+    .annotation-symbols-panel{position:absolute;right:0;top:52px;width:min(520px,90%);background:#fff;border:1px solid #d8d8d8;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,0.12);padding:12px;z-index:50;display:none;}
+    .annotation-symbols-panel.active{display:block;}
+    .annotation-symbols-header{display:flex;gap:8px;align-items:center;margin-bottom:8px;}
+    .annotation-symbols-search{flex:1;padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;}
+    .annotation-symbols-category{padding:6px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px;background:#fff;}
+    .annotation-symbols-toggles{display:flex;gap:12px;align-items:center;font-size:12px;color:#555;margin-bottom:8px;}
+    .annotation-symbols-toggles label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+    .annotation-symbols-grid{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:6px;margin-bottom:8px;}
+    .annotation-symbol-cell{position:relative;}
+    .annotation-symbol-btn{width:100%;border:1px solid #e1e1e1;border-radius:6px;background:#f9f9f9;padding:10px 6px;font-size:18px;cursor:pointer;}
+    .annotation-symbol-btn:hover{background:#f0f0f0;}
+    .annotation-symbol-btn:focus{outline:2px solid rgba(102,126,234,0.4);outline-offset:1px;}
+    .annotation-symbol-fav{position:absolute;top:4px;right:4px;background:transparent;border:none;font-size:12px;cursor:pointer;color:#aaa;}
+    .annotation-symbol-fav.active{color:#f4b400;}
+    .annotation-symbols-footer{border-top:1px solid #eee;padding-top:8px;font-size:12px;color:#666;}
+    .annotation-symbols-section{margin-bottom:6px;}
+    .annotation-symbols-title{font-weight:600;color:#333;margin-right:6px;}
+    .annotation-symbols-recent,.annotation-symbols-favorites{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;}
+    .annotation-symbol-chip{border:1px solid #e1e1e1;border-radius:6px;background:#fff;padding:4px 6px;cursor:pointer;}
+    .annotation-symbols-info{font-size:11px;color:#777;margin-top:6px;}
+    @media (max-width:900px){.annotation-symbols-grid{grid-template-columns:repeat(6,minmax(0,1fr));}}
+    @media (max-width:600px){.annotation-symbols-grid{grid-template-columns:repeat(4,minmax(0,1fr));}}
     .ref-actions{position:absolute;top:5px;right:5px;display:flex;gap:5px;}
     .ref-action-btn{background:#fff;border:1px solid #ddd;padding:4px 8px;border-radius:3px;cursor:pointer;font-size:11px;color:#666;}
     .ref-action-btn:hover{background:#f0f0f0;color:#333;}
@@ -318,24 +397,36 @@ HTML_TEMPLATE = """
     .line-editor-modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);overflow:auto;}
     .line-editor-modal.active{display:flex;align-items:center;justify-content:center;}
     .line-editor-content{background:#fff;padding:20px;border-radius:8px;max-width:700px;width:80%;max-height:70vh;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
+    .line-editor-content.resizable{resize:both;overflow:auto;min-width:320px;min-height:200px;width:80vw;height:60vh;max-width:95vw;max-height:90vh;}
     .line-editor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:2px solid #e0e0e0;padding-bottom:10px;}
     .line-editor-header h2{margin:0;color:#333;font-size:18px;}
     .line-editor-textarea{width:100%;min-height:150px;max-height:400px;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;background:#f9f9f9;}
     .line-editor-textarea:focus{outline:none;border-color:#667eea;background:#fff;}
-    .annotation-editor-toolbar{display:flex;gap:8px;margin:0 0 10px 0;}
-    .annotation-editor-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;}
-    .annotation-editor-btn:hover{background:#e6e6e6;}
-    .annotation-editor{width:100%;min-height:300px;max-height:70vh;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;background:#f9f9f9;overflow-y:auto;}
-    .annotation-editor:focus{outline:none;border-color:#667eea;background:#fff;}
+    .annotation-editor-toolbar{display:flex;flex-direction:column;gap:8px;margin:0 0 12px 0;flex-shrink:0;}
+    .annotation-toolbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
+    .annotation-toolbar-label{font-size:12px;color:#666;font-weight:600;}
+    .annotation-select{background:#fff;border:1px solid #ddd;padding:6px 8px;border-radius:4px;font-size:12px;color:#333;}
+    .annotation-select:focus{outline:2px solid rgba(102,126,234,0.3);outline-offset:1px;}
+    .annotation-divider{width:1px;height:22px;background:#e0e0e0;display:inline-block;margin:0 2px;}
+    .annotation-editor-btn{background:#f5f5f7;border:1px solid #d7d7d7;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;min-width:30px;display:inline-flex;align-items:center;justify-content:center;}
+    .annotation-editor-btn:hover{background:#eaeaea;}
+    .annotation-color-input{width:28px;height:28px;border:1px solid #d7d7d7;border-radius:4px;padding:0;background:#fff;cursor:pointer;}
+    .annotation-editor{width:100%;min-height:0;flex:1;padding:24px;border:2px solid #ddd;border-radius:6px;font-size:14px;font-family:inherit;line-height:1.7;background:#fff;overflow-y:scroll;white-space:pre-wrap;box-sizing:border-box;scrollbar-gutter:stable;}
+    .annotation-modal-body{position:relative;display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;}
+    .annotation-editor:focus{outline:none;border-color:#667eea;box-shadow:0 0 0 3px rgba(102,126,234,0.15);}
+    .annotation-editor.preview{background:#f9f9f9;}
     .annotation-editor sup{font-size:0.8em;vertical-align:super;}
     .annotation-editor sub{font-size:0.8em;vertical-align:sub;}
-    .annotation-editor-toolbar{display:flex;gap:8px;margin:0 0 10px 0;}
-    .annotation-editor-btn{background:#f0f0f0;border:1px solid #ddd;padding:6px 10px;border-radius:4px;cursor:pointer;font-size:13px;line-height:1;}
-    .annotation-editor-btn:hover{background:#e6e6e6;}
-    .annotation-editor{width:100%;min-height:300px;max-height:70vh;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;background:#f9f9f9;overflow-y:auto;}
-    .annotation-editor:focus{outline:none;border-color:#667eea;background:#fff;}
-    .annotation-editor sup{font-size:0.8em;vertical-align:super;}
-    .annotation-editor sub{font-size:0.8em;vertical-align:sub;}
+    .annotation-editor table.annotation-table{border-collapse:collapse;width:100%;margin:8px 0;}
+    .annotation-editor table.annotation-table td,.annotation-editor table.annotation-table th{border:1px solid #d5d5d5;padding:6px 8px;font-size:13px;}
+    .annotation-editor .annotation-code-block{background:#f4f6f8;border:1px solid #d9e1ea;border-radius:4px;padding:8px;font-family:Consolas,Monaco,monospace;font-size:12px;white-space:pre-wrap;}
+    .annotation-bookmark{background:#fff7e6;border:1px solid #ffe2a8;border-radius:4px;padding:2px 6px;font-size:12px;color:#7a4b00;display:inline-flex;align-items:center;gap:4px;}
+    .annotation-code-view{font-family:Consolas,Monaco,monospace;padding:24px;box-sizing:border-box;}
+    .annotation-editor-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding-top:14px;border-top:2px solid #e0e0e0;flex-shrink:0;}
+    .annotation-editor-stats{display:flex;align-items:center;gap:12px;font-size:12px;color:#666;}
+    .annotation-word-count{font-weight:600;color:#333;}
+    .annotation-lang-indicator{padding:3px 8px;border-radius:12px;background:#eef2ff;color:#3f51b5;font-weight:600;font-size:11px;letter-spacing:.4px;}
+    .annotation-editor-actions{display:flex;align-items:center;gap:10px;}
     .line-editor-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:15px;padding-top:15px;border-top:1px solid #e0e0e0;}
     .line {
       padding: 8px 12px;
@@ -465,9 +556,6 @@ HTML_TEMPLATE = """
         <button id="generateXmlBtn" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;">
           📄 Сгенерировать XML
         </button>
-        <a href="/pdf-select" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; background: rgba(255,255,255,0.2); color: white; border: 1px solid rgba(255,255,255,0.3); transition: all 0.2s; display: inline-block;">
-          📄 Выделение областей в PDF
-        </a>
       </div>
     </div>
     <div class="content">
@@ -478,7 +566,7 @@ HTML_TEMPLATE = """
           <button type="submit" class="btn-primary">Загрузить ZIP</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
         </form>
-        <div class="upload-help">Загрузите ZIP без папок внутри. Имя архива: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code>. В архиве должны быть PDF статей выпуска. Дополнительно можно загрузить файлы верстки в формате DOCX или RTF с теми же именами, что и PDF статьи, либо общий файл выпуска в формате DOCX/RTF с именем <code>full_issue</code>.</div>
+        <div class="upload-help">Загрузите ZIP без папок внутри. Имя архива: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code>. В архиве должны быть PDF статей выпуска. Дополнительно можно загрузить файлы верстки в формате DOCX/RTF/HTML/IDML с теми же именами, что и PDF статьи, либо общий файл выпуска в формате DOCX/RTF/HTML/IDML с именем <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.html</code>).</div>
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
           <button type="button" id="processArchiveBtn" class="btn-primary" disabled>Обработать архив</button>
           <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
@@ -653,7 +741,7 @@ HTML_TEMPLATE = """
         
         <!-- Модальные окна для формы -->
         <div id="refsModal" class="modal">
-          <div class="modal-content" id="refsModalContent">
+          <div class="modal-content resizable refs-modal-content" id="refsModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
             <div class="modal-header">
               <h2 id="modalTitle">Список литературы</h2>
               <div class="modal-header-actions">
@@ -670,7 +758,7 @@ HTML_TEMPLATE = """
         </div>
         
         <div id="annotationModal" class="modal">
-          <div class="modal-content" id="annotationModalContent">
+          <div class="modal-content resizable annotation-modal-content" id="annotationModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
             <div class="modal-header">
               <h2 id="annotationModalTitle">Аннотация</h2>
               <div class="modal-header-actions">
@@ -678,21 +766,114 @@ HTML_TEMPLATE = """
                 <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
               </div>
             </div>
+            <div class="annotation-modal-body">
             <div class="annotation-editor-toolbar">
-              <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
-              <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
+              <div class="annotation-toolbar-row">
+                <select id="annotationStyleSelect" class="annotation-select" data-action="format-block" title="Стили абзаца">
+                  <option value="p">Normal</option>
+                  <option value="h1">Heading 1</option>
+                  <option value="h2">Heading 2</option>
+                  <option value="h3">Heading 3</option>
+                </select>
+                <select id="annotationFontSelect" class="annotation-select" data-action="font-name" title="Шрифт">
+                  <option value="">Шрифт</option>
+                  <option value="Times New Roman">Times New Roman</option>
+                  <option value="Arial">Arial</option>
+                  <option value="Calibri">Calibri</option>
+                  <option value="Georgia">Georgia</option>
+                  <option value="Cambria">Cambria</option>
+                </select>
+                <select id="annotationFontSizeSelect" class="annotation-select" data-action="font-size" title="Размер">
+                  <option value="">Размер</option>
+                  <option value="2">12</option>
+                  <option value="3">14</option>
+                  <option value="4">16</option>
+                  <option value="5">18</option>
+                  <option value="6">24</option>
+                </select>
+                <span class="annotation-divider"></span>
+                <button type="button" class="annotation-editor-btn" data-action="bold" tabindex="-1" title="Полужирный"><strong>B</strong></button>
+                <button type="button" class="annotation-editor-btn" data-action="italic" tabindex="-1" title="Курсив"><em>I</em></button>
+                <button type="button" class="annotation-editor-btn" data-action="strike" tabindex="-1" title="Зачёркнутый"><span style="text-decoration:line-through;">S</span></button>
+                <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
+                <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
+                <input type="color" class="annotation-color-input" data-action="text-color" title="Цвет текста" value="#1f1f1f">
+                <input type="color" class="annotation-color-input" data-action="highlight-color" title="Маркер" value="#fff3a3">
+                <span class="annotation-divider"></span>
+                <button type="button" class="annotation-editor-btn" data-action="align-left" tabindex="-1" title="По левому краю">≡</button>
+                <button type="button" class="annotation-editor-btn" data-action="align-center" tabindex="-1" title="По центру">≡</button>
+                <button type="button" class="annotation-editor-btn" data-action="align-right" tabindex="-1" title="По правому краю">≡</button>
+                <button type="button" class="annotation-editor-btn" data-action="align-justify" tabindex="-1" title="По ширине">≡</button>
+                <button type="button" class="annotation-editor-btn" data-action="unordered-list" tabindex="-1" title="Маркированный список">•⋯</button>
+                <button type="button" class="annotation-editor-btn" data-action="ordered-list" tabindex="-1" title="Нумерованный список">1.</button>
+                <button type="button" class="annotation-editor-btn" data-action="link" tabindex="-1" title="Ссылка">🔗</button>
+                <button type="button" class="annotation-editor-btn" data-action="bookmark" tabindex="-1" title="Закладка">🔖</button>
+              </div>
+              <div class="annotation-toolbar-row">
+                <span class="annotation-toolbar-label">Вставка:</span>
+                <button type="button" class="annotation-editor-btn" data-action="insert-table" tabindex="-1" title="Таблица">▦</button>
+                <button type="button" class="annotation-editor-btn" data-action="insert-image" tabindex="-1" title="Изображение">🖼</button>
+                <button type="button" class="annotation-editor-btn" data-action="insert-video" tabindex="-1" title="Видео">▶</button>
+                <button type="button" class="annotation-editor-btn" data-action="insert-code" tabindex="-1" title="Вставка кода">&lt;/&gt;</button>
+                <button type="button" class="annotation-editor-btn" data-action="toggle-symbols-panel" tabindex="-1" title="Специальные символы" onclick="toggleAnnotationSymbolsPanel()">Ω</button>
+                <button type="button" class="annotation-editor-btn" data-action="toggle-preview" tabindex="-1" title="Просмотр">👁</button>
+                <button type="button" class="annotation-editor-btn" data-action="toggle-fullscreen" tabindex="-1" title="Полноэкранный режим">⛶</button>
+                <button type="button" class="annotation-editor-btn" data-action="toggle-code-view" tabindex="-1" title="HTML / Code View">HTML</button>
+                <button type="button" class="annotation-editor-btn" data-action="insert-latex" tabindex="-1" title="LaTeX">LaTeX</button>
+                <button type="button" class="annotation-editor-btn" data-action="insert-formula" tabindex="-1" title="Формула">Σ</button>
+              </div>
             </div>
-            <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false"></div>
-            <textarea id="annotationModalTextarea" class="line-editor-textarea" style="display:none;"></textarea>
-            <div class="modal-footer">
-              <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
-              <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
+            <div id="annotationSymbolsPanel" class="annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
+              <div class="annotation-symbols-header">
+                <input id="annotationSymbolsSearch" class="annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, degree, ≤" autocomplete="off">
+                <select id="annotationSymbolsCategory" class="annotation-symbols-category">
+                  <option value="all">Все</option>
+                  <option value="greek">Греческий</option>
+                  <option value="math">Математика</option>
+                  <option value="arrows">Стрелки</option>
+                  <option value="indices">Индексы</option>
+                  <option value="units">Единицы</option>
+                  <option value="currency">Валюты</option>
+                  <option value="typography">Типографика</option>
+                  <option value="latin">Диакритика</option>
+                  <option value="other">Прочее</option>
+                </select>
+              </div>
+              <div class="annotation-symbols-toggles">
+                <label><input id="annotationSymbolsLatex" type="checkbox"> Как LaTeX</label>
+                <label><input id="annotationSymbolsAutoClose" type="checkbox" checked> Автозакрытие</label>
+              </div>
+              <div id="annotationSymbolsGrid" class="annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+              <div class="annotation-symbols-footer">
+                <div class="annotation-symbols-section">
+                  <span class="annotation-symbols-title">Недавние</span>
+                  <div id="annotationSymbolsRecent" class="annotation-symbols-recent"></div>
+                </div>
+                <div class="annotation-symbols-section">
+                  <span class="annotation-symbols-title">Избранное</span>
+                  <div id="annotationSymbolsFavorites" class="annotation-symbols-favorites"></div>
+                </div>
+                <div class="annotation-symbols-info">Вставится в позицию курсора.</div>
+              </div>
+            </div>
+            <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="true" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false" style="padding:24px;box-sizing:border-box;height:32vh;max-height:32vh;overflow-y:scroll;"></div>
+            <textarea id="annotationModalTextarea" class="line-editor-textarea annotation-code-view" style="display:none;"></textarea>
+            <div class="annotation-editor-footer">
+              <div class="annotation-editor-stats">
+                <span id="annotationWordCount" class="annotation-word-count">СЛОВ: 0</span>
+                <span id="annotationLangIndicator" class="annotation-lang-indicator">RU</span>
+              </div>
+              <div class="annotation-editor-actions">
+                <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
+                <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
+              </div>
+            </div>
             </div>
           </div>
         </div>
         
         <div id="lineCopyModal" class="line-editor-modal">
-          <div class="line-editor-content">
+          <div class="line-editor-content resizable" style="resize:both;overflow:auto;min-width:320px;min-height:200px;">
             <div class="line-editor-header">
               <h2>Копирование строки</h2>
               <button class="modal-close" data-action="close-copy">&times;</button>
@@ -764,6 +945,24 @@ HTML_TEMPLATE = """
           modal.classList.add("active");
         }
         
+        function syncReferencesField() {
+          if (!currentRefsFieldId) return;
+          const field = document.getElementById(currentRefsFieldId);
+          if (!field) return;
+          const refItems = document.querySelectorAll("#refsList .ref-item");
+          const refs = Array.from(refItems)
+            .map(item => {
+              const textSpan = item.querySelector(".ref-text");
+              return textSpan ? textSpan.textContent.trim() : "";
+            })
+            .filter(ref => ref.length > 0);
+          field.value = refs.join("\n");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          if (window.updateReferencesCount) {
+            window.updateReferencesCount(currentRefsFieldId);
+          }
+        }
+
         function mergeWithNext(btn) {
           const refItem = btn.closest(".ref-item");
           if (!refItem) return;
@@ -782,16 +981,15 @@ HTML_TEMPLATE = """
             return;
           }
           
-          if (confirm(`Объединить источник ${refItem.querySelector(".ref-number")?.textContent.trim()} со следующим?\\n\\nТекущий: ${currentText.substring(0, 50)}...\\nСледующий: ${nextText.substring(0, 50)}...`)) {
-            const mergedText = currentText + " " + nextText;
-            const currentTextSpan = refItem.querySelector(".ref-text");
-            if (currentTextSpan) {
-              currentTextSpan.textContent = mergedText;
-            }
-            nextItem.remove();
-            renumberReferences();
-            updateMergeButtons();
+          const mergedText = currentText + " " + nextText;
+          const currentTextSpan = refItem.querySelector(".ref-text");
+          if (currentTextSpan) {
+            currentTextSpan.textContent = mergedText;
           }
+          nextItem.remove();
+          renumberReferences();
+          updateMergeButtons();
+          syncReferencesField();
         }
         
         function updateMergeButtons() {
@@ -854,6 +1052,10 @@ HTML_TEMPLATE = """
             .filter(ref => ref.length > 0);
           
           field.value = refs.join("\n");
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+          if (window.updateReferencesCount) {
+            window.updateReferencesCount(currentRefsFieldId);
+          }
           closeRefsModal();
           
           const notification = document.createElement("div");
@@ -1094,7 +1296,6 @@ function saveAnnotationSelection() {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return;
   const range = selection.getRangeAt(0);
-  if (range.collapsed) return;
   if (!editor.contains(range.commonAncestorContainer)) return;
 
   const start = computeOffset(editor, range.startContainer, range.startOffset);
@@ -1245,6 +1446,619 @@ function applyAnnotationFormat(action, rangeOverride) {
   saveAnnotationSelection();
 }
 
+function setAnnotationCodeView(enabled) {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (!editor || !textarea) return;
+  annotationCodeViewEnabled = enabled;
+  annotationPreviewEnabled = false;
+  editor.contentEditable = "true";
+  editor.classList.remove("preview");
+  if (enabled) {
+    textarea.value = editor.innerHTML;
+    textarea.style.display = "block";
+    editor.style.display = "none";
+  } else {
+    editor.innerHTML = textarea.value;
+    textarea.style.display = "none";
+    editor.style.display = "block";
+  }
+  updateAnnotationStats();
+  initAnnotationSymbolsPanel();
+}
+
+function toggleAnnotationPreview() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  annotationPreviewEnabled = !annotationPreviewEnabled;
+  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
+  editor.classList.toggle("preview", annotationPreviewEnabled);
+}
+
+function getAnnotationPlainText() {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (annotationCodeViewEnabled && textarea) {
+    return annotationHtmlToText(textarea.value || "");
+  }
+  if (editor) {
+    return annotationHtmlToText(editor.innerHTML || "");
+  }
+  return "";
+}
+
+function updateAnnotationStats() {
+  const countEl = document.getElementById("annotationWordCount");
+  const langEl = document.getElementById("annotationLangIndicator");
+  const modal = document.getElementById("annotationModal");
+  const fieldId = modal?.dataset?.fieldId || currentAnnotationFieldId;
+  if (langEl) {
+    langEl.textContent = fieldId === "annotation_en" ? "EN" : "RU";
+  }
+  const text = getAnnotationPlainText();
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean) : [];
+  if (countEl) {
+    countEl.textContent = `СЛОВ: ${words.length}`;
+  }
+}
+
+function getSelectionText() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return "";
+  return selection.toString();
+}
+
+function insertAnnotationHtml(html) {
+  document.execCommand("insertHTML", false, html);
+}
+
+function applyAnnotationCommand(action, value) {
+  if (!action) return;
+  if (action === "annotation-sup") {
+    applyAnnotationFormat("sup");
+    return;
+  }
+  if (action === "annotation-sub") {
+    applyAnnotationFormat("sub");
+    return;
+  }
+  const editor = document.getElementById("annotationModalEditor");
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  }
+  switch (action) {
+    case "bold":
+      document.execCommand("bold");
+      break;
+    case "italic":
+      document.execCommand("italic");
+      break;
+    case "strike":
+      document.execCommand("strikeThrough");
+      break;
+    case "align-left":
+      document.execCommand("justifyLeft");
+      break;
+    case "align-center":
+      document.execCommand("justifyCenter");
+      break;
+    case "align-right":
+      document.execCommand("justifyRight");
+      break;
+    case "align-justify":
+      document.execCommand("justifyFull");
+      break;
+    case "unordered-list":
+      document.execCommand("insertUnorderedList");
+      break;
+    case "ordered-list":
+      document.execCommand("insertOrderedList");
+      break;
+    case "text-color":
+      document.execCommand("foreColor", false, value);
+      break;
+    case "highlight-color":
+      document.execCommand("hiliteColor", false, value);
+      break;
+    case "format-block":
+      if (value) document.execCommand("formatBlock", false, value);
+      break;
+    case "font-name":
+      if (value) document.execCommand("fontName", false, value);
+      break;
+    case "font-size":
+      if (value) document.execCommand("fontSize", false, value);
+      break;
+    case "link": {
+      const url = prompt("Введите ссылку:", "https://");
+      if (!url) break;
+      const selected = getSelectionText();
+      if (selected) {
+        document.execCommand("createLink", false, url);
+      } else {
+        insertAnnotationHtml(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>`);
+      }
+      break;
+    }
+    case "bookmark": {
+      const name = prompt("Название закладки:");
+      if (!name) break;
+      insertAnnotationHtml(`<span class="annotation-bookmark">🔖 ${escapeHtml(name)}</span>`);
+      break;
+    }
+    case "insert-table": {
+      const rows = parseInt(prompt("Количество строк:", "2"), 10);
+      const cols = parseInt(prompt("Количество столбцов:", "2"), 10);
+      if (!rows || !cols) break;
+      let html = '<table class="annotation-table">';
+      for (let r = 0; r < rows; r += 1) {
+        html += "<tr>";
+        for (let c = 0; c < cols; c += 1) {
+          html += "<td>&nbsp;</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</table>";
+      insertAnnotationHtml(html);
+      break;
+    }
+    case "insert-image": {
+      const url = prompt("Ссылка на изображение:");
+      if (!url) break;
+      insertAnnotationHtml(`<img src="${escapeHtml(url)}" alt="image" style="max-width:100%;height:auto;">`);
+      break;
+    }
+    case "insert-video": {
+      const url = prompt("Ссылка на видео (iframe/url):");
+      if (!url) break;
+      insertAnnotationHtml(`<iframe src="${escapeHtml(url)}" frameborder="0" allowfullscreen style="width:100%;height:320px;"></iframe>`);
+      break;
+    }
+    case "insert-code": {
+      const selected = getSelectionText() || "код";
+      const escaped = escapeHtml(selected);
+      insertAnnotationHtml(`<pre class="annotation-code-block"><code>${escaped}</code></pre>`);
+      break;
+    }
+    case "toggle-symbols-panel":
+      toggleAnnotationSymbolsPanel();
+      break;
+    case "insert-latex": {
+      const latex = prompt("LaTeX формула:");
+      if (!latex) break;
+      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      break;
+    }
+    case "insert-formula": {
+      const formula = prompt("Формула:");
+      if (!formula) break;
+      document.execCommand("insertText", false, `∑ ${formula}`);
+      break;
+    }
+    case "toggle-preview":
+      toggleAnnotationPreview();
+      break;
+    case "toggle-fullscreen":
+      toggleAnnotationModalSize();
+      break;
+    case "toggle-code-view":
+      setAnnotationCodeView(!annotationCodeViewEnabled);
+      break;
+    default:
+      break;
+  }
+  updateAnnotationStats();
+}
+
+let annotationCodeViewEnabled = false;
+let annotationPreviewEnabled = false;
+
+function setAnnotationCodeView(enabled) {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (!editor || !textarea) return;
+  annotationCodeViewEnabled = enabled;
+  annotationPreviewEnabled = false;
+  editor.contentEditable = "true";
+  editor.classList.remove("preview");
+  if (enabled) {
+    textarea.value = editor.innerHTML;
+    textarea.style.display = "block";
+    editor.style.display = "none";
+  } else {
+    editor.innerHTML = textarea.value;
+    textarea.style.display = "none";
+    editor.style.display = "block";
+  }
+  updateAnnotationStats();
+}
+
+function toggleAnnotationPreview() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  annotationPreviewEnabled = !annotationPreviewEnabled;
+  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
+  editor.classList.toggle("preview", annotationPreviewEnabled);
+}
+
+function getAnnotationPlainText() {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (annotationCodeViewEnabled && textarea) {
+    return annotationHtmlToText(textarea.value || "");
+  }
+  if (editor) {
+    return annotationHtmlToText(editor.innerHTML || "");
+  }
+  return "";
+}
+
+function updateAnnotationStats() {
+  const countEl = document.getElementById("annotationWordCount");
+  const langEl = document.getElementById("annotationLangIndicator");
+  const modal = document.getElementById("annotationModal");
+  const fieldId = modal?.dataset?.fieldId || currentAnnotationFieldId;
+  if (langEl) {
+    langEl.textContent = fieldId === "annotation_en" ? "EN" : "RU";
+  }
+  const text = getAnnotationPlainText();
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean) : [];
+  if (countEl) {
+    countEl.textContent = `СЛОВ: ${words.length}`;
+  }
+}
+
+function getSelectionText() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return "";
+  return selection.toString();
+}
+
+function insertAnnotationHtml(html) {
+  document.execCommand("insertHTML", false, html);
+}
+
+function applyAnnotationCommand(action, value) {
+  if (!action) return;
+  if (action === "annotation-sup") {
+    applyAnnotationFormat("sup");
+    return;
+  }
+  if (action === "annotation-sub") {
+    applyAnnotationFormat("sub");
+    return;
+  }
+  const editor = document.getElementById("annotationModalEditor");
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  }
+  switch (action) {
+    case "bold":
+      document.execCommand("bold");
+      break;
+    case "italic":
+      document.execCommand("italic");
+      break;
+    case "strike":
+      document.execCommand("strikeThrough");
+      break;
+    case "align-left":
+      document.execCommand("justifyLeft");
+      break;
+    case "align-center":
+      document.execCommand("justifyCenter");
+      break;
+    case "align-right":
+      document.execCommand("justifyRight");
+      break;
+    case "align-justify":
+      document.execCommand("justifyFull");
+      break;
+    case "unordered-list":
+      document.execCommand("insertUnorderedList");
+      break;
+    case "ordered-list":
+      document.execCommand("insertOrderedList");
+      break;
+    case "text-color":
+      document.execCommand("foreColor", false, value);
+      break;
+    case "highlight-color":
+      document.execCommand("hiliteColor", false, value);
+      break;
+    case "format-block":
+      if (value) document.execCommand("formatBlock", false, value);
+      break;
+    case "font-name":
+      if (value) document.execCommand("fontName", false, value);
+      break;
+    case "font-size":
+      if (value) document.execCommand("fontSize", false, value);
+      break;
+    case "link": {
+      const url = prompt("Введите ссылку:", "https://");
+      if (!url) break;
+      const selected = getSelectionText();
+      if (selected) {
+        document.execCommand("createLink", false, url);
+      } else {
+        insertAnnotationHtml(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>`);
+      }
+      break;
+    }
+    case "bookmark": {
+      const name = prompt("Название закладки:");
+      if (!name) break;
+      insertAnnotationHtml(`<span class="annotation-bookmark">🔖 ${escapeHtml(name)}</span>`);
+      break;
+    }
+    case "insert-table": {
+      const rows = parseInt(prompt("Количество строк:", "2"), 10);
+      const cols = parseInt(prompt("Количество столбцов:", "2"), 10);
+      if (!rows || !cols) break;
+      let html = '<table class="annotation-table">';
+      for (let r = 0; r < rows; r += 1) {
+        html += "<tr>";
+        for (let c = 0; c < cols; c += 1) {
+          html += "<td>&nbsp;</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</table>";
+      insertAnnotationHtml(html);
+      break;
+    }
+    case "insert-image": {
+      const url = prompt("Ссылка на изображение:");
+      if (!url) break;
+      insertAnnotationHtml(`<img src="${escapeHtml(url)}" alt="image" style="max-width:100%;height:auto;">`);
+      break;
+    }
+    case "insert-video": {
+      const url = prompt("Ссылка на видео (iframe/url):");
+      if (!url) break;
+      insertAnnotationHtml(`<iframe src="${escapeHtml(url)}" frameborder="0" allowfullscreen style="width:100%;height:320px;"></iframe>`);
+      break;
+    }
+    case "insert-code": {
+      const selected = getSelectionText() || "код";
+      const escaped = escapeHtml(selected);
+      insertAnnotationHtml(`<pre class="annotation-code-block"><code>${escaped}</code></pre>`);
+      break;
+    }
+    case "toggle-symbols-panel":
+      toggleAnnotationSymbolsPanel();
+      break;
+    case "insert-latex": {
+      const latex = prompt("LaTeX формула:");
+      if (!latex) break;
+      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      break;
+    }
+    case "insert-formula": {
+      const formula = prompt("Формула:");
+      if (!formula) break;
+      document.execCommand("insertText", false, `∑ ${formula}`);
+      break;
+    }
+    case "toggle-preview":
+      toggleAnnotationPreview();
+      break;
+    case "toggle-fullscreen":
+      toggleAnnotationModalSize();
+      break;
+    case "toggle-code-view":
+      setAnnotationCodeView(!annotationCodeViewEnabled);
+      break;
+    default:
+      break;
+  }
+  updateAnnotationStats();
+}
+
+function setAnnotationCodeView(enabled) {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (!editor || !textarea) return;
+  annotationCodeViewEnabled = enabled;
+  annotationPreviewEnabled = false;
+  editor.contentEditable = "true";
+  editor.classList.remove("preview");
+  if (enabled) {
+    textarea.value = editor.innerHTML;
+    textarea.style.display = "block";
+    editor.style.display = "none";
+  } else {
+    editor.innerHTML = textarea.value;
+    textarea.style.display = "none";
+    editor.style.display = "block";
+  }
+  updateAnnotationStats();
+}
+
+function toggleAnnotationPreview() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  annotationPreviewEnabled = !annotationPreviewEnabled;
+  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
+  editor.classList.toggle("preview", annotationPreviewEnabled);
+}
+
+function getAnnotationPlainText() {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (annotationCodeViewEnabled && textarea) {
+    return annotationHtmlToText(textarea.value || "");
+  }
+  if (editor) {
+    return annotationHtmlToText(editor.innerHTML || "");
+  }
+  return "";
+}
+
+function updateAnnotationStats() {
+  const countEl = document.getElementById("annotationWordCount");
+  const langEl = document.getElementById("annotationLangIndicator");
+  const modal = document.getElementById("annotationModal");
+  const fieldId = modal?.dataset?.fieldId || currentAnnotationFieldId;
+  if (langEl) {
+    langEl.textContent = fieldId === "annotation_en" ? "EN" : "RU";
+  }
+  const text = getAnnotationPlainText();
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean) : [];
+  if (countEl) {
+    countEl.textContent = `СЛОВ: ${words.length}`;
+  }
+}
+
+function getSelectionText() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return "";
+  return selection.toString();
+}
+
+function insertAnnotationHtml(html) {
+  document.execCommand("insertHTML", false, html);
+}
+
+function applyAnnotationCommand(action, value) {
+  if (!action) return;
+  if (action === "annotation-sup") {
+    applyAnnotationFormat("sup");
+    return;
+  }
+  if (action === "annotation-sub") {
+    applyAnnotationFormat("sub");
+    return;
+  }
+  const editor = document.getElementById("annotationModalEditor");
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  }
+  switch (action) {
+    case "bold":
+      document.execCommand("bold");
+      break;
+    case "italic":
+      document.execCommand("italic");
+      break;
+    case "strike":
+      document.execCommand("strikeThrough");
+      break;
+    case "align-left":
+      document.execCommand("justifyLeft");
+      break;
+    case "align-center":
+      document.execCommand("justifyCenter");
+      break;
+    case "align-right":
+      document.execCommand("justifyRight");
+      break;
+    case "align-justify":
+      document.execCommand("justifyFull");
+      break;
+    case "unordered-list":
+      document.execCommand("insertUnorderedList");
+      break;
+    case "ordered-list":
+      document.execCommand("insertOrderedList");
+      break;
+    case "text-color":
+      document.execCommand("foreColor", false, value);
+      break;
+    case "highlight-color":
+      document.execCommand("hiliteColor", false, value);
+      break;
+    case "format-block":
+      if (value) document.execCommand("formatBlock", false, value);
+      break;
+    case "font-name":
+      if (value) document.execCommand("fontName", false, value);
+      break;
+    case "font-size":
+      if (value) document.execCommand("fontSize", false, value);
+      break;
+    case "link": {
+      const url = prompt("Введите ссылку:", "https://");
+      if (!url) break;
+      const selected = getSelectionText();
+      if (selected) {
+        document.execCommand("createLink", false, url);
+      } else {
+        insertAnnotationHtml(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>`);
+      }
+      break;
+    }
+    case "bookmark": {
+      const name = prompt("Название закладки:");
+      if (!name) break;
+      insertAnnotationHtml(`<span class="annotation-bookmark">🔖 ${escapeHtml(name)}</span>`);
+      break;
+    }
+    case "insert-table": {
+      const rows = parseInt(prompt("Количество строк:", "2"), 10);
+      const cols = parseInt(prompt("Количество столбцов:", "2"), 10);
+      if (!rows || !cols) break;
+      let html = '<table class="annotation-table">';
+      for (let r = 0; r < rows; r += 1) {
+        html += "<tr>";
+        for (let c = 0; c < cols; c += 1) {
+          html += "<td>&nbsp;</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</table>";
+      insertAnnotationHtml(html);
+      break;
+    }
+    case "insert-image": {
+      const url = prompt("Ссылка на изображение:");
+      if (!url) break;
+      insertAnnotationHtml(`<img src="${escapeHtml(url)}" alt="image" style="max-width:100%;height:auto;">`);
+      break;
+    }
+    case "insert-video": {
+      const url = prompt("Ссылка на видео (iframe/url):");
+      if (!url) break;
+      insertAnnotationHtml(`<iframe src="${escapeHtml(url)}" frameborder="0" allowfullscreen style="width:100%;height:320px;"></iframe>`);
+      break;
+    }
+    case "insert-code": {
+      const selected = getSelectionText() || "код";
+      const escaped = escapeHtml(selected);
+      insertAnnotationHtml(`<pre class="annotation-code-block"><code>${escaped}</code></pre>`);
+      break;
+    }
+    case "toggle-symbols-panel":
+      toggleAnnotationSymbolsPanel();
+      break;
+    case "insert-latex": {
+      const latex = prompt("LaTeX формула:");
+      if (!latex) break;
+      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      break;
+    }
+    case "insert-formula": {
+      const formula = prompt("Формула:");
+      if (!formula) break;
+      document.execCommand("insertText", false, `∑ ${formula}`);
+      break;
+    }
+    case "toggle-preview":
+      toggleAnnotationPreview();
+      break;
+    case "toggle-fullscreen":
+      toggleAnnotationModalSize();
+      break;
+    case "toggle-code-view":
+      setAnnotationCodeView(!annotationCodeViewEnabled);
+      break;
+    default:
+      break;
+  }
+  updateAnnotationStats();
+}
+
 
 
 
@@ -1271,34 +2085,319 @@ if (!window.__annotationEditorMouseDownAdded) {
     if (!button) return;
     event.preventDefault();
     event.stopPropagation();
-    const action = button.getAttribute("data-action") === "annotation-sup" ? "sup" : "sub";
-    const editor = document.getElementById("annotationModalEditor");
-    let range = null;
-    const selection = window.getSelection();
-    if (editor && selection && selection.rangeCount) {
-      const candidate = selection.getRangeAt(0);
-      if (!candidate.collapsed && editor.contains(candidate.commonAncestorContainer)) {
-        range = candidate.cloneRange();
-      }
-    }
-    applyAnnotationFormat(action, range);
+    const action = button.getAttribute("data-action");
+    applyAnnotationCommand(action);
   };
   document.addEventListener("pointerdown", handler, true);
   document.addEventListener("mousedown", handler, true);
   window.__annotationEditorMouseDownAdded = true;
 }
 if (!window.__annotationEditorHandlersAdded) {
-  document.addEventListener("click", (event) => {
-    const button = event.target.closest(".annotation-editor-btn");
-    if (!button) return;
-    const action = button.getAttribute("data-action");
-    if (action === "annotation-sup") {
-      applyAnnotationFormat("sup");
-    } else if (action === "annotation-sub") {
-      applyAnnotationFormat("sub");
+  document.addEventListener("change", (event) => {
+    const select = event.target.closest(".annotation-select");
+    if (select) {
+      applyAnnotationCommand(select.getAttribute("data-action"), select.value);
+      return;
+    }
+    const color = event.target.closest(".annotation-color-input");
+    if (color) {
+      applyAnnotationCommand(color.getAttribute("data-action"), color.value);
+    }
+  });
+  document.addEventListener("input", (event) => {
+    const editor = event.target.closest("#annotationModalEditor");
+    const textarea = event.target.closest("#annotationModalTextarea");
+    if (editor || textarea) {
+      updateAnnotationStats();
     }
   });
   window.__annotationEditorHandlersAdded = true;
+}
+
+function ensureAnnotationSymbolsData() {
+  if (window.__annotationSymbolsData) return;
+  window.__annotationSymbolsData = [
+    { id: "alpha", char: "α", name_ru: "альфа", name_en: "alpha", codepoint: "U+03B1", category: "greek", aliases: ["alpha", "альфа"], latex: "\\alpha" },
+    { id: "beta", char: "β", name_ru: "бета", name_en: "beta", codepoint: "U+03B2", category: "greek", aliases: ["beta", "бета"], latex: "\\beta" },
+    { id: "gamma", char: "γ", name_ru: "гамма", name_en: "gamma", codepoint: "U+03B3", category: "greek", aliases: ["gamma", "гамма"], latex: "\\gamma" },
+    { id: "delta", char: "δ", name_ru: "дельта", name_en: "delta", codepoint: "U+03B4", category: "greek", aliases: ["delta", "дельта"], latex: "\\delta" },
+    { id: "epsilon", char: "ε", name_ru: "эпсилон", name_en: "epsilon", codepoint: "U+03B5", category: "greek", aliases: ["epsilon", "эпсилон"], latex: "\\epsilon" },
+    { id: "theta", char: "θ", name_ru: "тета", name_en: "theta", codepoint: "U+03B8", category: "greek", aliases: ["theta", "тета"], latex: "\\theta" },
+    { id: "lambda", char: "λ", name_ru: "лямбда", name_en: "lambda", codepoint: "U+03BB", category: "greek", aliases: ["lambda", "лямбда"], latex: "\\lambda" },
+    { id: "mu", char: "μ", name_ru: "мю", name_en: "mu", codepoint: "U+03BC", category: "greek", aliases: ["mu", "micro", "мю"], latex: "\\mu" },
+    { id: "pi", char: "π", name_ru: "пи", name_en: "pi", codepoint: "U+03C0", category: "greek", aliases: ["pi", "пи"], latex: "\\pi" },
+    { id: "sigma", char: "σ", name_ru: "сигма", name_en: "sigma", codepoint: "U+03C3", category: "greek", aliases: ["sigma", "сигма"], latex: "\\sigma" },
+    { id: "phi", char: "φ", name_ru: "фи", name_en: "phi", codepoint: "U+03C6", category: "greek", aliases: ["phi", "фи"], latex: "\\phi" },
+    { id: "psi", char: "ψ", name_ru: "пси", name_en: "psi", codepoint: "U+03C8", category: "greek", aliases: ["psi", "пси"], latex: "\\psi" },
+    { id: "omega", char: "ω", name_ru: "омега", name_en: "omega", codepoint: "U+03C9", category: "greek", aliases: ["omega", "омега"], latex: "\\omega" },
+    { id: "Omega", char: "Ω", name_ru: "омега (верхн.)", name_en: "Omega", codepoint: "U+03A9", category: "greek", aliases: ["omega", "омега"], latex: "\\Omega" },
+    { id: "plusminus", char: "±", name_ru: "плюс-минус", name_en: "plus-minus", codepoint: "U+00B1", category: "math", aliases: ["plusminus", "+-"], latex: "\\pm" },
+    { id: "times", char: "×", name_ru: "умножить", name_en: "times", codepoint: "U+00D7", category: "math", aliases: ["times", "multiply"], latex: "\\times" },
+    { id: "divide", char: "÷", name_ru: "деление", name_en: "divide", codepoint: "U+00F7", category: "math", aliases: ["divide"], latex: "\\div" },
+    { id: "leq", char: "≤", name_ru: "меньше либо равно", name_en: "leq", codepoint: "U+2264", category: "math", aliases: ["leq", "<="], latex: "\\leq" },
+    { id: "geq", char: "≥", name_ru: "больше либо равно", name_en: "geq", codepoint: "U+2265", category: "math", aliases: ["geq", ">="], latex: "\\geq" },
+    { id: "neq", char: "≠", name_ru: "не равно", name_en: "not equal", codepoint: "U+2260", category: "math", aliases: ["neq", "!="], latex: "\\neq" },
+    { id: "approx", char: "≈", name_ru: "примерно", name_en: "approx", codepoint: "U+2248", category: "math", aliases: ["approx"], latex: "\\approx" },
+    { id: "infty", char: "∞", name_ru: "бесконечность", name_en: "infinity", codepoint: "U+221E", category: "math", aliases: ["infty", "infinity"], latex: "\\infty" },
+    { id: "sum", char: "∑", name_ru: "сумма", name_en: "sum", codepoint: "U+2211", category: "math", aliases: ["sum"], latex: "\\sum" },
+    { id: "prod", char: "∏", name_ru: "произведение", name_en: "prod", codepoint: "U+220F", category: "math", aliases: ["prod"], latex: "\\prod" },
+    { id: "sqrt", char: "√", name_ru: "корень", name_en: "sqrt", codepoint: "U+221A", category: "math", aliases: ["sqrt"], latex: "\\sqrt{}" },
+    { id: "int", char: "∫", name_ru: "интеграл", name_en: "integral", codepoint: "U+222B", category: "math", aliases: ["integral"], latex: "\\int" },
+    { id: "partial", char: "∂", name_ru: "частная производная", name_en: "partial", codepoint: "U+2202", category: "math", aliases: ["partial"], latex: "\\partial" },
+    { id: "nabla", char: "∇", name_ru: "набла", name_en: "nabla", codepoint: "U+2207", category: "math", aliases: ["nabla"], latex: "\\nabla" },
+    { id: "arrow_left", char: "←", name_ru: "стрелка влево", name_en: "left arrow", codepoint: "U+2190", category: "arrows", aliases: ["left", "arrow"], latex: "\\leftarrow" },
+    { id: "arrow_right", char: "→", name_ru: "стрелка вправо", name_en: "right arrow", codepoint: "U+2192", category: "arrows", aliases: ["right", "arrow"], latex: "\\rightarrow" },
+    { id: "arrow_up", char: "↑", name_ru: "стрелка вверх", name_en: "up arrow", codepoint: "U+2191", category: "arrows", aliases: ["up", "arrow"], latex: "\\uparrow" },
+    { id: "arrow_down", char: "↓", name_ru: "стрелка вниз", name_en: "down arrow", codepoint: "U+2193", category: "arrows", aliases: ["down", "arrow"], latex: "\\downarrow" },
+    { id: "arrow_lr", char: "↔", name_ru: "двунаправленная", name_en: "leftright arrow", codepoint: "U+2194", category: "arrows", aliases: ["leftright", "arrow"], latex: "\\leftrightarrow" },
+    { id: "sup1", char: "¹", name_ru: "верхний 1", name_en: "superscript 1", codepoint: "U+00B9", category: "indices", aliases: ["superscript", "1"] },
+    { id: "sup2", char: "²", name_ru: "верхний 2", name_en: "superscript 2", codepoint: "U+00B2", category: "indices", aliases: ["superscript", "2"] },
+    { id: "sup3", char: "³", name_ru: "верхний 3", name_en: "superscript 3", codepoint: "U+00B3", category: "indices", aliases: ["superscript", "3"] },
+    { id: "sub1", char: "₁", name_ru: "нижний 1", name_en: "subscript 1", codepoint: "U+2081", category: "indices", aliases: ["subscript", "1"] },
+    { id: "sub2", char: "₂", name_ru: "нижний 2", name_en: "subscript 2", codepoint: "U+2082", category: "indices", aliases: ["subscript", "2"] },
+    { id: "sub3", char: "₃", name_ru: "нижний 3", name_en: "subscript 3", codepoint: "U+2083", category: "indices", aliases: ["subscript", "3"] },
+    { id: "degree", char: "°", name_ru: "градус", name_en: "degree", codepoint: "U+00B0", category: "units", aliases: ["degree"], latex: "^\\circ" },
+    { id: "permil", char: "‰", name_ru: "промилле", name_en: "per mille", codepoint: "U+2030", category: "units", aliases: ["permil"], latex: "\\permil" },
+    { id: "angstrom", char: "Å", name_ru: "ангстрем", name_en: "angstrom", codepoint: "U+00C5", category: "units", aliases: ["angstrom"], latex: "\\AA" },
+    { id: "celsius", char: "℃", name_ru: "цельсий", name_en: "celsius", codepoint: "U+2103", category: "units", aliases: ["celsius"] },
+    { id: "euro", char: "€", name_ru: "евро", name_en: "euro", codepoint: "U+20AC", category: "currency", aliases: ["euro"] },
+    { id: "ruble", char: "₽", name_ru: "рубль", name_en: "ruble", codepoint: "U+20BD", category: "currency", aliases: ["ruble", "рубль"] },
+    { id: "pound", char: "£", name_ru: "фунт", name_en: "pound", codepoint: "U+00A3", category: "currency", aliases: ["pound"] },
+    { id: "yen", char: "¥", name_ru: "иена", name_en: "yen", codepoint: "U+00A5", category: "currency", aliases: ["yen"] },
+    { id: "emdash", char: "—", name_ru: "длинное тире", name_en: "em dash", codepoint: "U+2014", category: "typography", aliases: ["emdash"] },
+    { id: "endash", char: "–", name_ru: "короткое тире", name_en: "en dash", codepoint: "U+2013", category: "typography", aliases: ["endash"] },
+    { id: "laquo", char: "«", name_ru: "кавычки елочки", name_en: "guillemets", codepoint: "U+00AB", category: "typography", aliases: ["quotes"] },
+    { id: "raquo", char: "»", name_ru: "кавычки елочки", name_en: "guillemets", codepoint: "U+00BB", category: "typography", aliases: ["quotes"] },
+    { id: "ellipsis", char: "…", name_ru: "многоточие", name_en: "ellipsis", codepoint: "U+2026", category: "typography", aliases: ["ellipsis"] },
+    { id: "sect", char: "§", name_ru: "параграф", name_en: "section", codepoint: "U+00A7", category: "typography", aliases: ["section"] },
+    { id: "para", char: "¶", name_ru: "абзац", name_en: "paragraph", codepoint: "U+00B6", category: "typography", aliases: ["paragraph"] },
+    { id: "acute_e", char: "é", name_ru: "е с акутом", name_en: "e acute", codepoint: "U+00E9", category: "latin", aliases: ["e", "acute"] },
+    { id: "umlaut_u", char: "ü", name_ru: "у с умляутом", name_en: "u umlaut", codepoint: "U+00FC", category: "latin", aliases: ["u", "umlaut"] },
+    { id: "ring_a", char: "å", name_ru: "а с кружком", name_en: "a ring", codepoint: "U+00E5", category: "latin", aliases: ["a", "ring"] }
+  ];
+}
+
+function getAnnotationSymbolsStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function setAnnotationSymbolsStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {}
+}
+
+function getAnnotationSymbolsElements() {
+  return {
+    panel: document.getElementById("annotationSymbolsPanel"),
+    search: document.getElementById("annotationSymbolsSearch"),
+    category: document.getElementById("annotationSymbolsCategory"),
+    grid: document.getElementById("annotationSymbolsGrid"),
+    recent: document.getElementById("annotationSymbolsRecent"),
+    favorites: document.getElementById("annotationSymbolsFavorites"),
+    latexToggle: document.getElementById("annotationSymbolsLatex"),
+    autoCloseToggle: document.getElementById("annotationSymbolsAutoClose")
+  };
+}
+
+function renderAnnotationSymbolsPanel() {
+  ensureAnnotationSymbolsData();
+  const { search, category, grid } = getAnnotationSymbolsElements();
+  if (!search || !category || !grid) return;
+  const query = (search.value || "").trim().toLowerCase();
+  const selectedCategory = category.value || "all";
+  const favorites = new Set(getAnnotationSymbolsStorage("annotation_symbols_favorites", []));
+  const symbols = (window.__annotationSymbolsData || []).filter((item) => {
+    if (selectedCategory !== "all" && item.category !== selectedCategory) return false;
+    if (!query) return true;
+    const hay = [
+      item.char,
+      item.name_ru,
+      item.name_en,
+      item.codepoint,
+      item.category,
+      ...(item.aliases || []),
+      item.latex || ""
+    ].join(" ").toLowerCase();
+    return hay.includes(query);
+  });
+  grid.innerHTML = "";
+  symbols.forEach((item, index) => {
+    const cell = document.createElement("div");
+    cell.className = "annotation-symbol-cell";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "annotation-symbol-btn";
+    btn.dataset.symbolId = item.id;
+    btn.dataset.index = String(index);
+    btn.textContent = item.char;
+    btn.title = `${item.name_ru} (${item.codepoint})`;
+    btn.addEventListener("click", () => insertAnnotationSymbol(item));
+    const fav = document.createElement("button");
+    fav.type = "button";
+    fav.className = "annotation-symbol-fav" + (favorites.has(item.id) ? " active" : "");
+    fav.textContent = favorites.has(item.id) ? "★" : "☆";
+    fav.title = "В избранное";
+    fav.tabIndex = -1;
+    fav.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleAnnotationSymbolFavorite(item.id);
+    });
+    cell.appendChild(btn);
+    cell.appendChild(fav);
+    grid.appendChild(cell);
+  });
+  renderAnnotationSymbolsLists();
+}
+
+function renderAnnotationSymbolsLists() {
+  const { recent, favorites } = getAnnotationSymbolsElements();
+  if (!recent || !favorites) return;
+  const recentIds = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
+  const favoriteIds = getAnnotationSymbolsStorage("annotation_symbols_favorites", []);
+  recent.innerHTML = "";
+  favorites.innerHTML = "";
+  const data = window.__annotationSymbolsData || [];
+  recentIds.forEach((id) => {
+    const item = data.find((symbol) => symbol.id === id);
+    if (!item) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "annotation-symbol-chip";
+    chip.textContent = item.char;
+    chip.title = item.name_ru;
+    chip.addEventListener("click", () => insertAnnotationSymbol(item));
+    recent.appendChild(chip);
+  });
+  favoriteIds.forEach((id) => {
+    const item = data.find((symbol) => symbol.id === id);
+    if (!item) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "annotation-symbol-chip";
+    chip.textContent = item.char;
+    chip.title = item.name_ru;
+    chip.addEventListener("click", () => insertAnnotationSymbol(item));
+    favorites.appendChild(chip);
+  });
+}
+
+function toggleAnnotationSymbolFavorite(id) {
+  const current = new Set(getAnnotationSymbolsStorage("annotation_symbols_favorites", []));
+  if (current.has(id)) {
+    current.delete(id);
+  } else {
+    current.add(id);
+  }
+  setAnnotationSymbolsStorage("annotation_symbols_favorites", Array.from(current));
+  renderAnnotationSymbolsPanel();
+}
+
+function insertAnnotationSymbol(item) {
+  const editor = document.getElementById("annotationModalEditor");
+  const { latexToggle, autoCloseToggle, panel } = getAnnotationSymbolsElements();
+  if (!editor) return;
+  restoreAnnotationSelection();
+  editor.focus();
+  const useLatex = latexToggle && latexToggle.checked && item.latex;
+  const text = useLatex ? item.latex : item.char;
+  document.execCommand("insertText", false, text);
+  const recent = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
+  const filtered = recent.filter((id) => id !== item.id);
+  filtered.unshift(item.id);
+  setAnnotationSymbolsStorage("annotation_symbols_recent", filtered.slice(0, 20));
+  renderAnnotationSymbolsLists();
+  updateAnnotationStats();
+  if (autoCloseToggle && autoCloseToggle.checked && panel) {
+    closeAnnotationSymbolsPanel();
+  }
+  editor.focus();
+}
+
+function openAnnotationSymbolsPanel() {
+  const { panel, search } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  saveAnnotationSelection();
+  renderAnnotationSymbolsPanel();
+  panel.classList.add("active");
+  panel.style.display = "block";
+  panel.setAttribute("aria-hidden", "false");
+  if (search) {
+    search.focus();
+    search.select();
+  }
+}
+
+function closeAnnotationSymbolsPanel() {
+  const { panel } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  panel.classList.remove("active");
+  panel.style.display = "none";
+  panel.setAttribute("aria-hidden", "true");
+}
+
+function toggleAnnotationSymbolsPanel() {
+  const { panel } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  if (panel.classList.contains("active")) {
+    closeAnnotationSymbolsPanel();
+  } else {
+    openAnnotationSymbolsPanel();
+  }
+}
+
+function initAnnotationSymbolsPanel() {
+  if (window.__annotationSymbolsHandlersAdded) return;
+  window.__annotationSymbolsHandlersAdded = true;
+  const { panel, search, category, grid } = getAnnotationSymbolsElements();
+  if (search) search.addEventListener("input", renderAnnotationSymbolsPanel);
+  if (category) category.addEventListener("change", renderAnnotationSymbolsPanel);
+  document.addEventListener("mousedown", (event) => {
+    const target = event.target;
+    const button = target.closest("[data-action='toggle-symbols-panel']");
+    const panelEl = getAnnotationSymbolsElements().panel;
+    if (!panelEl || !panelEl.classList.contains("active")) return;
+    if (panelEl.contains(target) || button) return;
+    closeAnnotationSymbolsPanel();
+  });
+  document.addEventListener("keydown", (event) => {
+    const panelEl = getAnnotationSymbolsElements().panel;
+    if (!panelEl || !panelEl.classList.contains("active")) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeAnnotationSymbolsPanel();
+      document.getElementById("annotationModalEditor")?.focus();
+    }
+  });
+  if (grid) {
+    grid.addEventListener("keydown", (event) => {
+      const buttons = Array.from(grid.querySelectorAll(".annotation-symbol-btn"));
+      if (!buttons.length) return;
+      const active = document.activeElement;
+      const index = buttons.indexOf(active);
+      if (index === -1) return;
+      const columns = getComputedStyle(grid).gridTemplateColumns.split(" ").length || 8;
+      let nextIndex = index;
+      if (event.key === "ArrowRight") nextIndex = Math.min(buttons.length - 1, index + 1);
+      if (event.key === "ArrowLeft") nextIndex = Math.max(0, index - 1);
+      if (event.key === "ArrowDown") nextIndex = Math.min(buttons.length - 1, index + columns);
+      if (event.key === "ArrowUp") nextIndex = Math.max(0, index - columns);
+      if (nextIndex !== index) {
+        event.preventDefault();
+        buttons[nextIndex].focus();
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        buttons[index].click();
+      }
+    });
+  }
 }
 
 function viewAnnotation(fieldId, title) {
@@ -1318,8 +2417,17 @@ function viewAnnotation(fieldId, title) {
   modalTitle.textContent = title;
   modalEditor.innerHTML = annotationTextToHtml(annotationText);
   modal.dataset.fieldId = fieldId;
+  closeAnnotationSymbolsPanel();
   if (fieldId === "annotation" || fieldId === "annotation_en") {
     const lang = fieldId === "annotation_en" ? "en" : "ru";
+    const textarea = document.getElementById("annotationModalTextarea");
+    annotationCodeViewEnabled = false;
+    annotationPreviewEnabled = false;
+    if (textarea) textarea.style.display = "none";
+    modalEditor.style.display = "block";
+    modalEditor.contentEditable = "true";
+    modalEditor.classList.remove("preview");
+    modalEditor.lang = lang;
     const normalize = () => {
       const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
       modalEditor.innerHTML = annotationTextToHtml(cleaned);
@@ -1332,6 +2440,8 @@ function viewAnnotation(fieldId, title) {
     modalEditor.onpaste = null;
     modalEditor.onblur = null;
   }
+  updateAnnotationStats();
+  initAnnotationSymbolsPanel();
 
   modal.classList.add("active");
   setTimeout(() => {
@@ -1356,11 +2466,17 @@ function saveEditedAnnotation() {
 
   const field = document.getElementById(targetFieldId);
   const modalEditor = document.getElementById("annotationModalEditor");
+  const modalTextarea = document.getElementById("annotationModalTextarea");
 
   if (!field || !modalEditor) return;
 
-  const lang = targetFieldId === "annotation_en" ? "en" : "ru";
-  const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+  const html = annotationCodeViewEnabled && modalTextarea ? modalTextarea.value : modalEditor.innerHTML;
+  const rawText = annotationHtmlToText(html);
+  let cleaned = rawText;
+  if (targetFieldId === "annotation" || targetFieldId === "annotation_en") {
+    const lang = targetFieldId === "annotation_en" ? "en" : "ru";
+    cleaned = window.processAnnotation(rawText, lang);
+  }
   field.value = cleaned;
   closeAnnotationModal();
 
@@ -1387,6 +2503,8 @@ function closeAnnotationModal() {
               expandBtn.classList.remove("expanded");
             }
           }
+          annotationCodeViewEnabled = false;
+          annotationPreviewEnabled = false;
           currentAnnotationFieldId = null;
         }
         
@@ -1406,6 +2524,50 @@ function closeAnnotationModal() {
             }
           }
         }
+
+        function enableModalDragging(modalId, contentId) {
+          const modal = document.getElementById(modalId);
+          const content = document.getElementById(contentId);
+          if (!modal || !content) return;
+          const header = content.querySelector(".modal-header");
+          if (!header) return;
+          let isDragging = false;
+          let offsetX = 0;
+          let offsetY = 0;
+
+          const onMouseDown = (event) => {
+            if (event.button !== 0) return;
+            isDragging = true;
+            const rect = content.getBoundingClientRect();
+            offsetX = event.clientX - rect.left;
+            offsetY = event.clientY - rect.top;
+            content.style.position = "fixed";
+            content.style.margin = "0";
+            content.style.left = `${rect.left}px`;
+            content.style.top = `${rect.top}px`;
+          };
+
+          const onMouseMove = (event) => {
+            if (!isDragging) return;
+            const maxX = window.innerWidth - content.offsetWidth;
+            const maxY = window.innerHeight - content.offsetHeight;
+            const nextX = Math.min(Math.max(0, event.clientX - offsetX), Math.max(0, maxX));
+            const nextY = Math.min(Math.max(0, event.clientY - offsetY), Math.max(0, maxY));
+            content.style.left = `${nextX}px`;
+            content.style.top = `${nextY}px`;
+          };
+
+          const onMouseUp = () => {
+            isDragging = false;
+          };
+
+          header.addEventListener("mousedown", onMouseDown);
+          document.addEventListener("mousemove", onMouseMove);
+          document.addEventListener("mouseup", onMouseUp);
+        }
+
+        enableModalDragging("refsModal", "refsModalContent");
+        enableModalDragging("annotationModal", "annotationModalContent");
         
         function openCopyModal(text) {
           const modal = document.getElementById("lineCopyModal");
@@ -2496,7 +3658,8 @@ PDF_BBOX_TEMPLATE = """
 </html>
 """
 
-PDF_SELECT_TEMPLATE = """
+PDF_SELECT_TEMPLATE = ""  # Отключено, страница удалена
+"""
 <!DOCTYPE html>
 <html lang="ru">
 <head>
@@ -2611,7 +3774,7 @@ PDF_SELECT_TEMPLATE = """
       border-radius: 4px;
       overflow: auto;
       background: #e5e5e5;
-      max-height: 80vh;
+      max-height: 95vh;
       min-height: 600px;
     }
     #pdfViewer {
@@ -2851,21 +4014,12 @@ PDF_SELECT_TEMPLATE = """
     <div id="error" class="error" style="display: none;"></div>
 
     <div id="mainContent" class="main-content" style="display: none;">
-      <div class="pdf-panel">
+      <div id="pdfPanel" class="pdf-panel{% if view_mode != 'pdf' %} panel-hidden{% endif %}">
         <div class="pdf-viewer-container" id="pdfViewerContainer">
           <div id="pdfViewer"></div>
         </div>
       </div>
       <div class="results-panel">
-        <div class="instructions">
-          <h4>&#1048;&#1085;&#1089;&#1090;&#1088;&#1091;&#1082;&#1094;&#1080;&#1103;:</h4>
-          <ul>
-            <li><strong>&#1057;&#1087;&#1086;&#1089;&#1086;&#1073; 1:</strong> &#1050;&#1083;&#1080;&#1082;&#1085;&#1080;&#1090;&#1077; &#1085;&#1072; &#1087;&#1086;&#1083;&#1077; &#8594; &#1074;&#1099;&#1076;&#1077;&#1083;&#1080;&#1090;&#1077; &#1089;&#1090;&#1088;&#1086;&#1082;&#1080; &#1074; &#1090;&#1077;&#1082;&#1089;&#1090;&#1077;</li>
-            <li><strong>&#1057;&#1087;&#1086;&#1089;&#1086;&#1073; 2:</strong> &#1042;&#1099;&#1076;&#1077;&#1083;&#1080;&#1090;&#1077; &#1089;&#1090;&#1088;&#1086;&#1082;&#1080; &#8594; &#1074;&#1099;&#1073;&#1077;&#1088;&#1080;&#1090;&#1077; &#1087;&#1086;&#1083;&#1077; &#1080;&#1079; &#1087;&#1072;&#1085;&#1077;&#1083;&#1080; &#1074;&#1085;&#1080;&#1079;&#1091;</li>
-            <li>&#1052;&#1086;&#1078;&#1085;&#1086; &#1088;&#1077;&#1076;&#1072;&#1082;&#1090;&#1080;&#1088;&#1086;&#1074;&#1072;&#1090;&#1100; &#1090;&#1077;&#1082;&#1089;&#1090; &#1074; &#1087;&#1086;&#1083;&#1103;&#1093; &#1074;&#1088;&#1091;&#1095;&#1085;&#1091;&#1102;</li>
-            <li>&#1048;&#1089;&#1087;&#1086;&#1083;&#1100;&#1079;&#1091;&#1081;&#1090;&#1077; &#1087;&#1086;&#1080;&#1089;&#1082; &#1076;&#1083;&#1103; &#1073;&#1099;&#1089;&#1090;&#1088;&#1086;&#1075;&#1086; &#1085;&#1072;&#1093;&#1086;&#1078;&#1076;&#1077;&#1085;&#1080;&#1103; &#1090;&#1077;&#1082;&#1089;&#1090;&#1072;</li>
-          </ul>
-        </div>
         <div class="search-box">
           <input id="fieldSearch" type="text" placeholder="????? ?? ?????">
         </div>
@@ -2926,6 +4080,24 @@ VIEWER_TEMPLATE = """
       display: flex;
       gap: 10px;
     }
+    .view-toggle {
+      display: flex;
+      gap: 8px;
+    }
+    .toggle-btn {
+      background: rgba(255,255,255,0.2);
+      color: white;
+      border: 1px solid rgba(255,255,255,0.3);
+      padding: 8px 12px;
+      border-radius: 6px;
+      text-decoration: none;
+      font-size: 13px;
+      transition: all 0.2s;
+    }
+    .toggle-btn.active {
+      background: rgba(255,255,255,0.35);
+      border-color: rgba(255,255,255,0.6);
+    }
     .back-btn, .markup-btn {
       background: rgba(255,255,255,0.2);
       color: white;
@@ -2984,6 +4156,16 @@ VIEWER_TEMPLATE = """
     .viewer-content strong {
       font-weight: 600;
     }
+    .viewer-pdf {
+      padding: 30px;
+    }
+    .viewer-iframe {
+      width: 100%;
+      height: 95vh;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      background: #fff;
+    }
   </style>
 </head>
 <body>
@@ -2991,13 +4173,25 @@ VIEWER_TEMPLATE = """
     <div class="header">
       <h1>{{ filename }}</h1>
       <div class="header-actions">
+        <div class="view-toggle">
+          <a href="{{ html_url }}" class="toggle-btn {% if view_mode == 'html' %}active{% endif %}">HTML</a>
+          {% if pdf_url %}
+            <a href="{{ pdf_view_url }}" class="toggle-btn {% if view_mode == 'pdf' %}active{% endif %}">PDF</a>
+          {% endif %}
+        </div>
         <a href="/markup/{{ filename }}" class="markup-btn">📝 Разметить метаданные</a>
         <a href="/" class="back-btn">← Назад к списку</a>
       </div>
     </div>
-    <div class="viewer-content">
-      {{ content|safe }}
-    </div>
+    {% if view_mode == 'pdf' and pdf_url %}
+      <div class="viewer-pdf">
+        <iframe class="viewer-iframe" src="{{ pdf_url }}"></iframe>
+      </div>
+    {% else %}
+      <div class="viewer-content">
+        {{ content|safe }}
+      </div>
+    {% endif %}
   </div>
 </body>
 </html>
@@ -3023,6 +4217,10 @@ MARKUP_TEMPLATE = r"""
     .header-actions{display:flex;gap:10px;justify-content:center;margin-top:10px;}
     .header-btn{background:rgba(255,255,255,0.2);color:white;border:1px solid rgba(255,255,255,0.3);padding:8px 16px;border-radius:6px;text-decoration:none;font-size:14px;transition:all 0.2s;}
     .header-btn:hover{background:rgba(255,255,255,0.3);}
+    .header-toggle-btn{cursor:pointer;background:rgba(255,255,255,0.2);}
+    .header-toggle-btn.active{background:rgba(255,255,255,0.45);color:#fff;}
+    .header-toggle-btn[disabled]{opacity:0.5;cursor:default;}
+    .panel-hidden{display:none !important;}
     .content{display:flex;min-height:calc(100vh - 200px);}
     .pdf-panel{flex:1;min-width:0;padding:20px;overflow-y:auto;max-height:calc(100vh - 200px);border-right:1px solid #e0e0e0;background:#f5f5f5;display:flex;flex-direction:column;}
     .pdf-viewer-container{flex:1;border:2px solid #ddd;border-radius:4px;overflow:auto;background:#e5e5e5;min-height:400px;position:relative;}
@@ -3033,7 +4231,7 @@ MARKUP_TEMPLATE = r"""
     .pdf-tab-content.hidden{display:none;}
     .pdf-iframe{width:100%;height:80vh;border:none;background:#fff;border-radius:4px;}
 
-    #pdfViewerIframe{width:100%;height:80vh;border:none;display:block;}
+    #pdfViewerIframe{width:100%;height:95vh;border:none;display:block;}
     .pdf-page-markup{margin:10px auto;box-shadow:0 2px 8px rgba(0,0,0,0.2);background:white;position:relative;overflow:hidden;}
     .pdf-page-markup canvas{display:block;cursor:default;}
     .pdf-page-markup .textLayer{position:absolute;inset:0;opacity:1;pointer-events:auto;color:transparent;}
@@ -3056,6 +4254,7 @@ MARKUP_TEMPLATE = r"""
     .line-editor-modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);overflow:auto;}
     .line-editor-modal.active{display:flex;align-items:center;justify-content:center;}
     .line-editor-content{background:#fff;padding:20px;border-radius:8px;max-width:700px;width:80%;max-height:70vh;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
+    .line-editor-content.resizable{resize:both;overflow:auto;min-width:320px;min-height:200px;width:80vw;height:60vh;max-width:95vw;max-height:90vh;}
     .line-editor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:2px solid #e0e0e0;padding-bottom:10px;}
     .line-editor-header h2{margin:0;color:#333;font-size:18px;}
     .line-editor-textarea{width:100%;min-height:150px;max-height:400px;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;background:#f9f9f9;}
@@ -3092,10 +4291,12 @@ MARKUP_TEMPLATE = r"""
     .view-refs-btn{background:#2196f3;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;margin-top:5px;transition:all .2s;}
     .view-refs-btn:hover{background:#1976d2;}
     
-    .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:rgba(0,0,0,0.5);overflow:auto;}
+    .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:transparent;overflow:auto;pointer-events:none;}
     .modal.active{display:flex;align-items:center;justify-content:center;}
-    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow-y:auto;box-shadow:0 4px 20px rgba(0,0,0,0.3);}
-    .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;}
+    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;}
+    .refs-modal-content{overflow-y:auto;}
+    .annotation-modal-content{height:80vh;min-height:0;}
+    .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
@@ -3126,6 +4327,10 @@ MARKUP_TEMPLATE = r"""
     .author-toggle{color:#666;font-size:12px;transition:transform .2s;}
     .author-item.expanded .author-toggle{transform:rotate(180deg);}
     .author-actions{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:10px;}
+    .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
+    .author-collapse-actions{display:flex;justify-content:flex-end;margin-top:12px;}
+    .author-collapse-btn{background:#e0e0e0;color:#333;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;}
+    .author-collapse-btn:hover{background:#d0d0d0;}
     .author-actions label{margin:0;flex:1;}
     .add-author-btn{background:#667eea;color:#fff;border:none;padding:6px 12px;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;display:inline-flex;align-items:center;gap:4px;white-space:nowrap;}
     .add-author-btn:hover{background:#5568d3;}
@@ -3137,8 +4342,9 @@ MARKUP_TEMPLATE = r"""
     .author-section h4{margin:0 0 12px 0;color:#667eea;font-size:14px;font-weight:600;border-bottom:1px solid #e0e0e0;padding-bottom:5px;}
     .author-field{margin-bottom:10px;}
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
-    .author-field input{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
-    .author-field input:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
+    .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
+    .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
+    .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
     .correspondence-toggle{margin-top:5px;}
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -3157,26 +4363,28 @@ MARKUP_TEMPLATE = r"""
     </p>
     {% endif %}
     <div class="header-actions">
+      <button type="button" class="header-btn header-toggle-btn{% if view_mode == 'html' %} active{% endif %}" data-view="html">HTML</button>
+      <button type="button" class="header-btn header-toggle-btn{% if view_mode == 'pdf' %} active{% endif %}" data-view="pdf"{% if not show_pdf_viewer %} disabled{% endif %}>PDF</button>
       <a href="/" class="header-btn">← К списку</a>
     </div>
   </div>
 
   <div class="content">
     {% if show_pdf_viewer and pdf_path %}
-    <div class="pdf-panel">
+    <div id="pdfPanel" class="pdf-panel{% if view_mode != 'pdf' %} panel-hidden{% endif %}">
       <h3 style="margin-bottom: 10px; color: #333;">PDF просмотр:</h3>
       <div class="pdf-viewer-container">
         <iframe
           id="pdfViewerIframe"
-          src="/static/pdfjs/web/viewer.html?file=/pdf/{{ pdf_path|urlencode }}"
-          style="width: 100%; height: 80vh; border: none;"
+          src="/static/pdfjs/web/viewer.html?file=/pdf/{{ pdf_path|urlencode }}#zoom=page-width"
+          style="width: 100%; height: 95vh; border: none;"
           title="PDF viewer"
         ></iframe>
       </div>
     </div>
     {% endif %}
     {% if show_text_panel is sameas true %}
-    <div class="text-panel">
+    <div id="textPanel" class="text-panel{% if show_pdf_viewer and view_mode == 'pdf' %} panel-hidden{% endif %}">
       <div class="search-box">
         <input type="text" id="searchInput" placeholder="Поиск в тексте...">
       </div>
@@ -3193,15 +4401,6 @@ MARKUP_TEMPLATE = r"""
     {% endif %}
 
     <div class="form-panel">
-      <div class="instructions">
-        <h3>Инструкция:</h3>
-        <ul>
-          <li><strong>Способ 1:</strong> Кликните на поле → выделите строки в тексте</li>
-          <li><strong>Способ 2:</strong> Выделите строки → выберите поле из панели внизу</li>
-          <li>Можно редактировать текст в полях вручную</li>
-          <li>Используйте поиск для быстрого нахождения текста</li>
-        </ul>
-      </div>
 
       <form id="metadataForm">
         <div class="field-group">
@@ -3213,12 +4412,14 @@ MARKUP_TEMPLATE = r"""
         <div class="field-group">
           <label>Название (русский) *</label>
           <textarea id="title" name="title" required>{% if form_data %}{{ form_data.get('title', '')|e }}{% endif %}</textarea>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('title', 'Название (русский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="selected-lines" id="title-lines"></div>
         </div>
 
         <div class="field-group">
           <label>Название (английский)</label>
           <textarea id="title_en" name="title_en">{% if form_data %}{{ form_data.get('title_en', '')|e }}{% endif %}</textarea>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('title_en', 'Название (английский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="selected-lines" id="title_en-lines"></div>
         </div>
 
@@ -3343,13 +4544,13 @@ MARKUP_TEMPLATE = r"""
                     </div>
                     <div class="author-field">
                       <label>Организация (русский):</label>
-                      <input type="text" class="author-input" data-field="orgName" data-lang="RUS" data-index="{{ loop.index0 }}" value="{{ rus_info.get('orgName', '')|e }}">
+                      <textarea class="author-input author-textarea" data-field="orgName" data-lang="RUS" data-index="{{ loop.index0 }}" rows="2">{{ rus_info.get('orgName', '')|e }}</textarea>
                       <div class="selected-lines" style="display:none;"></div>
                       <div class="keywords-count" id="org-count-rus-{{ loop.index0 }}">Количество организаций: 0</div>
                     </div>
                     <div class="author-field">
                       <label>Organization (English):</label>
-                      <input type="text" class="author-input" data-field="orgName" data-lang="ENG" data-index="{{ loop.index0 }}" value="{{ eng_info.get('orgName', '')|e }}">
+                      <textarea class="author-input author-textarea" data-field="orgName" data-lang="ENG" data-index="{{ loop.index0 }}" rows="2">{{ eng_info.get('orgName', '')|e }}</textarea>
                       <div class="selected-lines" style="display:none;"></div>
                       <div class="keywords-count" id="org-count-eng-{{ loop.index0 }}">Количество организаций: 0</div>
                     </div>
@@ -3392,6 +4593,9 @@ MARKUP_TEMPLATE = r"""
                         <input type="text" class="author-input" data-field="researcherid" data-lang="CODES" data-index="{{ loop.index0 }}" value="{{ author_codes.get('researcherid', '')|e }}">
                       </div>
                     </div>
+                    <div class="author-collapse-actions">
+                      <button type="button" class="author-collapse-btn" onclick="event.preventDefault(); event.stopPropagation(); toggleAuthorDetails({{ loop.index0 }}); document.querySelector('.author-item[data-author-index=&quot;{{ loop.index0 }}&quot;]')?.scrollIntoView({ block: 'nearest' });">Свернуть</button>
+                    </div>
                   </div>
                 </div>
               {% endfor %}
@@ -3419,6 +4623,7 @@ MARKUP_TEMPLATE = r"""
           <label>Ключевые слова (русский)</label>
           <input type="text" id="keywords" name="keywords" value="{% if form_data %}{{ form_data.get('keywords', '')|e }}{% endif %}">
           <div class="selected-lines" id="keywords-lines"></div>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('keywords', 'Ключевые слова (русский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="keywords-count" id="keywords-count">Количество: 0</div>
         </div>
 
@@ -3426,6 +4631,7 @@ MARKUP_TEMPLATE = r"""
           <label>Ключевые слова (английский)</label>
           <input type="text" id="keywords_en" name="keywords_en" value="{% if form_data %}{{ form_data.get('keywords_en', '')|e }}{% endif %}">
           <div class="selected-lines" id="keywords_en-lines"></div>
+          <button type="button" class="view-refs-btn" onclick="viewAnnotation('keywords_en', 'Ключевые слова (английский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="keywords-count" id="keywords_en-count">Количество: 0</div>
         </div>
 
@@ -3526,7 +4732,7 @@ MARKUP_TEMPLATE = r"""
 </div>
 
 <div id="refsModal" class="modal">
-  <div class="modal-content" id="refsModalContent">
+  <div class="modal-content resizable refs-modal-content" id="refsModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
     <div class="modal-header">
       <h2 id="modalTitle">Список литературы</h2>
       <div class="modal-header-actions">
@@ -3543,7 +4749,7 @@ MARKUP_TEMPLATE = r"""
 </div>
 
 <div id="annotationModal" class="modal">
-  <div class="modal-content" id="annotationModalContent">
+  <div class="modal-content resizable annotation-modal-content" id="annotationModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
     <div class="modal-header">
       <h2 id="annotationModalTitle">Аннотация</h2>
       <div class="modal-header-actions">
@@ -3551,21 +4757,114 @@ MARKUP_TEMPLATE = r"""
         <button class="modal-close" onclick="closeAnnotationModal()">&times;</button>
       </div>
     </div>
-    <div class="annotation-editor-toolbar">
+  <div class="annotation-modal-body">
+  <div class="annotation-editor-toolbar">
+    <div class="annotation-toolbar-row">
+      <select id="annotationStyleSelect" class="annotation-select" data-action="format-block" title="Стили абзаца">
+        <option value="p">Normal</option>
+        <option value="h1">Heading 1</option>
+        <option value="h2">Heading 2</option>
+        <option value="h3">Heading 3</option>
+      </select>
+      <select id="annotationFontSelect" class="annotation-select" data-action="font-name" title="Шрифт">
+        <option value="">Шрифт</option>
+        <option value="Times New Roman">Times New Roman</option>
+        <option value="Arial">Arial</option>
+        <option value="Calibri">Calibri</option>
+        <option value="Georgia">Georgia</option>
+        <option value="Cambria">Cambria</option>
+      </select>
+      <select id="annotationFontSizeSelect" class="annotation-select" data-action="font-size" title="Размер">
+        <option value="">Размер</option>
+        <option value="2">12</option>
+        <option value="3">14</option>
+        <option value="4">16</option>
+        <option value="5">18</option>
+        <option value="6">24</option>
+      </select>
+      <span class="annotation-divider"></span>
+      <button type="button" class="annotation-editor-btn" data-action="bold" tabindex="-1" title="Полужирный"><strong>B</strong></button>
+      <button type="button" class="annotation-editor-btn" data-action="italic" tabindex="-1" title="Курсив"><em>I</em></button>
+      <button type="button" class="annotation-editor-btn" data-action="strike" tabindex="-1" title="Зачёркнутый"><span style="text-decoration:line-through;">S</span></button>
       <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
       <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
+      <input type="color" class="annotation-color-input" data-action="text-color" title="Цвет текста" value="#1f1f1f">
+      <input type="color" class="annotation-color-input" data-action="highlight-color" title="Маркер" value="#fff3a3">
+      <span class="annotation-divider"></span>
+      <button type="button" class="annotation-editor-btn" data-action="align-left" tabindex="-1" title="По левому краю">≡</button>
+      <button type="button" class="annotation-editor-btn" data-action="align-center" tabindex="-1" title="По центру">≡</button>
+      <button type="button" class="annotation-editor-btn" data-action="align-right" tabindex="-1" title="По правому краю">≡</button>
+      <button type="button" class="annotation-editor-btn" data-action="align-justify" tabindex="-1" title="По ширине">≡</button>
+      <button type="button" class="annotation-editor-btn" data-action="unordered-list" tabindex="-1" title="Маркированный список">•⋯</button>
+      <button type="button" class="annotation-editor-btn" data-action="ordered-list" tabindex="-1" title="Нумерованный список">1.</button>
+      <button type="button" class="annotation-editor-btn" data-action="link" tabindex="-1" title="Ссылка">🔗</button>
+      <button type="button" class="annotation-editor-btn" data-action="bookmark" tabindex="-1" title="Закладка">🔖</button>
     </div>
-    <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="false" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false"></div>
-    <textarea id="annotationModalTextarea" class="line-editor-textarea" style="display:none;"></textarea>
-    <div class="modal-footer">
+    <div class="annotation-toolbar-row">
+      <span class="annotation-toolbar-label">Вставка:</span>
+      <button type="button" class="annotation-editor-btn" data-action="insert-table" tabindex="-1" title="Таблица">▦</button>
+      <button type="button" class="annotation-editor-btn" data-action="insert-image" tabindex="-1" title="Изображение">🖼</button>
+      <button type="button" class="annotation-editor-btn" data-action="insert-video" tabindex="-1" title="Видео">▶</button>
+      <button type="button" class="annotation-editor-btn" data-action="insert-code" tabindex="-1" title="Вставка кода">&lt;/&gt;</button>
+      <button type="button" class="annotation-editor-btn" data-action="toggle-symbols-panel" tabindex="-1" title="Специальные символы" onclick="toggleAnnotationSymbolsPanel()">Ω</button>
+      <button type="button" class="annotation-editor-btn" data-action="toggle-preview" tabindex="-1" title="Просмотр">👁</button>
+      <button type="button" class="annotation-editor-btn" data-action="toggle-fullscreen" tabindex="-1" title="Полноэкранный режим">⛶</button>
+      <button type="button" class="annotation-editor-btn" data-action="toggle-code-view" tabindex="-1" title="HTML / Code View">HTML</button>
+      <button type="button" class="annotation-editor-btn" data-action="insert-latex" tabindex="-1" title="LaTeX">LaTeX</button>
+      <button type="button" class="annotation-editor-btn" data-action="insert-formula" tabindex="-1" title="Формула">Σ</button>
+    </div>
+  </div>
+  <div id="annotationSymbolsPanel" class="annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
+    <div class="annotation-symbols-header">
+      <input id="annotationSymbolsSearch" class="annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, degree, ≤" autocomplete="off">
+      <select id="annotationSymbolsCategory" class="annotation-symbols-category">
+        <option value="all">Все</option>
+        <option value="greek">Греческий</option>
+        <option value="math">Математика</option>
+        <option value="arrows">Стрелки</option>
+        <option value="indices">Индексы</option>
+        <option value="units">Единицы</option>
+        <option value="currency">Валюты</option>
+        <option value="typography">Типографика</option>
+        <option value="latin">Диакритика</option>
+        <option value="other">Прочее</option>
+      </select>
+    </div>
+    <div class="annotation-symbols-toggles">
+      <label><input id="annotationSymbolsLatex" type="checkbox"> Как LaTeX</label>
+      <label><input id="annotationSymbolsAutoClose" type="checkbox" checked> Автозакрытие</label>
+    </div>
+    <div id="annotationSymbolsGrid" class="annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+    <div class="annotation-symbols-footer">
+      <div class="annotation-symbols-section">
+        <span class="annotation-symbols-title">Недавние</span>
+        <div id="annotationSymbolsRecent" class="annotation-symbols-recent"></div>
+      </div>
+      <div class="annotation-symbols-section">
+        <span class="annotation-symbols-title">Избранное</span>
+        <div id="annotationSymbolsFavorites" class="annotation-symbols-favorites"></div>
+      </div>
+      <div class="annotation-symbols-info">Вставится в позицию курсора.</div>
+    </div>
+  </div>
+  <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="true" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false" style="padding:24px;box-sizing:border-box;height:32vh;max-height:32vh;overflow-y:scroll;"></div>
+  <textarea id="annotationModalTextarea" class="line-editor-textarea annotation-code-view" style="display:none;"></textarea>
+  <div class="annotation-editor-footer">
+    <div class="annotation-editor-stats">
+      <span id="annotationWordCount" class="annotation-word-count">СЛОВ: 0</span>
+      <span id="annotationLangIndicator" class="annotation-lang-indicator">RU</span>
+    </div>
+    <div class="annotation-editor-actions">
       <button class="modal-btn modal-btn-cancel" onclick="closeAnnotationModal()">Отмена</button>
       <button class="modal-btn modal-btn-save" onclick="saveEditedAnnotation()">Сохранить изменения</button>
     </div>
   </div>
+  </div>
+  </div>
 </div>
 
 <div id="lineCopyModal" class="line-editor-modal">
-  <div class="line-editor-content">
+  <div class="line-editor-content resizable" style="resize:both;overflow:auto;min-width:320px;min-height:200px;">
     <div class="line-editor-header">
       <h2>Копирование строки</h2>
       <button class="modal-close" data-action="close-copy">&times;</button>
@@ -3586,6 +4885,597 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
+function normalizeReferencesText(text) {
+  const original = text || "";
+  if (!original.trim()) return original;
+  let value = original;
+  value = value.replace(/(\S)([\u0410-\u042F\u0401][\u0430-\u044F\u0451]+\s+[\u0410-\u042F\u0401]\.[\u0410-\u042F\u0401]\.)/g, "$1\n$2");
+  value = value.replace(/(\S)([A-Z][a-z]+\s+[A-Z]\.[A-Z]\.)/g, "$1\n$2");
+  value = value.replace(/(https?:\/\/\S+)(?=[\u0410-\u042F\u0401A-Z])/g, "$1\n");
+  value = value.replace(/(10\.\d{4,9}\/\S+?)(?=[\u0410-\u042F\u0401A-Z])/g, "$1\n");
+  value = value.replace(/(\d\s*\u0441\.)(?=[\u0410-\u042F\u0401A-Z])/g, "$1\n");
+  value = value.replace(/(\u0421\.?\s*\d[^\n]*?)(?=[\u0410-\u042F\u0401A-Z])/g, "$1\n");
+  return value;
+}
+
+function normalizeReferenceWhitespace(text) {
+  return (text || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/[\u2028\u2029]/g, "\n")
+    .replace(/\u00A0/g, " ")
+    .replace(/\u200B/g, "");
+}
+
+function splitReferences(text) {
+  const cleaned = normalizeReferenceWhitespace(text);
+  if (!cleaned.trim()) return [];
+  const numberedMatches = Array.from(cleaned.matchAll(/(^|\n)\s*(\d{1,3})\s*[).]/g));
+  if (numberedMatches.length) {
+    const refs = [];
+    for (let i = 0; i < numberedMatches.length; i += 1) {
+      const match = numberedMatches[i];
+      const start = (match.index ?? 0) + match[0].length;
+      const end = i + 1 < numberedMatches.length
+        ? (numberedMatches[i + 1].index ?? cleaned.length)
+        : cleaned.length;
+      const entry = cleaned
+        .slice(start, end)
+        .replace(/\s*\n\s*/g, " ")
+        .trim();
+      if (entry) refs.push(entry);
+    }
+    return refs;
+  }
+
+  let working = cleaned;
+  if (!working.includes("\n")) {
+    working = normalizeReferencesText(working);
+  }
+  const lines = working
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  if (!lines.length) return [];
+  const refs = [];
+  let current = lines[0];
+  for (let i = 1; i < lines.length; i += 1) {
+    const line = lines[i];
+    const startsNew = /^[A-ZА-ЯЁ0-9]/.test(line);
+    if (!startsNew) {
+      current = `${current} ${line}`.trim();
+    } else {
+      refs.push(current);
+      current = line;
+    }
+  }
+  refs.push(current);
+  return refs;
+}
+
+function ensureAnnotationSymbolsData() {
+  if (window.__annotationSymbolsData) return;
+  window.__annotationSymbolsData = [
+    { id: "alpha", char: "α", name_ru: "альфа", name_en: "alpha", codepoint: "U+03B1", category: "greek", aliases: ["alpha", "альфа"], latex: "\\alpha" },
+    { id: "beta", char: "β", name_ru: "бета", name_en: "beta", codepoint: "U+03B2", category: "greek", aliases: ["beta", "бета"], latex: "\\beta" },
+    { id: "gamma", char: "γ", name_ru: "гамма", name_en: "gamma", codepoint: "U+03B3", category: "greek", aliases: ["gamma", "гамма"], latex: "\\gamma" },
+    { id: "delta", char: "δ", name_ru: "дельта", name_en: "delta", codepoint: "U+03B4", category: "greek", aliases: ["delta", "дельта"], latex: "\\delta" },
+    { id: "epsilon", char: "ε", name_ru: "эпсилон", name_en: "epsilon", codepoint: "U+03B5", category: "greek", aliases: ["epsilon", "эпсилон"], latex: "\\epsilon" },
+    { id: "theta", char: "θ", name_ru: "тета", name_en: "theta", codepoint: "U+03B8", category: "greek", aliases: ["theta", "тета"], latex: "\\theta" },
+    { id: "lambda", char: "λ", name_ru: "лямбда", name_en: "lambda", codepoint: "U+03BB", category: "greek", aliases: ["lambda", "лямбда"], latex: "\\lambda" },
+    { id: "mu", char: "μ", name_ru: "мю", name_en: "mu", codepoint: "U+03BC", category: "greek", aliases: ["mu", "micro", "мю"], latex: "\\mu" },
+    { id: "pi", char: "π", name_ru: "пи", name_en: "pi", codepoint: "U+03C0", category: "greek", aliases: ["pi", "пи"], latex: "\\pi" },
+    { id: "sigma", char: "σ", name_ru: "сигма", name_en: "sigma", codepoint: "U+03C3", category: "greek", aliases: ["sigma", "сигма"], latex: "\\sigma" },
+    { id: "phi", char: "φ", name_ru: "фи", name_en: "phi", codepoint: "U+03C6", category: "greek", aliases: ["phi", "фи"], latex: "\\phi" },
+    { id: "psi", char: "ψ", name_ru: "пси", name_en: "psi", codepoint: "U+03C8", category: "greek", aliases: ["psi", "пси"], latex: "\\psi" },
+    { id: "omega", char: "ω", name_ru: "омега", name_en: "omega", codepoint: "U+03C9", category: "greek", aliases: ["omega", "омега"], latex: "\\omega" },
+    { id: "Omega", char: "Ω", name_ru: "омега (верхн.)", name_en: "Omega", codepoint: "U+03A9", category: "greek", aliases: ["omega", "омега"], latex: "\\Omega" },
+    { id: "plusminus", char: "±", name_ru: "плюс-минус", name_en: "plus-minus", codepoint: "U+00B1", category: "math", aliases: ["plusminus", "+-"], latex: "\\pm" },
+    { id: "times", char: "×", name_ru: "умножить", name_en: "times", codepoint: "U+00D7", category: "math", aliases: ["times", "multiply"], latex: "\\times" },
+    { id: "divide", char: "÷", name_ru: "деление", name_en: "divide", codepoint: "U+00F7", category: "math", aliases: ["divide"], latex: "\\div" },
+    { id: "leq", char: "≤", name_ru: "меньше либо равно", name_en: "leq", codepoint: "U+2264", category: "math", aliases: ["leq", "<="], latex: "\\leq" },
+    { id: "geq", char: "≥", name_ru: "больше либо равно", name_en: "geq", codepoint: "U+2265", category: "math", aliases: ["geq", ">="], latex: "\\geq" },
+    { id: "neq", char: "≠", name_ru: "не равно", name_en: "not equal", codepoint: "U+2260", category: "math", aliases: ["neq", "!="], latex: "\\neq" },
+    { id: "approx", char: "≈", name_ru: "примерно", name_en: "approx", codepoint: "U+2248", category: "math", aliases: ["approx"], latex: "\\approx" },
+    { id: "infty", char: "∞", name_ru: "бесконечность", name_en: "infinity", codepoint: "U+221E", category: "math", aliases: ["infty", "infinity"], latex: "\\infty" },
+    { id: "sum", char: "∑", name_ru: "сумма", name_en: "sum", codepoint: "U+2211", category: "math", aliases: ["sum"], latex: "\\sum" },
+    { id: "prod", char: "∏", name_ru: "произведение", name_en: "prod", codepoint: "U+220F", category: "math", aliases: ["prod"], latex: "\\prod" },
+    { id: "sqrt", char: "√", name_ru: "корень", name_en: "sqrt", codepoint: "U+221A", category: "math", aliases: ["sqrt"], latex: "\\sqrt{}" },
+    { id: "int", char: "∫", name_ru: "интеграл", name_en: "integral", codepoint: "U+222B", category: "math", aliases: ["integral"], latex: "\\int" },
+    { id: "partial", char: "∂", name_ru: "частная производная", name_en: "partial", codepoint: "U+2202", category: "math", aliases: ["partial"], latex: "\\partial" },
+    { id: "nabla", char: "∇", name_ru: "набла", name_en: "nabla", codepoint: "U+2207", category: "math", aliases: ["nabla"], latex: "\\nabla" },
+    { id: "arrow_left", char: "←", name_ru: "стрелка влево", name_en: "left arrow", codepoint: "U+2190", category: "arrows", aliases: ["left", "arrow"], latex: "\\leftarrow" },
+    { id: "arrow_right", char: "→", name_ru: "стрелка вправо", name_en: "right arrow", codepoint: "U+2192", category: "arrows", aliases: ["right", "arrow"], latex: "\\rightarrow" },
+    { id: "arrow_up", char: "↑", name_ru: "стрелка вверх", name_en: "up arrow", codepoint: "U+2191", category: "arrows", aliases: ["up", "arrow"], latex: "\\uparrow" },
+    { id: "arrow_down", char: "↓", name_ru: "стрелка вниз", name_en: "down arrow", codepoint: "U+2193", category: "arrows", aliases: ["down", "arrow"], latex: "\\downarrow" },
+    { id: "arrow_lr", char: "↔", name_ru: "двунаправленная", name_en: "leftright arrow", codepoint: "U+2194", category: "arrows", aliases: ["leftright", "arrow"], latex: "\\leftrightarrow" },
+    { id: "sup1", char: "¹", name_ru: "верхний 1", name_en: "superscript 1", codepoint: "U+00B9", category: "indices", aliases: ["superscript", "1"] },
+    { id: "sup2", char: "²", name_ru: "верхний 2", name_en: "superscript 2", codepoint: "U+00B2", category: "indices", aliases: ["superscript", "2"] },
+    { id: "sup3", char: "³", name_ru: "верхний 3", name_en: "superscript 3", codepoint: "U+00B3", category: "indices", aliases: ["superscript", "3"] },
+    { id: "sub1", char: "₁", name_ru: "нижний 1", name_en: "subscript 1", codepoint: "U+2081", category: "indices", aliases: ["subscript", "1"] },
+    { id: "sub2", char: "₂", name_ru: "нижний 2", name_en: "subscript 2", codepoint: "U+2082", category: "indices", aliases: ["subscript", "2"] },
+    { id: "sub3", char: "₃", name_ru: "нижний 3", name_en: "subscript 3", codepoint: "U+2083", category: "indices", aliases: ["subscript", "3"] },
+    { id: "degree", char: "°", name_ru: "градус", name_en: "degree", codepoint: "U+00B0", category: "units", aliases: ["degree"], latex: "^\\circ" },
+    { id: "permil", char: "‰", name_ru: "промилле", name_en: "per mille", codepoint: "U+2030", category: "units", aliases: ["permil"], latex: "\\permil" },
+    { id: "angstrom", char: "Å", name_ru: "ангстрем", name_en: "angstrom", codepoint: "U+00C5", category: "units", aliases: ["angstrom"], latex: "\\AA" },
+    { id: "celsius", char: "℃", name_ru: "цельсий", name_en: "celsius", codepoint: "U+2103", category: "units", aliases: ["celsius"] },
+    { id: "euro", char: "€", name_ru: "евро", name_en: "euro", codepoint: "U+20AC", category: "currency", aliases: ["euro"] },
+    { id: "ruble", char: "₽", name_ru: "рубль", name_en: "ruble", codepoint: "U+20BD", category: "currency", aliases: ["ruble", "рубль"] },
+    { id: "pound", char: "£", name_ru: "фунт", name_en: "pound", codepoint: "U+00A3", category: "currency", aliases: ["pound"] },
+    { id: "yen", char: "¥", name_ru: "иена", name_en: "yen", codepoint: "U+00A5", category: "currency", aliases: ["yen"] },
+    { id: "emdash", char: "—", name_ru: "длинное тире", name_en: "em dash", codepoint: "U+2014", category: "typography", aliases: ["emdash"] },
+    { id: "endash", char: "–", name_ru: "короткое тире", name_en: "en dash", codepoint: "U+2013", category: "typography", aliases: ["endash"] },
+    { id: "laquo", char: "«", name_ru: "кавычки елочки", name_en: "guillemets", codepoint: "U+00AB", category: "typography", aliases: ["quotes"] },
+    { id: "raquo", char: "»", name_ru: "кавычки елочки", name_en: "guillemets", codepoint: "U+00BB", category: "typography", aliases: ["quotes"] },
+    { id: "ellipsis", char: "…", name_ru: "многоточие", name_en: "ellipsis", codepoint: "U+2026", category: "typography", aliases: ["ellipsis"] },
+    { id: "sect", char: "§", name_ru: "параграф", name_en: "section", codepoint: "U+00A7", category: "typography", aliases: ["section"] },
+    { id: "para", char: "¶", name_ru: "абзац", name_en: "paragraph", codepoint: "U+00B6", category: "typography", aliases: ["paragraph"] },
+    { id: "acute_e", char: "é", name_ru: "е с акутом", name_en: "e acute", codepoint: "U+00E9", category: "latin", aliases: ["e", "acute"] },
+    { id: "umlaut_u", char: "ü", name_ru: "у с умляутом", name_en: "u umlaut", codepoint: "U+00FC", category: "latin", aliases: ["u", "umlaut"] },
+    { id: "ring_a", char: "å", name_ru: "а с кружком", name_en: "a ring", codepoint: "U+00E5", category: "latin", aliases: ["a", "ring"] }
+  ];
+}
+
+function getAnnotationSymbolsStorage(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function setAnnotationSymbolsStorage(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {}
+}
+
+function getAnnotationSymbolsElements() {
+  return {
+    panel: document.getElementById("annotationSymbolsPanel"),
+    search: document.getElementById("annotationSymbolsSearch"),
+    category: document.getElementById("annotationSymbolsCategory"),
+    grid: document.getElementById("annotationSymbolsGrid"),
+    recent: document.getElementById("annotationSymbolsRecent"),
+    favorites: document.getElementById("annotationSymbolsFavorites"),
+    latexToggle: document.getElementById("annotationSymbolsLatex"),
+    autoCloseToggle: document.getElementById("annotationSymbolsAutoClose")
+  };
+}
+
+function renderAnnotationSymbolsPanel() {
+  ensureAnnotationSymbolsData();
+  const { search, category, grid } = getAnnotationSymbolsElements();
+  if (!search || !category || !grid) return;
+  const query = (search.value || "").trim().toLowerCase();
+  const selectedCategory = category.value || "all";
+  const favorites = new Set(getAnnotationSymbolsStorage("annotation_symbols_favorites", []));
+  const symbols = (window.__annotationSymbolsData || []).filter((item) => {
+    if (selectedCategory !== "all" && item.category !== selectedCategory) return false;
+    if (!query) return true;
+    const hay = [
+      item.char,
+      item.name_ru,
+      item.name_en,
+      item.codepoint,
+      item.category,
+      ...(item.aliases || []),
+      item.latex || ""
+    ].join(" ").toLowerCase();
+    return hay.includes(query);
+  });
+  grid.innerHTML = "";
+  symbols.forEach((item, index) => {
+    const cell = document.createElement("div");
+    cell.className = "annotation-symbol-cell";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "annotation-symbol-btn";
+    btn.dataset.symbolId = item.id;
+    btn.dataset.index = String(index);
+    btn.textContent = item.char;
+    btn.title = `${item.name_ru} (${item.codepoint})`;
+    btn.addEventListener("click", () => insertAnnotationSymbol(item));
+    const fav = document.createElement("button");
+    fav.type = "button";
+    fav.className = "annotation-symbol-fav" + (favorites.has(item.id) ? " active" : "");
+    fav.textContent = favorites.has(item.id) ? "★" : "☆";
+    fav.title = "В избранное";
+    fav.tabIndex = -1;
+    fav.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      toggleAnnotationSymbolFavorite(item.id);
+    });
+    cell.appendChild(btn);
+    cell.appendChild(fav);
+    grid.appendChild(cell);
+  });
+  renderAnnotationSymbolsLists();
+}
+
+function renderAnnotationSymbolsLists() {
+  const { recent, favorites } = getAnnotationSymbolsElements();
+  if (!recent || !favorites) return;
+  const recentIds = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
+  const favoriteIds = getAnnotationSymbolsStorage("annotation_symbols_favorites", []);
+  recent.innerHTML = "";
+  favorites.innerHTML = "";
+  const data = window.__annotationSymbolsData || [];
+  recentIds.forEach((id) => {
+    const item = data.find((symbol) => symbol.id === id);
+    if (!item) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "annotation-symbol-chip";
+    chip.textContent = item.char;
+    chip.title = item.name_ru;
+    chip.addEventListener("click", () => insertAnnotationSymbol(item));
+    recent.appendChild(chip);
+  });
+  favoriteIds.forEach((id) => {
+    const item = data.find((symbol) => symbol.id === id);
+    if (!item) return;
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "annotation-symbol-chip";
+    chip.textContent = item.char;
+    chip.title = item.name_ru;
+    chip.addEventListener("click", () => insertAnnotationSymbol(item));
+    favorites.appendChild(chip);
+  });
+}
+
+function toggleAnnotationSymbolFavorite(id) {
+  const current = new Set(getAnnotationSymbolsStorage("annotation_symbols_favorites", []));
+  if (current.has(id)) {
+    current.delete(id);
+  } else {
+    current.add(id);
+  }
+  setAnnotationSymbolsStorage("annotation_symbols_favorites", Array.from(current));
+  renderAnnotationSymbolsPanel();
+}
+
+function insertAnnotationSymbol(item) {
+  const editor = document.getElementById("annotationModalEditor");
+  const { latexToggle, autoCloseToggle, panel } = getAnnotationSymbolsElements();
+  if (!editor) return;
+  restoreAnnotationSelection();
+  editor.focus();
+  const useLatex = latexToggle && latexToggle.checked && item.latex;
+  const text = useLatex ? item.latex : item.char;
+  document.execCommand("insertText", false, text);
+  const recent = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
+  const filtered = recent.filter((id) => id !== item.id);
+  filtered.unshift(item.id);
+  setAnnotationSymbolsStorage("annotation_symbols_recent", filtered.slice(0, 20));
+  renderAnnotationSymbolsLists();
+  updateAnnotationStats();
+  if (autoCloseToggle && autoCloseToggle.checked && panel) {
+    closeAnnotationSymbolsPanel();
+  }
+  editor.focus();
+}
+
+function openAnnotationSymbolsPanel() {
+  const { panel, search } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  saveAnnotationSelection();
+  renderAnnotationSymbolsPanel();
+  panel.classList.add("active");
+  panel.style.display = "block";
+  panel.setAttribute("aria-hidden", "false");
+  if (search) {
+    search.focus();
+    search.select();
+  }
+}
+
+function closeAnnotationSymbolsPanel() {
+  const { panel } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  panel.classList.remove("active");
+  panel.style.display = "none";
+  panel.setAttribute("aria-hidden", "true");
+}
+
+function toggleAnnotationSymbolsPanel() {
+  const { panel } = getAnnotationSymbolsElements();
+  if (!panel) return;
+  if (panel.classList.contains("active")) {
+    closeAnnotationSymbolsPanel();
+  } else {
+    openAnnotationSymbolsPanel();
+  }
+}
+
+function initAnnotationSymbolsPanel() {
+  if (window.__annotationSymbolsHandlersAdded) return;
+  window.__annotationSymbolsHandlersAdded = true;
+  const { search, category, grid } = getAnnotationSymbolsElements();
+  if (search) search.addEventListener("input", renderAnnotationSymbolsPanel);
+  if (category) category.addEventListener("change", renderAnnotationSymbolsPanel);
+  document.addEventListener("mousedown", (event) => {
+    const target = event.target;
+    const button = target.closest("[data-action='toggle-symbols-panel']");
+    const panelEl = getAnnotationSymbolsElements().panel;
+    if (!panelEl || !panelEl.classList.contains("active")) return;
+    if (panelEl.contains(target) || button) return;
+    closeAnnotationSymbolsPanel();
+  });
+  document.addEventListener("keydown", (event) => {
+    const panelEl = getAnnotationSymbolsElements().panel;
+    if (!panelEl || !panelEl.classList.contains("active")) return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      closeAnnotationSymbolsPanel();
+      document.getElementById("annotationModalEditor")?.focus();
+    }
+  });
+  if (grid) {
+    grid.addEventListener("keydown", (event) => {
+      const buttons = Array.from(grid.querySelectorAll(".annotation-symbol-btn"));
+      if (!buttons.length) return;
+      const active = document.activeElement;
+      const index = buttons.indexOf(active);
+      if (index === -1) return;
+      const columns = getComputedStyle(grid).gridTemplateColumns.split(" ").length || 8;
+      let nextIndex = index;
+      if (event.key === "ArrowRight") nextIndex = Math.min(buttons.length - 1, index + 1);
+      if (event.key === "ArrowLeft") nextIndex = Math.max(0, index - 1);
+      if (event.key === "ArrowDown") nextIndex = Math.min(buttons.length - 1, index + columns);
+      if (event.key === "ArrowUp") nextIndex = Math.max(0, index - columns);
+      if (nextIndex !== index) {
+        event.preventDefault();
+        buttons[nextIndex].focus();
+      }
+      if (event.key === "Enter") {
+        event.preventDefault();
+        buttons[index].click();
+      }
+    });
+  }
+}
+
+let annotationCodeViewEnabled = false;
+let annotationPreviewEnabled = false;
+
+function setAnnotationCodeView(enabled) {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (!editor || !textarea) return;
+  annotationCodeViewEnabled = enabled;
+  annotationPreviewEnabled = false;
+  editor.contentEditable = "true";
+  editor.classList.remove("preview");
+  if (enabled) {
+    textarea.value = editor.innerHTML;
+    textarea.style.display = "block";
+    editor.style.display = "none";
+  } else {
+    editor.innerHTML = textarea.value;
+    textarea.style.display = "none";
+    editor.style.display = "block";
+  }
+  updateAnnotationStats();
+}
+
+function toggleAnnotationPreview() {
+  const editor = document.getElementById("annotationModalEditor");
+  if (!editor) return;
+  annotationPreviewEnabled = !annotationPreviewEnabled;
+  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
+  editor.classList.toggle("preview", annotationPreviewEnabled);
+}
+
+function getAnnotationPlainText() {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (annotationCodeViewEnabled && textarea) {
+    return annotationHtmlToText(textarea.value || "");
+  }
+  if (editor) {
+    return annotationHtmlToText(editor.innerHTML || "");
+  }
+  return "";
+}
+
+function updateAnnotationStats() {
+  const countEl = document.getElementById("annotationWordCount");
+  const langEl = document.getElementById("annotationLangIndicator");
+  const modal = document.getElementById("annotationModal");
+  const fieldId = modal?.dataset?.fieldId || currentAnnotationFieldId;
+  if (langEl) {
+    langEl.textContent = fieldId === "annotation_en" ? "EN" : "RU";
+  }
+  const text = getAnnotationPlainText();
+  const words = text.trim() ? text.trim().split(/\s+/).filter(Boolean) : [];
+  if (countEl) {
+    countEl.textContent = `СЛОВ: ${words.length}`;
+  }
+}
+
+function getSelectionText() {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) return "";
+  return selection.toString();
+}
+
+function insertAnnotationHtml(html) {
+  document.execCommand("insertHTML", false, html);
+}
+
+function applyAnnotationCommand(action, value) {
+  if (!action) return;
+  if (action === "annotation-sup") {
+    applyAnnotationFormat("sup");
+    return;
+  }
+  if (action === "annotation-sub") {
+    applyAnnotationFormat("sub");
+    return;
+  }
+  const editor = document.getElementById("annotationModalEditor");
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  }
+  switch (action) {
+    case "bold":
+      document.execCommand("bold");
+      break;
+    case "italic":
+      document.execCommand("italic");
+      break;
+    case "strike":
+      document.execCommand("strikeThrough");
+      break;
+    case "align-left":
+      document.execCommand("justifyLeft");
+      break;
+    case "align-center":
+      document.execCommand("justifyCenter");
+      break;
+    case "align-right":
+      document.execCommand("justifyRight");
+      break;
+    case "align-justify":
+      document.execCommand("justifyFull");
+      break;
+    case "unordered-list":
+      document.execCommand("insertUnorderedList");
+      break;
+    case "ordered-list":
+      document.execCommand("insertOrderedList");
+      break;
+    case "text-color":
+      document.execCommand("foreColor", false, value);
+      break;
+    case "highlight-color":
+      document.execCommand("hiliteColor", false, value);
+      break;
+    case "format-block":
+      if (value) document.execCommand("formatBlock", false, value);
+      break;
+    case "font-name":
+      if (value) document.execCommand("fontName", false, value);
+      break;
+    case "font-size":
+      if (value) document.execCommand("fontSize", false, value);
+      break;
+    case "link": {
+      const url = prompt("Введите ссылку:", "https://");
+      if (!url) break;
+      const selected = getSelectionText();
+      if (selected) {
+        document.execCommand("createLink", false, url);
+      } else {
+        insertAnnotationHtml(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(url)}</a>`);
+      }
+      break;
+    }
+    case "bookmark": {
+      const name = prompt("Название закладки:");
+      if (!name) break;
+      insertAnnotationHtml(`<span class="annotation-bookmark">🔖 ${escapeHtml(name)}</span>`);
+      break;
+    }
+    case "insert-table": {
+      const rows = parseInt(prompt("Количество строк:", "2"), 10);
+      const cols = parseInt(prompt("Количество столбцов:", "2"), 10);
+      if (!rows || !cols) break;
+      let html = '<table class="annotation-table">';
+      for (let r = 0; r < rows; r += 1) {
+        html += "<tr>";
+        for (let c = 0; c < cols; c += 1) {
+          html += "<td>&nbsp;</td>";
+        }
+        html += "</tr>";
+      }
+      html += "</table>";
+      insertAnnotationHtml(html);
+      break;
+    }
+    case "insert-image": {
+      const url = prompt("Ссылка на изображение:");
+      if (!url) break;
+      insertAnnotationHtml(`<img src="${escapeHtml(url)}" alt="image" style="max-width:100%;height:auto;">`);
+      break;
+    }
+    case "insert-video": {
+      const url = prompt("Ссылка на видео (iframe/url):");
+      if (!url) break;
+      insertAnnotationHtml(`<iframe src="${escapeHtml(url)}" frameborder="0" allowfullscreen style="width:100%;height:320px;"></iframe>`);
+      break;
+    }
+    case "insert-code": {
+      const selected = getSelectionText() || "код";
+      const escaped = escapeHtml(selected);
+      insertAnnotationHtml(`<pre class="annotation-code-block"><code>${escaped}</code></pre>`);
+      break;
+    }
+    case "toggle-symbols-panel":
+      toggleAnnotationSymbolsPanel();
+      break;
+    case "insert-latex": {
+      const latex = prompt("LaTeX формула:");
+      if (!latex) break;
+      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      break;
+    }
+    case "insert-formula": {
+      const formula = prompt("Формула:");
+      if (!formula) break;
+      document.execCommand("insertText", false, `∑ ${formula}`);
+      break;
+    }
+    case "toggle-preview":
+      toggleAnnotationPreview();
+      break;
+    case "toggle-fullscreen":
+      toggleAnnotationModalSize();
+      break;
+    case "toggle-code-view":
+      setAnnotationCodeView(!annotationCodeViewEnabled);
+      break;
+    default:
+      break;
+  }
+  updateAnnotationStats();
+}
+
+function setViewMode(mode) {
+  const pdfPanel = document.getElementById("pdfPanel");
+  const textPanel = document.getElementById("textPanel");
+  const htmlBtn = document.querySelector("[data-view='html']");
+  const pdfBtn = document.querySelector("[data-view='pdf']");
+  if (mode === "pdf" && (!pdfPanel || (pdfBtn && pdfBtn.disabled))) {
+    mode = "html";
+  }
+  if (pdfPanel) {
+    pdfPanel.classList.toggle("panel-hidden", mode !== "pdf");
+  }
+  if (textPanel) {
+    textPanel.classList.toggle("panel-hidden", mode === "pdf");
+  }
+  if (htmlBtn) htmlBtn.classList.toggle("active", mode === "html");
+  if (pdfBtn) pdfBtn.classList.toggle("active", mode === "pdf");
+  try {
+    const url = new URL(window.location.href);
+    url.searchParams.set("view", mode);
+    window.history.replaceState({}, "", url);
+  } catch (e) {}
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const htmlBtn = document.querySelector("[data-view='html']");
+  const pdfBtn = document.querySelector("[data-view='pdf']");
+  if (htmlBtn) htmlBtn.addEventListener("click", () => setViewMode("html"));
+  if (pdfBtn) pdfBtn.addEventListener("click", () => setViewMode("pdf"));
+  setViewMode("{{ view_mode }}");
+});
+
 let currentRefsFieldId = null;
 
 function viewReferences(fieldId, title) {
@@ -3594,15 +5484,11 @@ function viewReferences(fieldId, title) {
   
   currentRefsFieldId = fieldId;
   
-  const refsText = field.value.trim();
-  if (!refsText) {
-    alert("Список литературы пуст");
+  const refs = splitReferences(field.value);
+  if (refs.length === 0) {
+    alert("References list is empty");
     return;
   }
-  
-  const refs = refsText.split("\n")
-    .map(s => s.trim())
-    .filter(Boolean);
   
   const modal = document.getElementById("refsModal");
   const modalTitle = document.getElementById("modalTitle");
@@ -3637,6 +5523,24 @@ function viewReferences(fieldId, title) {
   modal.classList.add("active");
 }
 
+function syncReferencesField() {
+  if (!currentRefsFieldId) return;
+  const field = document.getElementById(currentRefsFieldId);
+  if (!field) return;
+  const refItems = document.querySelectorAll("#refsList .ref-item");
+  const refs = Array.from(refItems)
+    .map(item => {
+      const textSpan = item.querySelector(".ref-text");
+      return textSpan ? textSpan.textContent.trim() : "";
+    })
+    .filter(ref => ref.length > 0);
+  field.value = refs.join("\n");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  if (window.updateReferencesCount) {
+    window.updateReferencesCount(currentRefsFieldId);
+  }
+}
+
 function mergeWithNext(btn) {
   const refItem = btn.closest(".ref-item");
   if (!refItem) return;
@@ -3655,23 +5559,22 @@ function mergeWithNext(btn) {
     return;
   }
   
-  if (confirm(`Объединить источник ${refItem.querySelector(".ref-number")?.textContent.trim()} со следующим?\n\nТекущий: ${currentText.substring(0, 50)}...\nСледующий: ${nextText.substring(0, 50)}...`)) {
-    // Объединяем тексты через пробел
-    const mergedText = currentText + " " + nextText;
-    const currentTextSpan = refItem.querySelector(".ref-text");
-    if (currentTextSpan) {
-      currentTextSpan.textContent = mergedText;
-    }
-    
-    // Удаляем следующий элемент
-    nextItem.remove();
-    
-    // Перенумеровываем оставшиеся ссылки
-    renumberReferences();
-    
-    // Обновляем кнопки объединения (могут измениться после удаления)
-    updateMergeButtons();
+  // Объединяем тексты через пробел
+  const mergedText = currentText + " " + nextText;
+  const currentTextSpan = refItem.querySelector(".ref-text");
+  if (currentTextSpan) {
+    currentTextSpan.textContent = mergedText;
   }
+  
+  // Удаляем следующий элемент
+  nextItem.remove();
+  
+  // Перенумеровываем оставшиеся ссылки
+  renumberReferences();
+  
+  // Обновляем кнопки объединения (могут измениться после удаления)
+  updateMergeButtons();
+  syncReferencesField();
 }
 
 function updateMergeButtons() {
@@ -3795,6 +5698,7 @@ function saveEditedReferences() {
     .filter(ref => ref.length > 0);
   
   field.value = refs.join("\n");
+  field.dispatchEvent(new Event("input", { bubbles: true }));
   // Обновляем счетчик после сохранения
   if (window.updateReferencesCount) {
     window.updateReferencesCount(currentRefsFieldId);
@@ -4040,7 +5944,6 @@ function saveAnnotationSelection() {
   const selection = window.getSelection();
   if (!selection || selection.rangeCount === 0) return;
   const range = selection.getRangeAt(0);
-  if (range.collapsed) return;
   if (!editor.contains(range.commonAncestorContainer)) return;
 
   const start = computeOffset(editor, range.startContainer, range.startOffset);
@@ -4196,15 +6099,42 @@ if (!window.__annotationSelectionHandlerAdded) {
   document.addEventListener("selectionchange", saveAnnotationSelection);
   window.__annotationSelectionHandlerAdded = true;
 }
-if (!window.__annotationEditorHandlersAdded) {
-  document.addEventListener("click", (event) => {
+if (!window.__annotationSelectionSyncAdded) {
+  document.addEventListener("mouseup", saveAnnotationSelection, true);
+  document.addEventListener("keyup", saveAnnotationSelection, true);
+  document.addEventListener("touchend", saveAnnotationSelection, true);
+  window.__annotationSelectionSyncAdded = true;
+}
+if (!window.__annotationEditorMouseDownAdded) {
+  const handler = (event) => {
     const button = event.target.closest(".annotation-editor-btn");
     if (!button) return;
+    event.preventDefault();
+    event.stopPropagation();
     const action = button.getAttribute("data-action");
-    if (action === "annotation-sup") {
-      applyAnnotationFormat("sup");
-    } else if (action === "annotation-sub") {
-      applyAnnotationFormat("sub");
+    applyAnnotationCommand(action);
+  };
+  document.addEventListener("pointerdown", handler, true);
+  document.addEventListener("mousedown", handler, true);
+  window.__annotationEditorMouseDownAdded = true;
+}
+if (!window.__annotationEditorHandlersAdded) {
+  document.addEventListener("change", (event) => {
+    const select = event.target.closest(".annotation-select");
+    if (select) {
+      applyAnnotationCommand(select.getAttribute("data-action"), select.value);
+      return;
+    }
+    const color = event.target.closest(".annotation-color-input");
+    if (color) {
+      applyAnnotationCommand(color.getAttribute("data-action"), color.value);
+    }
+  });
+  document.addEventListener("input", (event) => {
+    const editor = event.target.closest("#annotationModalEditor");
+    const textarea = event.target.closest("#annotationModalTextarea");
+    if (editor || textarea) {
+      updateAnnotationStats();
     }
   });
   window.__annotationEditorHandlersAdded = true;
@@ -4229,6 +6159,14 @@ function viewAnnotation(fieldId, title) {
   modal.dataset.fieldId = fieldId;
   if (fieldId === "annotation" || fieldId === "annotation_en") {
     const lang = fieldId === "annotation_en" ? "en" : "ru";
+    const textarea = document.getElementById("annotationModalTextarea");
+    annotationCodeViewEnabled = false;
+    annotationPreviewEnabled = false;
+    if (textarea) textarea.style.display = "none";
+    modalEditor.style.display = "block";
+    modalEditor.contentEditable = "true";
+    modalEditor.classList.remove("preview");
+    modalEditor.lang = lang;
     const normalize = () => {
       const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
       modalEditor.innerHTML = annotationTextToHtml(cleaned);
@@ -4241,6 +6179,7 @@ function viewAnnotation(fieldId, title) {
     modalEditor.onpaste = null;
     modalEditor.onblur = null;
   }
+  updateAnnotationStats();
 
   modal.classList.add("active");
   setTimeout(() => {
@@ -4265,11 +6204,13 @@ function saveEditedAnnotation() {
 
   const field = document.getElementById(targetFieldId);
   const modalEditor = document.getElementById("annotationModalEditor");
+  const modalTextarea = document.getElementById("annotationModalTextarea");
 
   if (!field || !modalEditor) return;
 
   const lang = targetFieldId === "annotation_en" ? "en" : "ru";
-  const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
+  const html = annotationCodeViewEnabled && modalTextarea ? modalTextarea.value : modalEditor.innerHTML;
+  const cleaned = window.processAnnotation(annotationHtmlToText(html), lang);
   field.value = cleaned;
   closeAnnotationModal();
 
@@ -4296,6 +6237,9 @@ function closeAnnotationModal() {
       expandBtn.classList.remove("expanded");
     }
   }
+  closeAnnotationSymbolsPanel();
+  annotationCodeViewEnabled = false;
+  annotationPreviewEnabled = false;
   currentAnnotationFieldId = null;
 }
 
@@ -4315,6 +6259,50 @@ function toggleAnnotationModalSize() {
     }
   }
 }
+
+function enableModalDragging(modalId, contentId) {
+  const modal = document.getElementById(modalId);
+  const content = document.getElementById(contentId);
+  if (!modal || !content) return;
+  const header = content.querySelector(".modal-header");
+  if (!header) return;
+  let isDragging = false;
+  let offsetX = 0;
+  let offsetY = 0;
+
+  const onMouseDown = (event) => {
+    if (event.button !== 0) return;
+    isDragging = true;
+    const rect = content.getBoundingClientRect();
+    offsetX = event.clientX - rect.left;
+    offsetY = event.clientY - rect.top;
+    content.style.position = "fixed";
+    content.style.margin = "0";
+    content.style.left = `${rect.left}px`;
+    content.style.top = `${rect.top}px`;
+  };
+
+  const onMouseMove = (event) => {
+    if (!isDragging) return;
+    const maxX = window.innerWidth - content.offsetWidth;
+    const maxY = window.innerHeight - content.offsetHeight;
+    const nextX = Math.min(Math.max(0, event.clientX - offsetX), Math.max(0, maxX));
+    const nextY = Math.min(Math.max(0, event.clientY - offsetY), Math.max(0, maxY));
+    content.style.left = `${nextX}px`;
+    content.style.top = `${nextY}px`;
+  };
+
+  const onMouseUp = () => {
+    isDragging = false;
+  };
+
+  header.addEventListener("mousedown", onMouseDown);
+  document.addEventListener("mousemove", onMouseMove);
+  document.addEventListener("mouseup", onMouseUp);
+}
+
+enableModalDragging("refsModal", "refsModalContent");
+enableModalDragging("annotationModal", "annotationModalContent");
 
 function openCopyModal(text) {
   const modal = document.getElementById("lineCopyModal");
@@ -4495,13 +6483,13 @@ function createAuthorHTML(index) {
         </div>
         <div class="author-field">
           <label>Организация (русский):</label>
-          <input type="text" class="author-input" data-field="orgName" data-lang="RUS" data-index="${index}" value="">
+          <textarea class="author-input author-textarea" data-field="orgName" data-lang="RUS" data-index="${index}" rows="2"></textarea>
           <div class="selected-lines" style="display:none;"></div>
           <div class="keywords-count" id="org-count-rus-${index}">Количество организаций: 0</div>
         </div>
         <div class="author-field">
           <label>Organization (English):</label>
-          <input type="text" class="author-input" data-field="orgName" data-lang="ENG" data-index="${index}" value="">
+          <textarea class="author-input author-textarea" data-field="orgName" data-lang="ENG" data-index="${index}" rows="2"></textarea>
           <div class="selected-lines" style="display:none;"></div>
           <div class="keywords-count" id="org-count-eng-${index}">Количество организаций: 0</div>
         </div>
@@ -4543,6 +6531,9 @@ function createAuthorHTML(index) {
             <label>Researcher ID:</label>
             <input type="text" class="author-input" data-field="researcherid" data-lang="CODES" data-index="${index}" value="">
           </div>
+        </div>
+        <div class="author-collapse-actions">
+          <button type="button" class="author-collapse-btn" onclick="event.preventDefault(); event.stopPropagation(); toggleAuthorDetails(${index}); document.querySelector('.author-item[data-author-index=&quot;${index}&quot;]')?.scrollIntoView({ block: 'nearest' });">Свернуть</button>
         </div>
       </div>
     </div>
@@ -5115,9 +7106,6 @@ function collectAuthorsData() {
     if (cleaned.includes(";")) {
       return cleaned.split(";").map(s => s.trim()).filter(Boolean).length;
     }
-    if (cleaned.includes(",")) {
-      return cleaned.split(",").map(s => s.trim()).filter(Boolean).length;
-    }
     return cleaned ? 1 : 0;
   };
 
@@ -5132,7 +7120,9 @@ function collectAuthorsData() {
 
   window.countReferences = function(text) {
     if (!text || !text.trim()) return 0;
-    // Подсчитываем количество источников - каждая непустая строка = один источник
+    if (typeof splitReferences === "function") {
+      return splitReferences(text).length;
+    }
     const lines = text.split("\n")
       .map(line => line.trim())
       .filter(line => line.length > 0);
@@ -5197,8 +7187,10 @@ function collectAuthorsData() {
     return text.replace(/\b([A-Za-zА-Яа-яЁё]+)\s+([A-Za-zА-Яа-яЁё]+)\b/g, (m, a, b) => {
       const aLower = a.toLowerCase();
       const bLower = b.toLowerCase();
-      if (aLower.length <= 2 && !stop.has(aLower)) return a + b;
-      if (bLower.length <= 2 && !stop.has(bLower)) return a + b;
+      const aIsLower = a === aLower;
+      const bIsLower = b === bLower;
+      if (aLower.length <= 2 && !stop.has(aLower) && aIsLower) return a + b;
+      if (bLower.length <= 2 && !stop.has(bLower) && bIsLower) return a + b;
       if (prefixes && prefixes.has(aLower)) return a + b;
       if (bLower.startsWith("дователь")) return a + b;
       if (suffixes.has(bLower)) return a + b;
@@ -5483,8 +7475,8 @@ function collectAuthorsData() {
     } else if (fieldId === "annotation" || fieldId === "annotation_en") {
       // Обрабатываем аннотацию: удаляем префикс "Аннотация" или "Annotation" если он есть
       const annotation = window.processAnnotation(fullText, fieldId === "annotation_en" ? "en" : "ru");
-      // Если поле уже содержит текст, добавляем через пробел
-      value = field.value.trim() ? (field.value.trim() + " " + annotation) : annotation;
+      // Заменяем содержимое поля, не добавляя к предыдущему
+      value = annotation;
     } else if (fieldId === "year") {
       const year = extractYear(fullText);
       if (year) {

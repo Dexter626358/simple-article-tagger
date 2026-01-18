@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from html import unescape
 
 from flask import render_template_string, jsonify, request, abort, send_file
 
@@ -71,6 +72,29 @@ def register_markup_routes(app, ctx):
         except ValueError:
             abort(404)
         
+        view_mode = (request.args.get("mode") or "html").lower()
+        pdf_url = None
+        if file_path.suffix.lower() == ".pdf":
+            pdf_candidate = file_path
+        else:
+            pdf_candidate = file_path.with_suffix(".pdf")
+            if not pdf_candidate.exists():
+                pdf_candidate = None
+                try:
+                    rel_path = file_path.relative_to(words_input_dir)
+                    candidate = (_input_files_dir / rel_path).with_suffix(".pdf")
+                    if candidate.exists():
+                        pdf_candidate = candidate
+                except Exception:
+                    pass
+        if pdf_candidate and pdf_candidate.exists():
+            try:
+                rel_pdf = pdf_candidate.relative_to(_input_files_dir)
+                rel_pdf_url = str(rel_pdf).replace("\\", "/")
+                pdf_url = f"/pdf/{rel_pdf_url}"
+            except Exception:
+                pdf_url = None
+
         try:
             html_body, warnings = convert_file_to_html(file_path, use_word_reader=use_word_reader)
             
@@ -78,7 +102,17 @@ def register_markup_routes(app, ctx):
             if warnings:
                 print(f"Предупреждения для {filename}: {warnings}")
             
-            return render_template_string(VIEWER_TEMPLATE, filename=filename, content=html_body)
+            html_url = f"/view/{filename}"
+            pdf_view_url = f"/view/{filename}?mode=pdf"
+            return render_template_string(
+                VIEWER_TEMPLATE,
+                filename=filename,
+                content=html_body,
+                view_mode=view_mode,
+                html_url=html_url,
+                pdf_view_url=pdf_view_url,
+                pdf_url=pdf_url,
+            )
         except Exception as e:
             error_msg = f"Ошибка при конвертации файла: {e}"
             print(error_msg)
@@ -130,7 +164,8 @@ def register_markup_routes(app, ctx):
                         error_msg = (
                             f"??????: ?? ?????? ???? ??? {json_filename}<br><br>"
                             f"?????? ? ????? input_files/{subdir_name}/:<br>"
-                            f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf<br><br>"
+                            f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf / {json_path.stem}.idml / {json_path.stem}.html<br><br>"
+                            f"- full_issue.docx / full_issue.rtf / full_issue.html (полный выпуск)<br><br>"
                             f"????????? ???? ?: input_files/{subdir_name}/"
                         )
                     else:
@@ -178,6 +213,10 @@ def register_markup_routes(app, ctx):
                 # Извлекаем текст из HTML для разметки
                 lines = extract_text_from_html(html_body)
                 pdf_path_for_html = None
+
+            for line in lines:
+                if "text" in line:
+                    line["text"] = unescape(str(line.get("text", "")))
             
             # Для GPT используем PDF файл (если есть), иначе None
             pdf_path = None
@@ -350,37 +389,31 @@ def register_markup_routes(app, ctx):
             # Определяем, что показывать:
             # - Если есть только PDF (is_pdf_for_html == True) → показываем только PDF viewer
             # - Если есть Word файл (is_pdf_for_html == False) → показываем только HTML (текстовую панель)
-            if is_pdf_for_html:
-                # Если file_for_html - это PDF, показываем только PDF viewer
-                show_pdf_viewer = True
-                show_text_panel = False
-            else:
-                # Если file_for_html - это Word, показываем только текстовую панель
-                show_pdf_viewer = False
-                show_text_panel = True
-            
-            # Отладочный вывод
-            print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, type(show_text_panel)={type(show_text_panel)}")
-            
-            # Определяем путь к PDF для отображения (только если нужно показывать PDF viewer)
             pdf_path_for_viewer = None
-            if show_pdf_viewer:
-                if pdf_for_gpt:
-                    # Получаем относительный путь от input_files_dir
-                    try:
-                        pdf_relative = pdf_for_gpt.relative_to(_input_files_dir)
-                        pdf_path_for_viewer = str(pdf_relative.as_posix())
-                    except ValueError:
-                        # Если не удалось получить относительный путь, используем имя файла
-                        pdf_path_for_viewer = pdf_for_gpt.name
-                elif pdf_path_for_html:
-                    # Если нет PDF для GPT, но есть PDF для HTML, используем его
-                    try:
-                        pdf_relative = pdf_path_for_html.relative_to(_input_files_dir)
-                        pdf_path_for_viewer = str(pdf_relative.as_posix())
-                    except ValueError:
-                        pdf_path_for_viewer = pdf_path_for_html.name
-            
+            if pdf_for_gpt:
+                try:
+                    pdf_relative = pdf_for_gpt.relative_to(_input_files_dir)
+                    pdf_path_for_viewer = str(pdf_relative.as_posix())
+                except ValueError:
+                    pdf_path_for_viewer = pdf_for_gpt.name
+            elif pdf_path_for_html:
+                try:
+                    pdf_relative = pdf_path_for_html.relative_to(_input_files_dir)
+                    pdf_path_for_viewer = str(pdf_relative.as_posix())
+                except ValueError:
+                    pdf_path_for_viewer = pdf_path_for_html.name
+
+            show_pdf_viewer = pdf_path_for_viewer is not None
+            show_text_panel = True
+
+            view_mode = (request.args.get("view") or "html").lower()
+            if view_mode not in ("html", "pdf"):
+                view_mode = "html"
+            if view_mode == "pdf" and not show_pdf_viewer:
+                view_mode = "html"
+
+            print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, view_mode={view_mode}")
+
             return render_template_string(
                 MARKUP_TEMPLATE, 
                 filename=json_filename, 
@@ -391,7 +424,8 @@ def register_markup_routes(app, ctx):
                 article_start_line=article_start_line,
                 pdf_path=pdf_path_for_viewer,
                 show_pdf_viewer=show_pdf_viewer,
-                show_text_panel=show_text_panel
+                show_text_panel=show_text_panel,
+                view_mode=view_mode
             )
         except Exception as e:
             error_msg = f"Ошибка при подготовке разметки: {e}"
@@ -482,6 +516,10 @@ def register_markup_routes(app, ctx):
                 lines = extract_text_from_html(html_body)
                 pdf_path = None
             
+            for line in lines:
+                if "text" in line:
+                    line["text"] = unescape(str(line.get("text", "")))
+
             # Если используется общий файл, пытаемся найти начало статьи
             article_start_line = None
             if is_common_file:

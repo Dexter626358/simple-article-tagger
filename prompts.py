@@ -39,6 +39,8 @@ artType: RAR (default), REV, BRV, SCO, REP, CNF, EDI, COR, ABS, RPR, MIS, PER, U
   - **Priority rule**: Full names > Initials. Always prefer full names when they are present in the source.
 - **Initials**: When using initials (only when full names are not available), separate with space (e.g., "G. M." not "G.M.", "И. П." not "И.П.").
 - **Organizations**: If author is affiliated with multiple organizations, list them separated by semicolons.
+- **Shared affiliation rule**: If multiple authors share the same organization, and it is provided once for the group, apply this organization to ALL those authors. Copy both organization names (RUS/ENG) and addresses (RUS/ENG) for each author.
+- **Affiliation markers**: Superscript/inline numbers next to author names (e.g., "Юрова1,2", "Kordys 1") indicate the affiliation numbers listed below. Use these numbers to map each author to the correct organization(s). If an author has multiple numbers, include all corresponding organizations and addresses.
 - **Addresses**: Do not include organization name in address. For multiple organizations, separate addresses with semicolons. Address maybe just city.
 - **Important**: Do NOT include address information in the main author data fields (surname, initials, orgName). Address should be placed in the separate "address" field only.
 - **Email**: 
@@ -258,6 +260,8 @@ Return only valid JSON without additional comments or explanations. """
 
     # Промпт для форматирования списка литературы (исправление ошибок OCR)
     REFERENCES_FORMATTING_RUS = """
+IMPORTANT: Join broken lines within a single reference, including DOI/URL split by spaces or line breaks (e.g., "10.31857/ S0301179824020035" -> "10.31857/S0301179824020035").
+
 Задание:
 
 Перед тобой — список литературы, полученный с помощью распознавания текста (OCR). В нем уже выверено содержание и порядок источников, но есть технические ошибки форматирования: разрывы слов и инициалов пробелами, лишние пробелы, ошибки переноса, а также нарушение единообразия в оформлении.
@@ -319,6 +323,8 @@ Instructions:
 1. Remove extra spaces inside words, surnames, and initials.
 
 2. Merge any split lines belonging to the same reference.
+   - Join broken DOI/URL fragments split by spaces or line breaks (e.g., "10.31857/ S0301179824020035" -> "10.31857/S0301179824020035").
+
 
 3. Restore hyphenated words to their correct form.
 

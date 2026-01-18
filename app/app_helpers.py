@@ -7,6 +7,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
+from converters.idml_to_html import convert_idml_to_html
 from app.app_dependencies import (
     WORD_TO_HTML_AVAILABLE,
     convert_to_html,
@@ -16,6 +17,8 @@ from app.app_dependencies import (
     JSON_METADATA_AVAILABLE,
     load_json_metadata,
 )
+
+SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html"}
 
 def is_json_processed(json_path: Path) -> bool:
     """
@@ -341,7 +344,20 @@ def convert_file_to_html(
         raise FileNotFoundError(f"Файл не найден: {file_path}")
     
     suffix = file_path.suffix.lower()
+    warnings: list[str] = []
     
+    # Обработка HTML файлов
+    if suffix == ".html":
+        try:
+            try:
+                html_body = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                html_body = file_path.read_text(encoding="cp1251", errors="ignore")
+            html_body = merge_doi_url_in_html(html_body)
+            return html_body, warnings
+        except Exception as e:
+            raise RuntimeError(f"Ошибка чтения HTML: {e}") from e
+
     # Обработка PDF файлов
     if suffix == ".pdf":
         if not PDF_TO_HTML_AVAILABLE:
@@ -367,8 +383,16 @@ def convert_file_to_html(
             raise RuntimeError(f"Ошибка конвертации PDF: {e}") from e
     
     # Обработка Word файлов (DOCX/RTF)
+    if suffix == ".idml":
+        html_body = convert_idml_to_html(file_path)
+        html_body = merge_doi_url_in_html(html_body)
+        return html_body, warnings
+
     if suffix not in {".docx", ".rtf"}:
-        raise ValueError(f"Неподдерживаемый формат: {suffix}. Поддерживаются: .docx, .rtf, .pdf")
+        raise ValueError(
+            f"Неподдерживаемый формат: {suffix}. "
+            "Поддерживаются: .docx, .rtf, .pdf, .html"
+        )
     
     if not WORD_TO_HTML_AVAILABLE:
         raise RuntimeError("word_to_html недоступен")

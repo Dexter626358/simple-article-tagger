@@ -9,7 +9,13 @@ from pathlib import Path
 from flask import jsonify, request
 
 from app.app_dependencies import RTF_CONVERT_AVAILABLE, convert_rtf_to_docx
-from app.app_helpers import archive_processed_folders, cleanup_old_archives, _sanitize_folder_names
+from app.app_helpers import (
+    archive_processed_folders,
+    cleanup_old_archives,
+    list_archived_projects,
+    restore_archived_project,
+    _sanitize_folder_names,
+)
 
 def register_archive_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
@@ -177,14 +183,27 @@ def register_archive_routes(app, ctx):
 
     @app.route("/process-archive-status")
     def process_archive_status():
+        archive_name = None
         with progress_lock:
-            return jsonify({
+            archive_name = progress_state.get("archive") or last_archive.get("name")
+            status_payload = {
                 "status": progress_state.get("status"),
                 "processed": progress_state.get("processed", 0),
                 "total": progress_state.get("total", 0),
                 "message": progress_state.get("message", ""),
-                "archive": progress_state.get("archive") or last_archive.get("name")
-            })
+                "archive": archive_name,
+            }
+        if archive_name:
+            archive_dir = (_input_files_dir / archive_name).resolve()
+            if archive_dir.exists() and archive_dir.is_dir():
+                pdf_files = list(archive_dir.glob("*.pdf"))
+                extra_files = [
+                    p for p in archive_dir.iterdir()
+                    if p.is_file() and p.suffix.lower() != ".pdf"
+                ]
+                status_payload["pdf_count"] = len(pdf_files)
+                status_payload["extra_count"] = len(extra_files)
+        return jsonify(status_payload)
 
     @app.route("/finalize-archive", methods=["POST"])
     def finalize_archive():
@@ -225,3 +244,56 @@ def register_archive_routes(app, ctx):
         })
     
 
+    @app.route("/project-save", methods=["POST"])
+    def project_save():
+        data = request.get_json(silent=True) or {}
+        issue = (data.get("issue") or last_archive.get("name") or "").strip()
+        if not issue:
+            return jsonify({"success": False, "error": "Не указан выпуск."}), 400
+        issue_names = _sanitize_folder_names([issue])
+        if not issue_names:
+            return jsonify({"success": False, "error": "Недопустимое имя выпуска."}), 400
+        result = archive_processed_folders(
+            folder_names=issue_names,
+            archive_root_dir=archive_root_dir,
+            input_files_dir=_input_files_dir,
+            json_input_dir=json_input_dir,
+            xml_output_dir=xml_output_dir,
+        )
+        return jsonify({
+            "success": True,
+            "archive_dir": result.get("archive_dir"),
+            "moved": result.get("moved", []),
+            "issue": issue_names[0],
+        })
+
+    @app.route("/project-snapshots")
+    def project_snapshots():
+        return jsonify({
+            "success": True,
+            "snapshots": list_archived_projects(archive_root_dir),
+        })
+
+    @app.route("/project-restore", methods=["POST"])
+    def project_restore():
+        data = request.get_json(silent=True) or {}
+        run_name = (data.get("run") or "").strip()
+        issue = (data.get("issue") or "").strip()
+        overwrite = bool(data.get("overwrite", False))
+        if not run_name or not issue:
+            return jsonify({"success": False, "error": "Не указаны архив и выпуск."}), 400
+        run_names = _sanitize_folder_names([run_name])
+        issue_names = _sanitize_folder_names([issue])
+        if not run_names or not issue_names:
+            return jsonify({"success": False, "error": "Недопустимое имя архива или выпуска."}), 400
+        result = restore_archived_project(
+            archive_root_dir=archive_root_dir,
+            run_name=run_names[0],
+            issue_name=issue_names[0],
+            input_files_dir=_input_files_dir,
+            json_input_dir=json_input_dir,
+            xml_output_dir=xml_output_dir,
+            overwrite=overwrite,
+        )
+        status = 200 if result.get("success") else 400
+        return jsonify(result), status

@@ -43,6 +43,54 @@ HTML_TEMPLATE = """
       opacity: 0.9;
       font-size: 12px;
     }
+    .step-bar {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: rgba(255, 255, 255, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.08);
+    }
+    .step.active {
+      background: rgba(255, 255, 255, 0.28);
+      border-color: rgba(255, 255, 255, 0.6);
+      color: #fff;
+    }
+    .step.done {
+      background: rgba(76, 175, 80, 0.35);
+      border-color: rgba(76, 175, 80, 0.8);
+      color: #fff;
+    }
+    .upload-help ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+    .upload-help li {
+      margin: 4px 0;
+    }
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #1b1b1b;
+      background: #f1f5f9;
+      border: 1px solid #d8e0ff;
+    }
     .content {
       padding: 15px 20px;
       min-height: auto;
@@ -557,6 +605,11 @@ HTML_TEMPLATE = """
           📄 Сгенерировать XML
         </button>
       </div>
+      <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
+        <div class="step" data-step="1" data-label="Шаг 1 • ZIP">Шаг 1 • ZIP</div>
+        <div class="step" data-step="2" data-label="Шаг 2 • Разметка">Шаг 2 • Разметка</div>
+        <div class="step" data-step="3" data-label="Шаг 3 • XML">Шаг 3 • XML</div>
+      </div>
     </div>
     <div class="content">
       <div class="upload-panel">
@@ -566,7 +619,16 @@ HTML_TEMPLATE = """
           <button type="submit" class="btn-primary">Загрузить ZIP</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
         </form>
-        <div class="upload-help">Загрузите ZIP без папок внутри. Имя архива: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code>. В архиве должны быть PDF статей выпуска. Дополнительно можно загрузить файлы верстки в формате DOCX/RTF/HTML/IDML с теми же именами, что и PDF статьи, либо общий файл выпуска в формате DOCX/RTF/HTML/IDML с именем <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.html</code>).</div>
+        <div class="upload-help">
+          <div style="font-weight: 700; margin-bottom: 6px;">Требования к архиву</div>
+          <ul style="margin-left: 18px;">
+            <li>📁 Без папок внутри</li>
+            <li>🏷 Имя: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code></li>
+            <li>📄 Обязательно: PDF статей выпуска</li>
+            <li>📝 Дополнительно: DOCX / RTF / HTML / IDML / LaTeX</li>
+            <li>📦 Общий файл: <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.tex</code>)</li>
+          </ul>
+        </div>
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
           <button type="button" id="processArchiveBtn" class="btn-primary" disabled>Обработать архив</button>
           <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
@@ -574,8 +636,148 @@ HTML_TEMPLATE = """
           </div>
           <span id="archiveProgress" class="upload-status"></span>
         </div>
+        <div style="margin-top: 6px; display:flex; gap: 10px; flex-wrap: wrap; align-items:center;">
+          <span id="archiveDetails" class="upload-status"></span>
+        </div>
+        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+          <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="(async()=>{const issue=window.prompt('Укажите имя выпуска (папки):');if(!issue){return;}const status=document.getElementById('projectStatus');if(status){status.textContent='Сохранение проекта...';status.style.color='#555';}try{const resp=await fetch('/project-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const data=await resp.json().catch(()=>({}));if(!resp.ok||!data.success){if(status){status.textContent=data.error||'Ошибка сохранения проекта.';status.style.color='#c62828';}return;}if(status){status.textContent=`Проект сохранен: ${data.issue||issue}`;status.style.color='#2e7d32';}setTimeout(()=>window.location.reload(),1200);}catch(_){if(status){status.textContent='Ошибка сохранения проекта.';status.style.color='#c62828';}}})()">Сохранить проект</button>
+          <button type="button" id="openProjectBtn" class="btn-secondary" onclick="(async()=>{const status=document.getElementById('projectStatus');if(status){status.textContent='Загрузка списка проектов...';status.style.color='#555';}try{const resp=await fetch('/project-snapshots');const data=await resp.json().catch(()=>({}));const snapshots=data.snapshots||[];const options=[];snapshots.forEach(run=>{(run.issues||[]).forEach(issue=>{options.push({run:run.run,issue});});});if(!options.length){if(status){status.textContent='Нет сохраненных проектов.';status.style.color='#c62828';}return;}const list=options.map((opt,idx)=>`${idx+1}. ${opt.issue} (архив ${opt.run})`).join('\\n');const choice=window.prompt(`Выберите проект для восстановления:\\n${list}\\nВведите номер:`);const index=Number(choice)-1;if(!choice||Number.isNaN(index)||!options[index]){if(status){status.textContent='Отмена восстановления.';status.style.color='#555';}return;}const target=options[index];const restore=async(overwrite)=>{const restoreResp=await fetch('/project-restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run:target.run,issue:target.issue,overwrite})});return restoreResp.json().catch(()=>({}));};let restoreData=await restore(false);if(!restoreData.success&&restoreData.code==='dest_exists'){const confirmOverwrite=window.confirm('Папка выпуска уже существует. Перезаписать?');if(!confirmOverwrite){if(status){status.textContent='Восстановление отменено.';status.style.color='#555';}return;}restoreData=await restore(true);}if(!restoreData.success){if(status){status.textContent=restoreData.error||'Ошибка восстановления.';status.style.color='#c62828';}return;}if(status){status.textContent=`Проект восстановлен: ${target.issue}`;status.style.color='#2e7d32';}setTimeout(()=>window.location.reload(),1200);}catch(_){if(status){status.textContent='Ошибка восстановления.';status.style.color='#c62828';}}})()">Открыть проект</button>
+          <span id="projectStatus" class="upload-status"></span>
+        </div>
+        <script>
+          window.saveProject = async () => {
+            const issue = window.prompt("Укажите имя выпуска (папки):");
+            if (!issue) {
+              return;
+            }
+            const status = document.getElementById("projectStatus");
+            if (status) {
+              status.textContent = "Сохранение проекта...";
+              status.style.color = "#555";
+            }
+            try {
+              const resp = await fetch("/project-save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ issue })
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                if (status) {
+                  status.textContent = data.error || "Ошибка сохранения проекта.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              if (status) {
+                status.textContent = `Проект сохранен: ${data.issue || issue}`;
+                status.style.color = "#2e7d32";
+              }
+              setTimeout(() => window.location.reload(), 1200);
+            } catch (_) {
+              if (status) {
+                status.textContent = "Ошибка сохранения проекта.";
+                status.style.color = "#c62828";
+              }
+            }
+          };
+
+          window.openProject = async () => {
+            const status = document.getElementById("projectStatus");
+            if (status) {
+              status.textContent = "Загрузка списка проектов...";
+              status.style.color = "#555";
+            }
+            try {
+              const resp = await fetch("/project-snapshots");
+              const data = await resp.json().catch(() => ({}));
+              const snapshots = data.snapshots || [];
+              const options = [];
+              snapshots.forEach((run) => {
+                (run.issues || []).forEach((issue) => {
+                  options.push({ run: run.run, issue });
+                });
+              });
+              if (!options.length) {
+                if (status) {
+                  status.textContent = "Нет сохраненных проектов.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              const list = options
+                .map((opt, idx) => `${idx + 1}. ${opt.issue} (архив ${opt.run})`)
+                .join("\n");
+              const choice = window.prompt(`Выберите проект для восстановления:\n${list}\nВведите номер:`);
+              const index = Number(choice) - 1;
+              if (!choice || Number.isNaN(index) || !options[index]) {
+                if (status) {
+                  status.textContent = "Отмена восстановления.";
+                  status.style.color = "#555";
+                }
+                return;
+              }
+              const target = options[index];
+              const restore = async (overwrite) => {
+                const restoreResp = await fetch("/project-restore", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
+                });
+                return restoreResp.json().catch(() => ({}));
+              };
+              let restoreData = await restore(false);
+              if (!restoreData.success && restoreData.code === "dest_exists") {
+                const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
+                if (!confirmOverwrite) {
+                  if (status) {
+                    status.textContent = "Восстановление отменено.";
+                    status.style.color = "#555";
+                  }
+                  return;
+                }
+                restoreData = await restore(true);
+              }
+              if (!restoreData.success) {
+                if (status) {
+                  status.textContent = restoreData.error || "Ошибка восстановления.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              if (status) {
+                status.textContent = `Проект восстановлен: ${target.issue}`;
+                status.style.color = "#2e7d32";
+              }
+              setTimeout(() => window.location.reload(), 1200);
+            } catch (_) {
+              if (status) {
+                status.textContent = "Ошибка восстановления.";
+                status.style.color = "#c62828";
+              }
+            }
+          };
+        </script>
       </div>
       {% if files %}
+        <div class="upload-panel" style="margin-top: 12px;">
+          <div class="upload-title">Статус разметки</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:#444;">
+            <div>Всего статей: <strong>{{ files|length }}</strong></div>
+            <div>Размечено: <strong>{{ files|selectattr('is_processed')|list|length }}</strong></div>
+            <div>Осталось: <strong>{{ (files|length) - (files|selectattr('is_processed')|list|length) }}</strong></div>
+            {% set total_files = files|length %}
+            {% set processed_files = files|selectattr('is_processed')|list|length %}
+            {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
+            {% set progress_color = '#c62828' if progress_pct <= 30 else ('#f9a825' if progress_pct <= 70 else '#2e7d32') %}
+            <div class="status-chip" style="background: {{ progress_color }}; color: #fff;">
+              {{ progress_pct }}% готово
+            </div>
+            <a href="/markup/{{ files[0].name }}" class="btn-secondary" style="text-decoration:none; padding:6px 10px;">
+              Перейти к разметке
+            </a>
+          </div>
+        </div>
         <div class="file-list">
           {% for file in files %}
             <a href="/markup/{{ file.name }}" style="text-decoration: none; color: inherit;">
@@ -2983,8 +3185,13 @@ function closeAnnotationModal() {
       <script>
         const inputArchiveForm = document.getElementById("inputArchiveForm");
         const processArchiveBtn = document.getElementById("processArchiveBtn");
+        const saveProjectBtn = document.getElementById("saveProjectBtn");
+        const openProjectBtn = document.getElementById("openProjectBtn");
         const archiveProgress = document.getElementById("archiveProgress");
         const archiveProgressFill = document.getElementById("archiveProgressFill");
+        const archiveDetails = document.getElementById("archiveDetails");
+        const projectStatus = document.getElementById("projectStatus");
+        const stepBar = document.getElementById("stepBar");
         let currentArchive = null;
         let archivePollTimer = null;
         const archiveReloadKey = "archive_done_reloaded";
@@ -2993,6 +3200,63 @@ function closeAnnotationModal() {
           if (archivePollTimer) {
             clearInterval(archivePollTimer);
             archivePollTimer = null;
+          }
+        };
+
+        const updateSteps = () => {
+          if (!stepBar) return;
+          const total = Number(stepBar.dataset.total || 0);
+          const processedTotal = Number(stepBar.dataset.processed || 0);
+          const step1 = stepBar.querySelector('[data-step="1"]');
+          const step2 = stepBar.querySelector('[data-step="2"]');
+          const step3 = stepBar.querySelector('[data-step="3"]');
+          const setStep = (el, state) => {
+            if (!el) return;
+            const label = el.dataset.label || el.textContent || "";
+            el.classList.remove("active", "done");
+            if (state === "done") {
+              el.classList.add("done");
+              el.textContent = `✔ ${label}`;
+            } else if (state === "active") {
+              el.classList.add("active");
+              el.textContent = `▶ ${label}`;
+            } else {
+              el.textContent = label;
+            }
+          };
+          setStep(step1, currentArchive ? "done" : "active");
+          if (total > 0) {
+            setStep(step2, processedTotal === total ? "done" : "active");
+          } else {
+            setStep(step2, "");
+          }
+          if (total > 0 && processedTotal === total) {
+            setStep(step3, "active");
+          } else {
+            setStep(step3, "");
+          }
+        };
+
+        const updateSteps = () => {
+          if (!stepBar) return;
+          const total = Number(stepBar.dataset.total || 0);
+          const processedTotal = Number(stepBar.dataset.processed || 0);
+          const step1 = stepBar.querySelector('[data-step="1"]');
+          const step2 = stepBar.querySelector('[data-step="2"]');
+          const step3 = stepBar.querySelector('[data-step="3"]');
+          [step1, step2, step3].forEach((step) => {
+            if (step) {
+              step.classList.remove("active", "done");
+            }
+          });
+          if (step1) {
+            step1.classList.add(currentArchive ? "done" : "active");
+          }
+          if (step2 && total > 0) {
+            step2.classList.add(processedTotal === total ? "done" : "active");
+          }
+          if (step3 && total > 0 && processedTotal === total) {
+            step3.classList.add("active");
           }
         };
 
@@ -3006,6 +3270,7 @@ function closeAnnotationModal() {
           if (data?.archive) {
             currentArchive = data.archive;
           }
+          updateSteps();
           if (processArchiveBtn) {
             processArchiveBtn.disabled = !currentArchive || status === "running";
           }
@@ -3015,9 +3280,21 @@ function closeAnnotationModal() {
             const pct = Math.max(0, Math.min(100, Math.round((processed / safeTotal) * 100)));
             archiveProgressFill.style.width = `${pct}%`;
           }
+          const setArchiveDetails = (color) => {
+            if (!archiveDetails) return;
+            const pdfCount = data?.pdf_count ?? null;
+            const extraCount = data?.extra_count ?? null;
+            const details = [];
+            if (pdfCount !== null) details.push(`PDF: ${pdfCount}`);
+            if (extraCount !== null) details.push(`Доп. файлов: ${extraCount}`);
+            if (data?.message) details.push(data.message);
+            archiveDetails.textContent = details.join(" • ");
+            archiveDetails.style.color = color || "#555";
+          };
           if (status === "running") {
             archiveProgress.textContent = `Прогресс: ${processed}/${total}`;
             archiveProgress.style.color = "#555";
+            setArchiveDetails("#555");
             if (!archivePollTimer) {
               archivePollTimer = setInterval(fetchArchiveStatus, 1000);
             }
@@ -3026,6 +3303,7 @@ function closeAnnotationModal() {
           if (status === "done") {
             archiveProgress.textContent = `Готово: ${processed}/${total}`;
             archiveProgress.style.color = "#2e7d32";
+            setArchiveDetails("#2e7d32");
             stopArchivePolling();
             if (!sessionStorage.getItem(archiveReloadKey)) {
               sessionStorage.setItem(archiveReloadKey, "1");
@@ -3036,6 +3314,7 @@ function closeAnnotationModal() {
           if (status === "error") {
             archiveProgress.textContent = data?.message || "Ошибка обработки.";
             archiveProgress.style.color = "#c62828";
+            setArchiveDetails("#c62828");
             if (archiveProgressFill) {
               archiveProgressFill.style.width = "0%";
             }
@@ -3045,11 +3324,15 @@ function closeAnnotationModal() {
           if (currentArchive) {
             archiveProgress.textContent = `Готов к обработке: ${currentArchive}`;
             archiveProgress.style.color = "#555";
+            setArchiveDetails("#555");
             if (archiveProgressFill && status !== "running") {
               archiveProgressFill.style.width = "0%";
             }
           } else {
             archiveProgress.textContent = "";
+            if (archiveDetails) {
+              archiveDetails.textContent = "";
+            }
             if (archiveProgressFill) {
               archiveProgressFill.style.width = "0%";
             }
@@ -3100,6 +3383,98 @@ function closeAnnotationModal() {
               }
             }
           });
+        }
+
+        const setProjectStatus = (text, color) => {
+          if (!projectStatus) return;
+          projectStatus.textContent = text;
+          projectStatus.style.color = color || "#555";
+        };
+
+        window.saveProject = async () => {
+          const issue = (currentArchive || "").trim() || window.prompt("Укажите имя выпуска (папки):");
+          if (!issue) {
+            return;
+          }
+          setProjectStatus("Сохранение проекта...", "#555");
+          try {
+            const resp = await fetch("/project-save", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ issue })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+              setProjectStatus(data.error || "Ошибка сохранения проекта.", "#c62828");
+              return;
+            }
+            setProjectStatus(`Проект сохранен: ${data.issue || issue}`, "#2e7d32");
+            setTimeout(() => window.location.reload(), 1200);
+          } catch (_) {
+            setProjectStatus("Ошибка сохранения проекта.", "#c62828");
+          }
+        };
+
+        window.openProject = async () => {
+          setProjectStatus("Загрузка списка проектов...", "#555");
+          try {
+            const resp = await fetch("/project-snapshots");
+            const data = await resp.json().catch(() => ({}));
+            const snapshots = data.snapshots || [];
+            const options = [];
+            snapshots.forEach((run) => {
+              (run.issues || []).forEach((issue) => {
+                options.push({ run: run.run, issue });
+              });
+            });
+            if (!options.length) {
+              setProjectStatus("Нет сохраненных проектов.", "#c62828");
+              return;
+            }
+            const list = options
+              .map((opt, idx) => `${idx + 1}. ${opt.issue} (архив ${opt.run})`)
+              .join("\n");
+            const choice = window.prompt(`Выберите проект для восстановления:\n${list}\nВведите номер:`);
+            const index = Number(choice) - 1;
+            if (!choice || Number.isNaN(index) || !options[index]) {
+              setProjectStatus("Отмена восстановления.", "#555");
+              return;
+            }
+            const target = options[index];
+            const restore = async (overwrite) => {
+              const restoreResp = await fetch("/project-restore", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
+              });
+              return restoreResp.json().catch(() => ({}));
+            };
+            let restoreData = await restore(false);
+            if (!restoreData.success && restoreData.code === "dest_exists") {
+              const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
+              if (!confirmOverwrite) {
+                setProjectStatus("Восстановление отменено.", "#555");
+                return;
+              }
+              restoreData = await restore(true);
+            }
+            if (!restoreData.success) {
+              setProjectStatus(restoreData.error || "Ошибка восстановления.", "#c62828");
+              return;
+            }
+            setProjectStatus(`Проект восстановлен: ${target.issue}`, "#2e7d32");
+            setTimeout(() => window.location.reload(), 1200);
+          } catch (_) {
+            setProjectStatus("Ошибка восстановления.", "#c62828");
+          }
+        };
+
+        if (saveProjectBtn) {
+          saveProjectBtn.addEventListener("click", window.saveProject);
+        }
+
+        if (openProjectBtn) {
+          openProjectBtn.addEventListener("click", window.openProject);
         }
 
         if (inputArchiveForm) {

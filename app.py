@@ -31,7 +31,7 @@ from app.routes.markup_routes import register_markup_routes
 # Константы
 # ----------------------------
 
-SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html"}
+SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html", ".tex"}
 SUPPORTED_JSON_EXTENSIONS = {".json"}
 ARCHIVE_ROOT_DIRNAME = "processed_archives"
 ARCHIVE_RETENTION_DAYS = 7
@@ -135,26 +135,39 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         word_files = list(issue_dir.glob("*.docx")) + list(issue_dir.glob("*.rtf"))
         idml_files = list(issue_dir.glob("*.idml"))
         html_files = list(issue_dir.glob("*.html"))
+        tex_files = list(issue_dir.glob("*.tex"))
 
         pdf_for_article = next((p for p in pdf_files if p.stem == json_stem), None)
+        pdf_full_issue = next((p for p in pdf_files if p.stem == "full_issue"), None)
         word_for_article = next((w for w in word_files if w.stem == json_stem), None)
         idml_for_article = next((w for w in idml_files if w.stem == json_stem), None)
         word_full_issue = next((w for w in word_files if w.stem == "full_issue"), None)
         html_for_article = next((h for h in html_files if h.stem == json_stem), None)
         html_full_issue = next((h for h in html_files if h.stem == "full_issue"), None)
+        tex_for_article = next((t for t in tex_files if t.stem == json_stem), None)
+        tex_full_issue = next((t for t in tex_files if t.stem == "full_issue"), None)
 
         if idml_for_article:
-            return pdf_for_article, idml_for_article
+            return pdf_for_article or pdf_full_issue, idml_for_article
         if html_full_issue:
-            return pdf_for_article, html_full_issue
+            return pdf_for_article or pdf_full_issue, html_full_issue
         if word_full_issue:
-            return pdf_for_article, word_full_issue
+            return pdf_for_article or pdf_full_issue, word_full_issue
+        if tex_full_issue:
+            return pdf_for_article or pdf_full_issue, tex_full_issue
+        pdf_fallback = pdf_for_article or pdf_full_issue or (pdf_files[0] if pdf_files else None)
         if html_for_article:
-            return None, html_for_article
+            return pdf_fallback, html_for_article
         if word_for_article:
-            return None, word_for_article
+            return pdf_fallback, word_for_article
+        if tex_for_article:
+            return pdf_fallback, tex_for_article
         if pdf_for_article:
             return pdf_for_article, pdf_for_article
+        if pdf_full_issue:
+            return pdf_full_issue, pdf_full_issue
+        if pdf_files:
+            return pdf_files[0], pdf_files[0]
 
         return None, None
 

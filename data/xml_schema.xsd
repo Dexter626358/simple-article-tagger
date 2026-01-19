@@ -1120,6 +1120,39 @@
                                 </xs:sequence>
                               </xs:complexType>
                             </xs:element>
+                            <xs:element minOccurs="0" maxOccurs="1" name="artFunding">
+                              <xs:annotation>
+                                <xs:documentation>
+									Элемент, включающий в себя список элементов, значения которых содержат сведения о финансовой поддержке статьи
+								</xs:documentation>
+                              </xs:annotation>
+                              <xs:complexType>
+                                <xs:sequence>
+                                  <xs:element minOccurs="0" maxOccurs="unbounded" name="funding">
+                                    <xs:annotation>
+                                      <xs:documentation>
+											Элемент, значение которого содержит финансовую поддержку статьи. У этого элемента есть обязательный атрибут lang.
+											Внутри этого элемента допустимо использование следующих элементов: i, b, sub, sup, br
+										</xs:documentation>
+                                    </xs:annotation>
+                                    <xs:complexType mixed="true">
+                                      <xs:sequence minOccurs="0" maxOccurs="unbounded">
+                                        <xs:choice maxOccurs="unbounded">
+                                          <xs:any processContents="skip" minOccurs="0" maxOccurs="unbounded" />
+                                        </xs:choice>
+                                      </xs:sequence>
+                                      <xs:attribute name="lang" type="typeLang" use="required">
+                                        <xs:annotation>
+                                          <xs:documentation>
+													Атрибут lang, в значении которого указывается язык финансовой поддержки в трёхбуквенном коде (см. справочник typeLang)
+												</xs:documentation>
+                                        </xs:annotation>
+                                      </xs:attribute>
+                                    </xs:complexType>
+                                  </xs:element>
+                                </xs:sequence>
+                              </xs:complexType>
+                            </xs:element>
                           </xs:choice>
                           <!-- </xs:sequence> -->
                         </xs:complexType>

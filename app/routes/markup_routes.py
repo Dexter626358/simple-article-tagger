@@ -164,8 +164,8 @@ def register_markup_routes(app, ctx):
                         error_msg = (
                             f"??????: ?? ?????? ???? ??? {json_filename}<br><br>"
                             f"?????? ? ????? input_files/{subdir_name}/:<br>"
-                            f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf / {json_path.stem}.idml / {json_path.stem}.html<br><br>"
-                            f"- full_issue.docx / full_issue.rtf / full_issue.html (полный выпуск)<br><br>"
+                            f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf / {json_path.stem}.idml / {json_path.stem}.html / {json_path.stem}.tex<br><br>"
+                            f"- full_issue.docx / full_issue.rtf / full_issue.html / full_issue.tex (полный выпуск)<br><br>"
                             f"????????? ???? ?: input_files/{subdir_name}/"
                         )
                     else:

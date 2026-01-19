@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import re
 import shutil
@@ -18,7 +19,7 @@ from app.app_dependencies import (
     load_json_metadata,
 )
 
-SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html"}
+SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html", ".tex"}
 
 def is_json_processed(json_path: Path) -> bool:
     """
@@ -198,6 +199,74 @@ def archive_processed_folders(
     return {"archive_dir": str(run_dir), "moved": moved}
 
 
+def list_archived_projects(archive_root_dir: Path) -> list[dict]:
+    """Return list of archive runs with available issue folders."""
+    if not archive_root_dir.exists() or not archive_root_dir.is_dir():
+        return []
+    runs: list[dict] = []
+    for run_dir in sorted(archive_root_dir.iterdir(), reverse=True):
+        if not run_dir.is_dir():
+            continue
+        issues: set[str] = set()
+        for sub in ("input_files", "json_input", "xml_output"):
+            subdir = run_dir / sub
+            if not subdir.exists() or not subdir.is_dir():
+                continue
+            for issue_dir in subdir.iterdir():
+                if issue_dir.is_dir():
+                    issues.add(issue_dir.name)
+        if issues:
+            runs.append({
+                "run": run_dir.name,
+                "issues": sorted(issues),
+            })
+    return runs
+
+
+def restore_archived_project(
+    archive_root_dir: Path,
+    run_name: str,
+    issue_name: str,
+    input_files_dir: Path,
+    json_input_dir: Path,
+    xml_output_dir: Path,
+    overwrite: bool = False,
+) -> dict:
+    """Restore archived issue folders back into working directories."""
+    run_dir = archive_root_dir / run_name
+    if not run_dir.exists() or not run_dir.is_dir():
+        return {"success": False, "error": f"Архив не найден: {run_name}"}
+
+    moved: list[str] = []
+    for base_dir, subdir in (
+        (input_files_dir, "input_files"),
+        (json_input_dir, "json_input"),
+        (xml_output_dir, "xml_output"),
+    ):
+        src = run_dir / subdir / issue_name
+        if not src.exists() or not src.is_dir():
+            continue
+        dest = base_dir / issue_name
+        if dest.exists():
+            if not overwrite:
+                return {
+                    "success": False,
+                    "error": f"Папка уже существует: {dest}",
+                    "code": "dest_exists",
+                }
+            shutil.rmtree(dest)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+        moved.append(str(dest))
+
+    if not moved:
+        return {
+            "success": False,
+            "error": f"В архиве нет данных для выпуска: {issue_name}",
+        }
+
+    return {"success": True, "moved": moved}
+
 def get_source_files(input_dir: Path) -> list[dict]:
     """
     Получает список DOCX/RTF файлов из указанной директории и всех подпапок.
@@ -322,6 +391,208 @@ def merge_doi_url_in_html(html_content: str) -> str:
     return ''.join(result_parts)
 
 
+def _strip_latex_comments(text: str) -> str:
+    lines = []
+    for line in text.splitlines():
+        cleaned = []
+        escaped = False
+        for ch in line:
+            if ch == "\\" and not escaped:
+                escaped = True
+                cleaned.append(ch)
+                continue
+            if ch == "%" and not escaped:
+                break
+            escaped = False
+            cleaned.append(ch)
+        lines.append("".join(cleaned))
+    return "\n".join(lines)
+
+
+def _strip_latex_command(text: str, command: str) -> str:
+    pattern = re.compile(rf"\\\\{command}\\*?(?:\\[[^\\]]*\\])?\\{{([^{{}}]*)\\}}")
+    prev = None
+    while prev != text:
+        prev = text
+        text = pattern.sub(r"\\1", text)
+    return text
+
+
+def _latex_to_html(latex_source: str) -> str:
+    source = _strip_latex_comments(latex_source)
+    source = source.replace("\r\n", "\n").replace("\r", "\n")
+    source = source.lstrip("\ufeff")
+    if "\\begin{document}" in source and "\\end{document}" in source:
+        body = source.split("\\begin{document}", 1)[1]
+        source = body.split("\\end{document}", 1)[0]
+
+    source = re.sub(r"\\begin\\{abstract\\}", "\n<<ABSTRACT>>\n", source)
+    source = re.sub(r"\\end\\{abstract\\}", "\n<<ENDABSTRACT>>\n", source)
+    source = re.sub(r"\\begin\\{keywords\\}", "\n<<KEYWORDS>>\n", source)
+    source = re.sub(r"\\end\\{keywords\\}", "\n<<ENDKEYWORDS>>\n", source)
+    source = re.sub(r"\\keywords?\\*?\\{([^{}]*)\\}", r"\n<<KEYWORDS>>\1\n", source)
+
+    source = re.sub(r"\\begin\\{itemize\\}", "\n<<UL>>\n", source)
+    source = re.sub(r"\\end\\{itemize\\}", "\n<<ENDUL>>\n", source)
+    source = re.sub(r"\\begin\\{enumerate\\}", "\n<<OL>>\n", source)
+    source = re.sub(r"\\end\\{enumerate\\}", "\n<<ENDOL>>\n", source)
+
+    def _replace_item(match: re.Match) -> str:
+        label = match.group(1)
+        if label:
+            return f"\n<<LI>> {label} "
+        return "\n<<LI>> "
+
+    source = re.sub(r"\\item(?:\\[(.*?)\\])?", _replace_item, source)
+
+    source = re.sub(r"\\section\\*?\\{([^{}]*)\\}", r"\n<<H2>>\1\n", source)
+    source = re.sub(r"\\subsection\\*?\\{([^{}]*)\\}", r"\n<<H3>>\1\n", source)
+    source = re.sub(r"\\subsubsection\\*?\\{([^{}]*)\\}", r"\n<<H4>>\1\n", source)
+    source = re.sub(r"\\paragraph\\*?\\{([^{}]*)\\}", r"\n<<H5>>\1\n", source)
+    source = re.sub(r"\\title\\*?\\{([^{}]*)\\}", r"\n<<H1>>\1\n", source)
+
+    source = source.replace("~", " ")
+    source = re.sub(r"\\\\\\s*(\\[[^\\]]*\\])?", "\n", source)
+    source = source.replace("\\par", "\n")
+
+    for cmd in (
+        "textbf",
+        "textit",
+        "emph",
+        "underline",
+        "textrm",
+        "texttt",
+        "textsc",
+        "textsf",
+        "textsl",
+        "mathrm",
+        "mathbf",
+        "mathit",
+    ):
+        source = _strip_latex_command(source, cmd)
+
+    source = re.sub(r"\\cite\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
+    source = re.sub(r"\\ref\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
+    source = re.sub(r"\\eqref\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
+
+    source = re.sub(r"\\begin\\{[^}]+\\}", "", source)
+    source = re.sub(r"\\end\\{[^}]+\\}", "", source)
+
+    source = re.sub(r"\\[a-zA-Z]+\\*?(?:\\[[^\\]]*\\])?", "", source)
+    source = source.replace("{", "").replace("}", "")
+    source = re.sub(r"\\$\\$\\s*(.*?)\\s*\\$\\$", r"\\1", source, flags=re.DOTALL)
+    source = re.sub(r"\\$(.*?)\\$", r"\\1", source)
+    source = re.sub(r"[ \\t]+", " ", source)
+    source = re.sub(r"\\n{3,}", "\n\n", source)
+
+    html_parts = ['<div class="latex-content">']
+    paragraph: list[str] = []
+    block_mode: str | None = None
+    block_lines: list[str] = []
+    in_list: str | None = None
+
+    def flush_paragraph() -> None:
+        if paragraph:
+            text = " ".join(paragraph).strip()
+            if text:
+                html_parts.append(f"<p>{html.escape(text)}</p>")
+            paragraph.clear()
+
+    def close_list() -> None:
+        nonlocal in_list
+        if in_list == "ul":
+            html_parts.append("</ul>")
+        elif in_list == "ol":
+            html_parts.append("</ol>")
+        in_list = None
+
+    for raw_line in source.split("\n"):
+        line = raw_line.strip()
+        if line == "<<ABSTRACT>>":
+            flush_paragraph()
+            close_list()
+            block_mode = "abstract"
+            block_lines = []
+            continue
+        if line == "<<KEYWORDS>>":
+            flush_paragraph()
+            close_list()
+            block_mode = "keywords"
+            block_lines = []
+            continue
+        if line in {"<<ENDABSTRACT>>", "<<ENDKEYWORDS>>"}:
+            if block_mode and block_lines:
+                text = " ".join(block_lines).strip()
+                if text:
+                    html_parts.append(f'<p class="{block_mode}">{html.escape(text)}</p>')
+            block_mode = None
+            block_lines = []
+            continue
+        if block_mode:
+            if line:
+                block_lines.append(line)
+            continue
+        if not line:
+            flush_paragraph()
+            continue
+
+        if line == "<<UL>>":
+            flush_paragraph()
+            close_list()
+            html_parts.append("<ul>")
+            in_list = "ul"
+            continue
+        if line == "<<ENDUL>>":
+            flush_paragraph()
+            close_list()
+            continue
+        if line == "<<OL>>":
+            flush_paragraph()
+            close_list()
+            html_parts.append("<ol>")
+            in_list = "ol"
+            continue
+        if line == "<<ENDOL>>":
+            flush_paragraph()
+            close_list()
+            continue
+
+        for marker, tag in (
+            ("<<H1>>", "h1"),
+            ("<<H2>>", "h2"),
+            ("<<H3>>", "h3"),
+            ("<<H4>>", "h4"),
+            ("<<H5>>", "h5"),
+        ):
+            if line.startswith(marker):
+                flush_paragraph()
+                close_list()
+                title = line[len(marker):].strip()
+                if title:
+                    html_parts.append(f"<{tag}>{html.escape(title)}</{tag}>")
+                break
+        else:
+            if line.startswith("<<LI>>"):
+                flush_paragraph()
+                if not in_list:
+                    html_parts.append("<ul>")
+                    in_list = "ul"
+                item_text = line[len("<<LI>>"):].strip()
+                if item_text:
+                    html_parts.append(f"<li>{html.escape(item_text)}</li>")
+                continue
+
+            if in_list:
+                html_parts.append(f"<li>{html.escape(line)}</li>")
+            else:
+                paragraph.append(line)
+
+    flush_paragraph()
+    close_list()
+    html_parts.append("</div>")
+    return "".join(html_parts)
+
+
 def convert_file_to_html(
     file_path: Path,
     use_word_reader: bool = False,
@@ -358,6 +629,18 @@ def convert_file_to_html(
         except Exception as e:
             raise RuntimeError(f"Ошибка чтения HTML: {e}") from e
 
+    # Обработка LaTeX файлов
+    if suffix == ".tex":
+        try:
+            try:
+                latex_source = file_path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                latex_source = file_path.read_text(encoding="cp1251", errors="ignore")
+            html_body = _latex_to_html(latex_source)
+            return html_body, warnings
+        except Exception as e:
+            raise RuntimeError(f"Ошибка чтения LaTeX: {e}") from e
+
     # Обработка PDF файлов
     if suffix == ".pdf":
         if not PDF_TO_HTML_AVAILABLE:
@@ -391,7 +674,7 @@ def convert_file_to_html(
     if suffix not in {".docx", ".rtf"}:
         raise ValueError(
             f"Неподдерживаемый формат: {suffix}. "
-            "Поддерживаются: .docx, .rtf, .pdf, .html"
+            "Поддерживаются: .docx, .rtf, .pdf, .html, .idml, .tex"
         )
     
     if not WORD_TO_HTML_AVAILABLE:

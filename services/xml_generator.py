@@ -468,11 +468,11 @@ def json_to_article_xml(json_file: Path) -> ET.Element:
         if date in data.get("dates", {}):
             ET.SubElement(dates_elem, date).text = data["dates"][date]
 
-    # fundings
-    fundings_elem = ET.SubElement(article, "fundings")
+    # artFunding
+    art_funding_elem = ET.SubElement(article, "artFunding")
     for lang in ["RUS", "ENG"]:
         if lang in data.get("fundings", {}):
-            ET.SubElement(fundings_elem, "funding", lang=lang).text = data["fundings"][lang]
+            ET.SubElement(art_funding_elem, "funding", lang=lang).text = data["fundings"][lang]
 
 
     return article

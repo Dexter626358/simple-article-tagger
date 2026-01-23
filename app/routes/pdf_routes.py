@@ -10,6 +10,61 @@ from flask import render_template_string, jsonify, request, send_file, abort
 from app.app_dependencies import PDF_TO_HTML_AVAILABLE, extract_text_from_pdf
 from app.app_helpers import get_source_files
 
+
+def _normalize_extracted_text(text: str, field_id: str | None, options: dict) -> str:
+    if not text or text == "(Текст не найден)":
+        return text
+    cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+
+    fix_hyphenation = options.get("fix_hyphenation", True)
+    if fix_hyphenation:
+        # Обрабатываем переносы с переводом строки: "сло-\nво" → "слово"
+        cleaned = re.sub(
+            r"([A-Za-zА-Яа-яЁё])[-‑–—]\s*\n\s*([a-zа-яё])",
+            r"\1\2",
+            cleaned,
+        )
+        # Обрабатываем переносы с пробелом (из PDF): "сло- во" → "слово"
+        cleaned = re.sub(
+            r"([A-Za-zА-Яа-яЁё])[-‑–—]\s+([a-zа-яё])",
+            r"\1\2",
+            cleaned,
+        )
+
+    strip_prefix = options.get("strip_prefix", True)
+    if strip_prefix:
+        if field_id in {"annotation", "annotation_en"}:
+            cleaned = re.sub(r"^(аннотация|abstract)\s*[:\-]\s*", "", cleaned, flags=re.IGNORECASE)
+        if field_id in {"keywords", "keywords_en"}:
+            cleaned = re.sub(r"^(ключевые слова|keywords)\s*[:\-]\s*", "", cleaned, flags=re.IGNORECASE)
+
+    join_lines = options.get("join_lines")
+    if join_lines is None:
+        join_lines = field_id not in {"references_ru", "references_en"}
+    if join_lines:
+        cleaned = re.sub(r"[ \t]*\n[ \t]*", " ", cleaned)
+
+    # Склеиваем индексы: "С орг" → "С_орг", "N общ" → "N_общ"
+    # Паттерн: одиночная буква + пробел + короткое слово (2-4 буквы, обычно нижний индекс)
+    # Типичные индексы: орг, общ, max, min, opt и т.д.
+    cleaned = re.sub(
+        r'\b([A-ZА-ЯЁ])\s+(орг|общ|max|min|opt|eff|tot|org|obs|calc|exp|теор|эксп|ср|мин|макс)\b',
+        r'\1_\2',
+        cleaned,
+        flags=re.IGNORECASE
+    )
+    
+    # Также обрабатываем случаи когда индекс уже частично склеен: "Сорг" → "С_орг"  
+    cleaned = re.sub(
+        r'\b([CNPKС])(\s*)(орг|общ|org|tot)\b',
+        r'\1_\3',
+        cleaned,
+        flags=re.IGNORECASE
+    )
+
+    cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
+    return cleaned
+
 def register_pdf_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
     words_input_dir = ctx.get("words_input_dir")
@@ -346,6 +401,8 @@ def register_pdf_routes(app, ctx):
             data = request.get_json()
             pdf_filename = data.get("pdf_file")
             selections = data.get("selections", [])
+            options = data.get("options", {}) or {}
+            merge_by_field = bool(options.get("merge_by_field", False))
             
             print(f"DEBUG: Запрос извлечения текста из {len(selections)} областей")
             print(f"DEBUG: PDF файл: {pdf_filename}")
@@ -432,11 +489,14 @@ def register_pdf_routes(app, ctx):
                         top = min(pdf_y1, pdf_y2)
                         bottom = max(pdf_y1, pdf_y2)
                         
-                        # Ограничиваем координаты границами страницы
-                        pdf_x1 = max(0, min(pdf_x1, page.width))
-                        pdf_x2 = max(0, min(pdf_x2, page.width))
-                        top = max(0, min(top, page.height))
-                        bottom = max(0, min(bottom, page.height))
+                        # Добавляем отступ для захвата крайних символов
+                        # Увеличенный padding помогает захватить номера страниц и года в конце строк
+                        padding_x = 5  # пиксели по горизонтали
+                        padding_y = 3  # пиксели по вертикали
+                        pdf_x1 = max(0, pdf_x1 - padding_x)
+                        pdf_x2 = min(page.width, pdf_x2 + padding_x)
+                        top = max(0, top - padding_y)
+                        bottom = min(page.height, bottom + padding_y)
                         
                         # Убеждаемся, что x1 < x2 и top < bottom
                         if pdf_x1 >= pdf_x2:
@@ -451,99 +511,166 @@ def register_pdf_routes(app, ctx):
                         try:
                             cropped = page.crop((pdf_x1, top, pdf_x2, bottom))
                             
-                            # Извлекаем текст разными способами для диагностики
-                            text_simple = cropped.extract_text()
+                            # Извлекаем текст с настройками для лучшей группировки
+                            # Увеличенные tolerance помогают захватить индексы (sub/sup)
+                            text_simple = cropped.extract_text(
+                                x_tolerance=3,  # допуск по X для объединения символов в слова
+                                y_tolerance=5,  # допуск по Y увеличен для захвата индексов
+                            )
                             
-                            # Также пробуем извлечь через слова (words) для более точного контроля
-                            words = cropped.extract_words()
+                            # Также извлекаем слова для более точного контроля
+                            words = cropped.extract_words(
+                                x_tolerance=3,
+                                y_tolerance=5,  # увеличен для индексов
+                                keep_blank_chars=False,
+                            )
                             
                             print(f"DEBUG: Извлеченный текст (простой метод): {text_simple[:100] if text_simple else '(пусто)'}")
                             print(f"DEBUG: Найдено слов: {len(words)}")
                             
-                            # Если есть слова, можем собрать текст из них
+                            # Группируем слова по строкам (по Y-координате)
                             if words:
-                                # Сортируем слова по координатам (сверху вниз, слева направо)
-                                words_sorted = sorted(words, key=lambda w: (w['top'], w['x0']))
-                                text_from_words = ' '.join([w['text'] for w in words_sorted])
+                                # Группируем слова по строкам с допуском по Y
+                                line_tolerance = 5  # пиксели
+                                lines = []
+                                current_line = []
+                                current_top = None
+                                
+                                # Сортируем сначала по Y (top), потом по X (x0)
+                                words_sorted_by_y = sorted(words, key=lambda w: (round(w['top'] / line_tolerance), w['x0']))
+                                
+                                for w in words_sorted_by_y:
+                                    if current_top is None:
+                                        current_top = w['top']
+                                        current_line = [w]
+                                    elif abs(w['top'] - current_top) <= line_tolerance:
+                                        # Та же строка
+                                        current_line.append(w)
+                                    else:
+                                        # Новая строка
+                                        if current_line:
+                                            # Сортируем слова в строке по X
+                                            current_line.sort(key=lambda x: x['x0'])
+                                            lines.append(current_line)
+                                        current_line = [w]
+                                        current_top = w['top']
+                                
+                                if current_line:
+                                    current_line.sort(key=lambda x: x['x0'])
+                                    lines.append(current_line)
+                                
+                                # Собираем текст из строк
+                                text_from_words = '\n'.join([' '.join([w['text'] for w in line]) for line in lines])
+                                words_sorted = [w for line in lines for w in line]  # плоский список для дальнейшей обработки
+                                
                                 print(f"DEBUG: Текст из слов (первые 100 символов): {text_from_words[:100]}")
                                 
-                                # Пробуем определить, какой текст нужен (русский или английский)
-                                # Если есть кириллица, предпочитаем русский текст
-                                has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_from_words)
-                                has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text_from_words)
+                                # Для references и annotation НЕ фильтруем по языку — оставляем весь текст
+                                skip_early_lang_filter = field_id in {
+                                    "references_ru", "references_en", 
+                                    "annotation", "annotation_en"
+                                }
                                 
-                                print(f"DEBUG: Есть кириллица: {has_cyrillic}, есть латиница: {has_latin}")
-                                
-                                # Если есть и русский, и английский текст, определяем, какой преобладает
-                                if has_cyrillic and has_latin:
-                                    # Разделяем на русские и английские слова
-                                    cyrillic_words = [w for w in words_sorted if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text'])]
-                                    latin_words = [w for w in words_sorted if not any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text']) and any(c.isalpha() for c in w['text'])]
+                                if not skip_early_lang_filter:
+                                    # Пробуем определить, какой текст нужен (русский или английский)
+                                    has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_from_words)
+                                    has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text_from_words)
                                     
-                                    # Подсчитываем количество символов в каждом языке
-                                    cyrillic_chars = sum(len(w['text']) for w in cyrillic_words)
-                                    latin_chars = sum(len(w['text']) for w in latin_words)
+                                    print(f"DEBUG: Есть кириллица: {has_cyrillic}, есть латиница: {has_latin}")
                                     
-                                    print(f"DEBUG: Кириллица: {len(cyrillic_words)} слов, {cyrillic_chars} символов")
-                                    print(f"DEBUG: Латиница: {len(latin_words)} слов, {latin_chars} символов")
-                                    
-                                    # Выбираем язык с большим количеством символов
-                                    if cyrillic_chars >= latin_chars:
-                                        if cyrillic_words:
-                                            text_from_words = ' '.join([w['text'] for w in cyrillic_words])
-                                            print(f"DEBUG: Выбран русский текст (преобладает кириллица: {cyrillic_chars} > {latin_chars}): {text_from_words[:100]}")
-                                    else:
-                                        if latin_words:
-                                            text_from_words = ' '.join([w['text'] for w in latin_words])
-                                            print(f"DEBUG: Выбран английский текст (преобладает латиница: {latin_chars} > {cyrillic_chars}): {text_from_words[:100]}")
+                                    # Если есть и русский, и английский текст, определяем, какой преобладает
+                                    if has_cyrillic and has_latin:
+                                        # Разделяем на русские и английские слова
+                                        cyrillic_words = [w for w in words_sorted if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text'])]
+                                        latin_words = [w for w in words_sorted if not any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text']) and any(c.isalpha() for c in w['text'])]
+                                        
+                                        # Подсчитываем количество символов в каждом языке
+                                        cyrillic_chars = sum(len(w['text']) for w in cyrillic_words)
+                                        latin_chars = sum(len(w['text']) for w in latin_words)
+                                        
+                                        print(f"DEBUG: Кириллица: {len(cyrillic_words)} слов, {cyrillic_chars} символов")
+                                        print(f"DEBUG: Латиница: {len(latin_words)} слов, {latin_chars} символов")
+                                        
+                                        # Выбираем язык с большим количеством символов
+                                        if cyrillic_chars >= latin_chars:
+                                            if cyrillic_words:
+                                                text_from_words = ' '.join([w['text'] for w in cyrillic_words])
+                                                print(f"DEBUG: Выбран русский текст (преобладает кириллица: {cyrillic_chars} > {latin_chars}): {text_from_words[:100]}")
+                                        else:
+                                            if latin_words:
+                                                text_from_words = ' '.join([w['text'] for w in latin_words])
+                                                print(f"DEBUG: Выбран английский текст (преобладает латиница: {latin_chars} > {cyrillic_chars}): {text_from_words[:100]}")
                             
-                            # Используем текст из слов, если он есть, иначе простой метод
-                            if words and len(words) > 0:
-                                # Проверяем, есть ли кириллица в извлеченном тексте
-                                has_cyrillic_in_simple = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_simple) if text_simple else False
+                            # Выбираем лучший метод извлечения
+                            if words and len(words) > 0 and 'text_from_words' in locals() and text_from_words:
+                                # Сравниваем качество двух методов
+                                # Признак плохого извлечения: много коротких "слов" (1-2 символа) подряд
+                                simple_words = text_simple.split() if text_simple else []
+                                grouped_words = text_from_words.split()
                                 
-                                if has_cyrillic_in_simple:
-                                    # Если в простом методе есть кириллица, используем его
-                                    text = text_simple
-                                    print(f"DEBUG: Используется простой метод (есть кириллица)")
-                                elif 'text_from_words' in locals() and text_from_words:
-                                    # Используем текст из слов
+                                # Считаем долю коротких слов (признак перемешанных символов)
+                                short_simple = sum(1 for w in simple_words if len(w) <= 2) / max(len(simple_words), 1)
+                                short_grouped = sum(1 for w in grouped_words if len(w) <= 2) / max(len(grouped_words), 1)
+                                
+                                print(f"DEBUG: Доля коротких слов - простой: {short_simple:.2f}, группировка: {short_grouped:.2f}")
+                                
+                                # Если в простом методе много коротких слов — используем группировку
+                                if short_simple > 0.3 and short_grouped < short_simple:
                                     text = text_from_words
-                                    print(f"DEBUG: Используется метод из слов")
-                                else:
+                                    print(f"DEBUG: Используется метод группировки (меньше коротких слов)")
+                                elif text_simple:
                                     text = text_simple
-                            else:
+                                    print(f"DEBUG: Используется простой метод")
+                                else:
+                                    text = text_from_words
+                                    print(f"DEBUG: Используется метод группировки (простой пуст)")
+                            elif text_simple:
                                 text = text_simple
+                                print(f"DEBUG: Используется простой метод (нет слов)")
+                            else:
+                                text = "(Текст не найден)"
                             
-                            if is_rus_field:
+                            # Для списка литературы и аннотаций НЕ фильтруем по языку — 
+                            # там могут быть термины, названия методов, имена на латинице
+                            is_references_field = field_id in {"references_ru", "references_en"}
+                            is_annotation_field = field_id in {"annotation", "annotation_en"}
+                            skip_language_filter = is_references_field or is_annotation_field
+                            
+                            # Для русских полей (кроме references и annotation): включаем кириллические слова + цифры/пунктуацию
+                            if is_rus_field and not skip_language_filter:
                                 ru_text = None
                                 if words:
-                                    cyrillic_words = [
+                                    # Включаем слова с кириллицей ИЛИ без букв (цифры, пунктуация, номера страниц)
+                                    relevant_words = [
                                         w for w in words_sorted
                                         if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w["text"])
+                                        or not any(c.isalpha() for c in w["text"])  # цифры, пунктуация
                                     ]
-                                    if cyrillic_words:
-                                        ru_text = " ".join([w["text"] for w in cyrillic_words])
+                                    if relevant_words:
+                                        ru_text = " ".join([w["text"] for w in relevant_words])
                                 if not ru_text and text_simple and any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_simple):
                                     ru_text = text_simple
                                 if ru_text:
                                     text = ru_text
-                                    print(f"DEBUG: ??????? ????????? ??? ???? {field_id}: {text[:100]}")
+                                    print(f"DEBUG: Выбран русский текст для поля {field_id}: {text[:100]}")
 
-                            if is_eng_field:
+                            # Для английских полей (кроме references и annotation): включаем латинские слова + цифры/пунктуацию
+                            if is_eng_field and not skip_language_filter:
                                 en_text = None
                                 if words:
-                                    latin_words = [
+                                    # Включаем слова с латиницей ИЛИ без букв (цифры, пунктуация, номера страниц)
+                                    relevant_words = [
                                         w for w in words_sorted
                                         if any(c.isalpha() and ord(c) < 0x0400 for c in w["text"])
+                                        or not any(c.isalpha() for c in w["text"])  # цифры, пунктуация
                                     ]
-                                    if latin_words:
-                                        en_text = " ".join([w["text"] for w in latin_words])
+                                    if relevant_words:
+                                        en_text = " ".join([w["text"] for w in relevant_words])
                                 if not en_text and text_simple and any(c.isalpha() and ord(c) < 0x0400 for c in text_simple):
                                     en_text = text_simple
                                 if en_text:
                                     text = en_text
-                                    print(f"DEBUG: ??????? ????????? ??? ???? {field_id}: {text[:100]}")
+                                    print(f"DEBUG: Выбран английский текст для поля {field_id}: {text[:100]}")
 
                             if text:
                                 text = text.strip()
@@ -554,7 +681,8 @@ def register_pdf_routes(app, ctx):
                             
                             # Дополнительная проверка: если в тексте есть и русский, и английский,
                             # определяем преобладающий язык и выбираем соответствующий текст
-                            if text and text != "(Текст не найден)":
+                            # НО: для списка литературы и аннотаций пропускаем — там смешанные языки это норма
+                            if text and text != "(Текст не найден)" and not skip_language_filter:
                                 has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text)
                                 has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text)
                                 
@@ -644,19 +772,23 @@ def register_pdf_routes(app, ctx):
                                             text = '\n'.join(filtered_lines).strip()
                             
                             extracted.append({
+                                "field_id": field_id,
+                                "page": page_num,
                                 "bbox": {
                                     "x1": pdf_x1,
                                     "y1": pdf_y1,
                                     "x2": pdf_x2,
                                     "y2": pdf_y2
                                 },
-                                "text": text
+                                "text": _normalize_extracted_text(text, field_id, options)
                             })
                         except Exception as crop_error:
                             import traceback
                             error_msg = f"Ошибка при crop: {str(crop_error)}\n{traceback.format_exc()}"
                             print(f"ERROR: {error_msg}")
                             extracted.append({
+                                "field_id": field_id,
+                                "page": page_num,
                                 "bbox": {
                                     "x1": pdf_x1,
                                     "y1": pdf_y1,
@@ -667,9 +799,21 @@ def register_pdf_routes(app, ctx):
                             })
                 
                 print(f"DEBUG: Извлечено текста из {len(extracted)} областей")
+                merged = {}
+                if merge_by_field:
+                    for item in sorted(extracted, key=lambda i: (i.get("field_id") or "", i.get("page", 0))):
+                        field = item.get("field_id")
+                        text = item.get("text")
+                        if not field or not text or text == "(Текст не найден)":
+                            continue
+                        merged.setdefault(field, [])
+                        merged[field].append(text)
+                    merged = {k: "\n".join(v).strip() for k, v in merged.items()}
+
                 return jsonify({
                     "success": True,
-                    "extracted": extracted
+                    "extracted": extracted,
+                    "merged": merged if merge_by_field else None,
                 })
             except ImportError as e:
                 print(f"ERROR: pdfplumber не установлен: {e}")

@@ -614,7 +614,7 @@ HTML_TEMPLATE = """
     <div class="content">
       <div class="upload-panel">
         <div class="upload-title">Загрузка архива input_files</div>
-        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data">
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post" onsubmit="event.preventDefault(); window.uploadArchive && window.uploadArchive(); return false;">
           <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
           <button type="submit" class="btn-primary">Загрузить ZIP</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
@@ -640,10 +640,65 @@ HTML_TEMPLATE = """
           <span id="archiveDetails" class="upload-status"></span>
         </div>
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-          <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="(async()=>{const issue=window.prompt('Укажите имя выпуска (папки):');if(!issue){return;}const status=document.getElementById('projectStatus');if(status){status.textContent='Сохранение проекта...';status.style.color='#555';}try{const resp=await fetch('/project-save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({issue})});const data=await resp.json().catch(()=>({}));if(!resp.ok||!data.success){if(status){status.textContent=data.error||'Ошибка сохранения проекта.';status.style.color='#c62828';}return;}if(status){status.textContent=`Проект сохранен: ${data.issue||issue}`;status.style.color='#2e7d32';}setTimeout(()=>window.location.reload(),1200);}catch(_){if(status){status.textContent='Ошибка сохранения проекта.';status.style.color='#c62828';}}})()">Сохранить проект</button>
-          <button type="button" id="openProjectBtn" class="btn-secondary" onclick="(async()=>{const status=document.getElementById('projectStatus');if(status){status.textContent='Загрузка списка проектов...';status.style.color='#555';}try{const resp=await fetch('/project-snapshots');const data=await resp.json().catch(()=>({}));const snapshots=data.snapshots||[];const options=[];snapshots.forEach(run=>{(run.issues||[]).forEach(issue=>{options.push({run:run.run,issue});});});if(!options.length){if(status){status.textContent='Нет сохраненных проектов.';status.style.color='#c62828';}return;}const list=options.map((opt,idx)=>`${idx+1}. ${opt.issue} (архив ${opt.run})`).join('\\n');const choice=window.prompt(`Выберите проект для восстановления:\\n${list}\\nВведите номер:`);const index=Number(choice)-1;if(!choice||Number.isNaN(index)||!options[index]){if(status){status.textContent='Отмена восстановления.';status.style.color='#555';}return;}const target=options[index];const restore=async(overwrite)=>{const restoreResp=await fetch('/project-restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({run:target.run,issue:target.issue,overwrite})});return restoreResp.json().catch(()=>({}));};let restoreData=await restore(false);if(!restoreData.success&&restoreData.code==='dest_exists'){const confirmOverwrite=window.confirm('Папка выпуска уже существует. Перезаписать?');if(!confirmOverwrite){if(status){status.textContent='Восстановление отменено.';status.style.color='#555';}return;}restoreData=await restore(true);}if(!restoreData.success){if(status){status.textContent=restoreData.error||'Ошибка восстановления.';status.style.color='#c62828';}return;}if(status){status.textContent=`Проект восстановлен: ${target.issue}`;status.style.color='#2e7d32';}setTimeout(()=>window.location.reload(),1200);}catch(_){if(status){status.textContent='Ошибка восстановления.';status.style.color='#c62828';}}})()">Открыть проект</button>
+          <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="window.saveProject && window.saveProject()">Сохранить проект</button>
+          <button type="button" id="openProjectBtn" class="btn-secondary" onclick="window.openProject && window.openProject()">Открыть проект</button>
           <span id="projectStatus" class="upload-status"></span>
         </div>
+        <script>
+          window.uploadArchive = async () => {
+            const fileInput = document.getElementById("inputArchiveFile");
+            const status = document.getElementById("inputArchiveStatus");
+            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+              if (status) {
+                status.textContent = "Выберите ZIP файл.";
+                status.style.color = "#c62828";
+              }
+              return;
+            }
+            const formData = new FormData();
+            formData.append("archive", fileInput.files[0]);
+            if (status) {
+              status.textContent = "Загрузка архива...";
+              status.style.color = "#555";
+            }
+            try {
+              const response = await fetch("/upload-input-archive", {
+                method: "POST",
+                body: formData
+              });
+              const data = await response.json().catch(() => ({}));
+              if (!response.ok || !data.success) {
+                if (status) {
+                  status.textContent = data.error || "Ошибка загрузки архива.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              if (status) {
+                status.textContent = data.message || "Архив загружен.";
+                status.style.color = "#2e7d32";
+              }
+              if (data && data.archive) {
+                window.currentArchive = data.archive;
+                sessionStorage.setItem("lastArchiveName", data.archive);
+                const processBtn = document.getElementById("processArchiveBtn");
+                if (processBtn) {
+                  processBtn.disabled = false;
+                }
+                if (status) {
+                  status.textContent = "Архив загружен: " + data.archive;
+                  status.style.color = "#2e7d32";
+                }
+              }
+              setTimeout(() => window.location.reload(), 1200);
+            } catch (_) {
+              if (status) {
+                status.textContent = "Ошибка загрузки архива.";
+                status.style.color = "#c62828";
+              }
+            }
+          };
+        </script>
         <script>
           window.saveProject = async () => {
             const issue = window.prompt("Укажите имя выпуска (папки):");
@@ -670,7 +725,7 @@ HTML_TEMPLATE = """
                 return;
               }
               if (status) {
-                status.textContent = `Проект сохранен: ${data.issue || issue}`;
+                status.textContent = "Проект сохранен: " + (data.issue || issue);
                 status.style.color = "#2e7d32";
               }
               setTimeout(() => window.location.reload(), 1200);
@@ -706,9 +761,9 @@ HTML_TEMPLATE = """
                 return;
               }
               const list = options
-                .map((opt, idx) => `${idx + 1}. ${opt.issue} (архив ${opt.run})`)
-                .join("\n");
-              const choice = window.prompt(`Выберите проект для восстановления:\n${list}\nВведите номер:`);
+                .map((opt, idx) => (idx + 1) + ". " + opt.issue + " (архив " + opt.run + ")")
+                .join("\\n");
+              const choice = window.prompt("Выберите проект для восстановления:\\n" + list + "\\nВведите номер:");
               const index = Number(choice) - 1;
               if (!choice || Number.isNaN(index) || !options[index]) {
                 if (status) {
@@ -746,7 +801,7 @@ HTML_TEMPLATE = """
                 return;
               }
               if (status) {
-                status.textContent = `Проект восстановлен: ${target.issue}`;
+                status.textContent = "Проект восстановлен: " + target.issue;
                 status.style.color = "#2e7d32";
               }
               setTimeout(() => window.location.reload(), 1200);
@@ -801,7 +856,9 @@ HTML_TEMPLATE = """
         
         <script>
           // Обработчик кнопки генерации XML
-          document.getElementById("generateXmlBtn")?.addEventListener("click", async function() {
+          const generateXmlBtn = document.getElementById("generateXmlBtn");
+          if (generateXmlBtn) {
+            generateXmlBtn.addEventListener("click", async function() {
             const btn = this;
             const originalText = btn.textContent;
             
@@ -862,7 +919,7 @@ HTML_TEMPLATE = """
                 // Показываем уведомление
                 const notification = document.createElement("div");
                 notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;max-width:400px;";
-                notification.innerHTML = `<strong>Успешно!</strong><br>${data.message}<br><small>Скачано файлов: ${data.files?.length || 0}</small>`;
+                notification.innerHTML = "<strong>Успешно!</strong><br>" + data.message + "<br><small>Скачано файлов: " + ((data.files && data.files.length) ? data.files.length : 0) + "</small>";
                 document.body.appendChild(notification);
                 
                 setTimeout(() => {
@@ -895,6 +952,7 @@ HTML_TEMPLATE = """
               }, 3000);
             }
           });
+          }
           
           // Теперь используем прямые ссылки на /markup/<filename> вместо AJAX загрузки
           
@@ -905,7 +963,7 @@ HTML_TEMPLATE = """
               const savedFiles = JSON.parse(localStorage.getItem("recently_saved_files") || "[]");
               if (savedFiles.length > 0) {
                 savedFiles.forEach(function(filename) {
-                  const fileItem = document.querySelector(`.file-item[data-filename="${filename}"]`);
+                  const fileItem = document.querySelector('.file-item[data-filename="' + filename + '"]');
                   if (fileItem) {
                     // Добавляем класс processed, если его еще нет
                     if (!fileItem.classList.contains("processed")) {
@@ -1111,7 +1169,7 @@ HTML_TEMPLATE = """
             return;
           }
           
-          const refs = refsText.split("\n")
+          const refs = refsText.split("\\n")
             .map(s => s.trim())
             .filter(Boolean);
           
@@ -1158,7 +1216,7 @@ HTML_TEMPLATE = """
               return textSpan ? textSpan.textContent.trim() : "";
             })
             .filter(ref => ref.length > 0);
-          field.value = refs.join("\n");
+          field.value = refs.join("\\n");
           field.dispatchEvent(new Event("input", { bubbles: true }));
           if (window.updateReferencesCount) {
             window.updateReferencesCount(currentRefsFieldId);
@@ -1253,7 +1311,7 @@ HTML_TEMPLATE = """
             })
             .filter(ref => ref.length > 0);
           
-          field.value = refs.join("\n");
+          field.value = refs.join("\\n");
           field.dispatchEvent(new Event("input", { bubbles: true }));
           if (window.updateReferencesCount) {
             window.updateReferencesCount(currentRefsFieldId);
@@ -1345,16 +1403,16 @@ function annotationHtmlToText(html) {
     }
 
     if (tag === "BR") {
-      output += "\n";
+      output += "\\n";
       return;
     }
     if (tag === "DIV" || tag === "P") {
-      if (output && !output.endsWith("\n")) {
-        output += "\n";
+      if (output && !output.endsWith("\\n")) {
+        output += "\\n";
       }
       node.childNodes.forEach(walk);
-      if (!output.endsWith("\n")) {
-        output += "\n";
+      if (!output.endsWith("\\n")) {
+        output += "\\n";
       }
       return;
     }
@@ -3192,7 +3250,7 @@ function closeAnnotationModal() {
         const archiveDetails = document.getElementById("archiveDetails");
         const projectStatus = document.getElementById("projectStatus");
         const stepBar = document.getElementById("stepBar");
-        let currentArchive = null;
+        window.currentArchive = window.currentArchive || null;
         let archivePollTimer = null;
         const archiveReloadKey = "archive_done_reloaded";
 
@@ -3224,7 +3282,7 @@ function closeAnnotationModal() {
               el.textContent = label;
             }
           };
-          setStep(step1, currentArchive ? "done" : "active");
+          setStep(step1, window.currentArchive ? "done" : "active");
           if (total > 0) {
             setStep(step2, processedTotal === total ? "done" : "active");
           } else {
@@ -3237,29 +3295,6 @@ function closeAnnotationModal() {
           }
         };
 
-        const updateSteps = () => {
-          if (!stepBar) return;
-          const total = Number(stepBar.dataset.total || 0);
-          const processedTotal = Number(stepBar.dataset.processed || 0);
-          const step1 = stepBar.querySelector('[data-step="1"]');
-          const step2 = stepBar.querySelector('[data-step="2"]');
-          const step3 = stepBar.querySelector('[data-step="3"]');
-          [step1, step2, step3].forEach((step) => {
-            if (step) {
-              step.classList.remove("active", "done");
-            }
-          });
-          if (step1) {
-            step1.classList.add(currentArchive ? "done" : "active");
-          }
-          if (step2 && total > 0) {
-            step2.classList.add(processedTotal === total ? "done" : "active");
-          }
-          if (step3 && total > 0 && processedTotal === total) {
-            step3.classList.add("active");
-          }
-        };
-
         const updateArchiveUi = (data) => {
           const status = data?.status || "idle";
           const processed = Number(data?.processed || 0);
@@ -3268,11 +3303,17 @@ function closeAnnotationModal() {
             sessionStorage.removeItem(archiveReloadKey);
           }
           if (data?.archive) {
-            currentArchive = data.archive;
+            window.currentArchive = data.archive;
+            sessionStorage.setItem("lastArchiveName", data.archive);
+          } else if (!window.currentArchive) {
+            const cachedArchive = sessionStorage.getItem("lastArchiveName");
+            if (cachedArchive) {
+              window.currentArchive = cachedArchive;
+            }
           }
           updateSteps();
           if (processArchiveBtn) {
-            processArchiveBtn.disabled = !currentArchive || status === "running";
+            processArchiveBtn.disabled = !window.currentArchive || status === "running";
           }
           if (!archiveProgress) return;
           if (archiveProgressFill) {
@@ -3321,8 +3362,8 @@ function closeAnnotationModal() {
             stopArchivePolling();
             return;
           }
-          if (currentArchive) {
-            archiveProgress.textContent = `Готов к обработке: ${currentArchive}`;
+          if (window.currentArchive) {
+            archiveProgress.textContent = `Готов к обработке: ${window.currentArchive}`;
             archiveProgress.style.color = "#555";
             setArchiveDetails("#555");
             if (archiveProgressFill && status !== "running") {
@@ -3353,7 +3394,7 @@ function closeAnnotationModal() {
 
         if (processArchiveBtn) {
           processArchiveBtn.addEventListener("click", async () => {
-            if (!currentArchive) {
+            if (!window.currentArchive) {
               updateArchiveUi({ status: "idle", archive: null });
               return;
             }
@@ -3365,7 +3406,7 @@ function closeAnnotationModal() {
               const resp = await fetch("/process-archive", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ archive: currentArchive })
+                body: JSON.stringify({ archive: window.currentArchive })
               });
               const data = await resp.json().catch(() => ({}));
               if (!resp.ok || !data.success) {
@@ -3392,7 +3433,7 @@ function closeAnnotationModal() {
         };
 
         window.saveProject = async () => {
-          const issue = (currentArchive || "").trim() || window.prompt("Укажите имя выпуска (папки):");
+          const issue = (window.currentArchive || "").trim() || window.prompt("Укажите имя выпуска (папки):");
           if (!issue) {
             return;
           }
@@ -3433,8 +3474,8 @@ function closeAnnotationModal() {
             }
             const list = options
               .map((opt, idx) => `${idx + 1}. ${opt.issue} (архив ${opt.run})`)
-              .join("\n");
-            const choice = window.prompt(`Выберите проект для восстановления:\n${list}\nВведите номер:`);
+              .join("\\n");
+            const choice = window.prompt(`Выберите проект для восстановления:\\n${list}\\nВведите номер:`);
             const index = Number(choice) - 1;
             if (!choice || Number.isNaN(index) || !options[index]) {
               setProjectStatus("Отмена восстановления.", "#555");
@@ -4152,6 +4193,64 @@ PDF_SELECT_TEMPLATE = ""  # Отключено, страница удалена
       max-height: 95vh;
       min-height: 600px;
     }
+    .pdf-bbox-toolbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 10px;
+      font-size: 12px;
+      color: #444;
+    }
+    .pdf-bbox-toolbar .bbox-active-field {
+      font-weight: 600;
+      color: #1e88e5;
+    }
+    .pdf-bbox-toolbar .bbox-btn {
+      border: 1px solid #667eea;
+      background: #fff;
+      color: #667eea;
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    .pdf-bbox-toolbar .bbox-btn:hover {
+      background: #667eea;
+      color: #fff;
+    }
+    .bbox-overlay {
+      position: absolute;
+      /* left, top, width, height устанавливаются в JS */
+      z-index: 50;
+      pointer-events: auto;
+      cursor: crosshair;
+      box-sizing: border-box;
+    }
+    .bbox-rect {
+      position: absolute;
+      border: 2px solid #1e88e5;
+      background: rgba(30, 136, 229, 0.15);
+      box-sizing: border-box;
+    }
+    .bbox-rect.active {
+      box-shadow: 0 0 0 2px #000;
+      z-index: 1000;
+    }
+    .bbox-rect .bbox-label {
+      position: absolute;
+      top: -18px;
+      left: 0;
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: rgba(30, 136, 229, 0.9);
+      color: #fff;
+      white-space: nowrap;
+    }
+    .bbox-rect.temp {
+      border-style: dashed;
+      background: rgba(30, 136, 229, 0.08);
+    }
     #pdfViewer {
       width: 100%;
       min-height: 600px;
@@ -4748,6 +4847,11 @@ MARKUP_TEMPLATE = r"""
     {% if show_pdf_viewer and pdf_path %}
     <div id="pdfPanel" class="pdf-panel{% if view_mode != 'pdf' %} panel-hidden{% endif %}">
       <h3 style="margin-bottom: 10px; color: #333;">PDF просмотр:</h3>
+      <div class="pdf-bbox-toolbar">
+        <span>Поле для bbox:</span>
+        <span id="bboxActiveField" class="bbox-active-field">не выбрано</span>
+        <button type="button" id="bboxClearBtn" class="bbox-btn">Очистить bbox на странице</button>
+      </div>
       <div class="pdf-viewer-container">
         <iframe
           id="pdfViewerIframe"
@@ -5252,6 +5356,7 @@ MARKUP_TEMPLATE = r"""
   </div>
 </div>
 
+<script src="/static/pdf-bbox.js"></script>
 <script>
 // Глобальные функции для работы с модальным окном списка литературы
 function escapeHtml(text) {
@@ -7065,6 +7170,7 @@ function collectAuthorsData() {
 (() => {
   const selected = new Set();
   let currentFieldId = null;
+  const pdfBbox = window.PdfBbox || null;
 
   const $ = (sel, root=document) => root.querySelector(sel);
   const $$ = (sel, root=document) => Array.from(root.querySelectorAll(sel));
@@ -7607,6 +7713,11 @@ function collectAuthorsData() {
     });
     return processed.filter(Boolean);
   }
+
+  window.extractUDC = extractUDC;
+  window.processKeywords = processKeywords;
+  window.processFunding = processFunding;
+  window.processReferences = processReferences;
   
   function mergeDoiUrlWithReferences(refs) {
     if (!refs || refs.length === 0) return refs;
@@ -8056,6 +8167,7 @@ function collectAuthorsData() {
       if (!el) return;
       if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el.id) {
         currentFieldId = el.id;
+        if (pdfBbox) pdfBbox.setActiveField(el.id);
       }
     });
 
@@ -8073,7 +8185,10 @@ function collectAuthorsData() {
           return;
         }
         const assign = btn.dataset.assign;
-        if (assign) applySelectionToField(assign);
+        if (assign) {
+          if (pdfBbox) pdfBbox.setActiveField(assign);
+          applySelectionToField(assign);
+        }
       });
     }
 
@@ -8167,6 +8282,7 @@ function collectAuthorsData() {
           });
           const result = await resp.json();
           if (result.success) {
+            if (pdfBbox) await pdfBbox.saveSelections();
             // Сохраняем информацию о том, что файл был только что сохранен
             // Это позволит сразу подсветить его на главной странице
             const savedFiles = JSON.parse(localStorage.getItem("recently_saved_files") || "[]");
@@ -8189,6 +8305,17 @@ function collectAuthorsData() {
         } catch (err) {
           alert("Ошибка: " + err.message);
         }
+      });
+    }
+
+    if (pdfBbox) {
+      pdfBbox.init({
+        iframeSelector: "#pdfViewerIframe",
+        pdfFile: "{{ pdf_path|e }}",
+        activeFieldLabelSelector: "#bboxActiveField",
+        clearButtonSelector: "#bboxClearBtn",
+        extractEndpoint: "/api/pdf-extract-text",
+        saveEndpoint: "/api/pdf-save-coordinates",
       });
     }
   });

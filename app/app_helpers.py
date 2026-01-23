@@ -414,7 +414,7 @@ def _strip_latex_command(text: str, command: str) -> str:
     prev = None
     while prev != text:
         prev = text
-        text = pattern.sub(r"\\1", text)
+        text = pattern.sub(lambda m: m.group(1) if m.groups() else m.group(0), text)
     return text
 
 
@@ -426,11 +426,16 @@ def _latex_to_html(latex_source: str) -> str:
         body = source.split("\\begin{document}", 1)[1]
         source = body.split("\\end{document}", 1)[0]
 
-    source = re.sub(r"\\begin\\{abstract\\}", "\n<<ABSTRACT>>\n", source)
-    source = re.sub(r"\\end\\{abstract\\}", "\n<<ENDABSTRACT>>\n", source)
-    source = re.sub(r"\\begin\\{keywords\\}", "\n<<KEYWORDS>>\n", source)
-    source = re.sub(r"\\end\\{keywords\\}", "\n<<ENDKEYWORDS>>\n", source)
-    source = re.sub(r"\\keywords?\\*?\\{([^{}]*)\\}", r"\n<<KEYWORDS>>\1\n", source)
+    source = re.sub(r"\\begin\\{abstract\\}", "\n<<ABSTRACT>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\end\\{abstract\\}", "\n<<ENDABSTRACT>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\begin\\{keywords\\}", "\n<<KEYWORDS>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\end\\{keywords\\}", "\n<<ENDKEYWORDS>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(
+        r"\\keywords?\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<KEYWORDS>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+        flags=re.IGNORECASE,
+    )
 
     source = re.sub(r"\\begin\\{itemize\\}", "\n<<UL>>\n", source)
     source = re.sub(r"\\end\\{itemize\\}", "\n<<ENDUL>>\n", source)
@@ -438,18 +443,38 @@ def _latex_to_html(latex_source: str) -> str:
     source = re.sub(r"\\end\\{enumerate\\}", "\n<<ENDOL>>\n", source)
 
     def _replace_item(match: re.Match) -> str:
-        label = match.group(1)
+        label = match.group(1) if match.groups() else None
         if label:
             return f"\n<<LI>> {label} "
         return "\n<<LI>> "
 
     source = re.sub(r"\\item(?:\\[(.*?)\\])?", _replace_item, source)
 
-    source = re.sub(r"\\section\\*?\\{([^{}]*)\\}", r"\n<<H2>>\1\n", source)
-    source = re.sub(r"\\subsection\\*?\\{([^{}]*)\\}", r"\n<<H3>>\1\n", source)
-    source = re.sub(r"\\subsubsection\\*?\\{([^{}]*)\\}", r"\n<<H4>>\1\n", source)
-    source = re.sub(r"\\paragraph\\*?\\{([^{}]*)\\}", r"\n<<H5>>\1\n", source)
-    source = re.sub(r"\\title\\*?\\{([^{}]*)\\}", r"\n<<H1>>\1\n", source)
+    source = re.sub(
+        r"\\section\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<H2>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+    )
+    source = re.sub(
+        r"\\subsection\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<H3>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+    )
+    source = re.sub(
+        r"\\subsubsection\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<H4>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+    )
+    source = re.sub(
+        r"\\paragraph\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<H5>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+    )
+    source = re.sub(
+        r"\\title\\*?\\{([^{}]*)\\}",
+        lambda m: "\n<<H1>>" + (m.group(1) if m.groups() else "") + "\n",
+        source,
+    )
 
     source = source.replace("~", " ")
     source = re.sub(r"\\\\\\s*(\\[[^\\]]*\\])?", "\n", source)
@@ -480,8 +505,17 @@ def _latex_to_html(latex_source: str) -> str:
 
     source = re.sub(r"\\[a-zA-Z]+\\*?(?:\\[[^\\]]*\\])?", "", source)
     source = source.replace("{", "").replace("}", "")
-    source = re.sub(r"\\$\\$\\s*(.*?)\\s*\\$\\$", r"\\1", source, flags=re.DOTALL)
-    source = re.sub(r"\\$(.*?)\\$", r"\\1", source)
+    source = re.sub(
+        r"\\$\\$\\s*(.*?)\\s*\\$\\$",
+        lambda m: m.group(1) if m.groups() else m.group(0),
+        source,
+        flags=re.DOTALL,
+    )
+    source = re.sub(
+        r"\\$(.*?)\\$",
+        lambda m: m.group(1) if m.groups() else m.group(0),
+        source,
+    )
     source = re.sub(r"[ \\t]+", " ", source)
     source = re.sub(r"\\n{3,}", "\n\n", source)
 
@@ -508,25 +542,34 @@ def _latex_to_html(latex_source: str) -> str:
 
     for raw_line in source.split("\n"):
         line = raw_line.strip()
-        if line == "<<ABSTRACT>>":
+        if "<<ABSTRACT>>" in line:
             flush_paragraph()
             close_list()
             block_mode = "abstract"
             block_lines = []
+            tail = line.replace("<<ABSTRACT>>", "").strip()
+            if tail:
+                block_lines.append(tail)
             continue
-        if line == "<<KEYWORDS>>":
+        if "<<KEYWORDS>>" in line:
             flush_paragraph()
             close_list()
             block_mode = "keywords"
             block_lines = []
+            tail = line.replace("<<KEYWORDS>>", "").strip()
+            if tail:
+                block_lines.append(tail)
             continue
-        if line in {"<<ENDABSTRACT>>", "<<ENDKEYWORDS>>"}:
+        if "<<ENDABSTRACT>>" in line or "<<ENDKEYWORDS>>" in line:
             if block_mode and block_lines:
                 text = " ".join(block_lines).strip()
                 if text:
                     html_parts.append(f'<p class="{block_mode}">{html.escape(text)}</p>')
             block_mode = None
             block_lines = []
+            remainder = line.replace("<<ENDABSTRACT>>", "").replace("<<ENDKEYWORDS>>", "").strip()
+            if remainder:
+                paragraph.append(remainder)
             continue
         if block_mode:
             if line:

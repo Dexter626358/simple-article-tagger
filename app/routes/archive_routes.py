@@ -265,16 +265,12 @@ def register_archive_routes(app, ctx):
             "archive_dir": result.get("archive_dir"),
             "moved": result.get("moved", []),
             "issue": issue_names[0],
-        })
-
-    @app.route("/project-snapshots")
+        })    @app.route("/project-snapshots")
     def project_snapshots():
         return jsonify({
             "success": True,
             "snapshots": list_archived_projects(archive_root_dir),
-        })
-
-    @app.route("/project-restore", methods=["POST"])
+        })    @app.route("/project-restore", methods=["POST"])
     def project_restore():
         data = request.get_json(silent=True) or {}
         run_name = (data.get("run") or "").strip()

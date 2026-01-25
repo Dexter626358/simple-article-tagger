@@ -412,7 +412,27 @@ def register_markup_routes(app, ctx):
             if view_mode == "pdf" and not show_pdf_viewer:
                 view_mode = "html"
 
-            print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, view_mode={view_mode}")
+            # Извлекаем ISSN из имени папки (формат: issn_год_том_номер или issn_год_номер)
+            journal_issn = ""
+            journal_name = ""
+            try:
+                relative_path = json_path.relative_to(json_input_dir)
+                if len(relative_path.parts) > 1:
+                    folder_name = relative_path.parts[0]
+                    # Пробуем извлечь ISSN из имени папки
+                    parts = folder_name.split("_")
+                    if len(parts) >= 2:
+                        # ISSN может быть в формате XXXX-XXXX или XXXXXXXX
+                        potential_issn = parts[0]
+                        if re.match(r'^\d{4}[-]?\d{3}[\dXx]$', potential_issn):
+                            journal_issn = potential_issn
+                            # Форматируем ISSN: добавляем дефис если нет
+                            if len(journal_issn) == 8 and '-' not in journal_issn:
+                                journal_issn = f"{journal_issn[:4]}-{journal_issn[4:]}"
+            except ValueError:
+                pass
+
+            print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, view_mode={view_mode}, issn={journal_issn}")
 
             return render_template_string(
                 MARKUP_TEMPLATE, 
@@ -425,7 +445,9 @@ def register_markup_routes(app, ctx):
                 pdf_path=pdf_path_for_viewer,
                 show_pdf_viewer=show_pdf_viewer,
                 show_text_panel=show_text_panel,
-                view_mode=view_mode
+                view_mode=view_mode,
+                journal_issn=journal_issn,
+                journal_name=journal_name
             )
         except Exception as e:
             error_msg = f"Ошибка при подготовке разметки: {e}"

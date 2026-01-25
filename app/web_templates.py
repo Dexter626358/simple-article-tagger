@@ -601,7 +601,10 @@ HTML_TEMPLATE = """
       <h1>📄 Работа с метаданными статей</h1>
       <p>Выберите JSON файл для разметки</p>
       <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-        <button id="generateXmlBtn" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;">
+        {% set total_files = files|length %}
+        {% set processed_files = files|selectattr('is_processed')|list|length %}
+        {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
+        <button id="generateXmlBtn" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
           📄 Сгенерировать XML
         </button>
       </div>
@@ -639,7 +642,23 @@ HTML_TEMPLATE = """
         <div style="margin-top: 6px; display:flex; gap: 10px; flex-wrap: wrap; align-items:center;">
           <span id="archiveDetails" class="upload-status"></span>
         </div>
-        <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
+                <div id="projectModal" class="modal">
+          <div class="modal-content" style="max-width: 520px;">
+            <div class="modal-header">
+              <h2>??????? ??????</h2>
+              <button type="button" class="modal-close" data-action="close">?</button>
+            </div>
+            <div style="display:flex; flex-direction:column; gap:12px;">
+              <label style="font-weight:600; font-size:14px;">??????</label>
+              <select id="projectSelect" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:4px; font-size:14px;"></select>
+              <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
+                <button type="button" class="modal-btn modal-btn-cancel" data-action="cancel">??????</button>
+                <button type="button" id="projectOpenConfirm" class="modal-btn modal-btn-save">???????</button>
+              </div>
+            </div>
+          </div>
+        </div>
+<div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
           <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="window.saveProject && window.saveProject()">Сохранить проект</button>
           <button type="button" id="openProjectBtn" class="btn-secondary" onclick="window.openProject && window.openProject()">Открыть проект</button>
           <span id="projectStatus" class="upload-status"></span>
@@ -738,49 +757,134 @@ HTML_TEMPLATE = """
           };
 
           window.openProject = async () => {
-            const status = document.getElementById("projectStatus");
-            if (status) {
-              status.textContent = "Загрузка списка проектов...";
-              status.style.color = "#555";
-            }
-            try {
-              const resp = await fetch("/project-snapshots");
-              const data = await resp.json().catch(() => ({}));
-              const snapshots = data.snapshots || [];
-              const options = [];
-              snapshots.forEach((run) => {
-                (run.issues || []).forEach((issue) => {
-                  options.push({ run: run.run, issue });
-                });
+          const status = document.getElementById("projectStatus");
+          const modal = document.getElementById("projectModal");
+          const select = document.getElementById("projectSelect");
+          if (status) {
+            status.textContent = "???????? ?????? ????????...";
+            status.style.color = "#555";
+          }
+          try {
+            const resp = await fetch("/project-snapshots");
+            const data = await resp.json().catch(() => ({}));
+            const snapshots = data.snapshots || [];
+            const options = [];
+            snapshots.forEach((run) => {
+              (run.issues || []).forEach((issue) => {
+                options.push({ run: run.run, issue });
               });
-              if (!options.length) {
-                if (status) {
-                  status.textContent = "Нет сохраненных проектов.";
-                  status.style.color = "#c62828";
-                }
-                return;
+            });
+            if (!options.length) {
+              if (status) {
+                status.textContent = "??? ??????????? ????????.";
+                status.style.color = "#c62828";
               }
-              const list = options
-                .map((opt, idx) => (idx + 1) + ". " + opt.issue + " (архив " + opt.run + ")")
-                .join("\\n");
-              const choice = window.prompt("Выберите проект для восстановления:\\n" + list + "\\nВведите номер:");
-              const index = Number(choice) - 1;
-              if (!choice || Number.isNaN(index) || !options[index]) {
+              return;
+            }
+            if (select) {
+              select.innerHTML = "";
+              options.forEach((opt) => {
+                const option = document.createElement("option");
+                option.value = JSON.stringify(opt);
+                option.textContent = `${opt.issue} (????? ${opt.run})`;
+                select.appendChild(option);
+              });
+            }
+            if (modal) {
+              modal.classList.add("active");
+            }
+            if (status) {
+              status.textContent = "";
+            }
+          } catch (_) {
+            if (status) {
+              status.textContent = "?????? ???????? ????????.";
+              status.style.color = "#c62828";
+            }
+          }
+        };
+
+        const projectModal = document.getElementById("projectModal");
+        const projectSelect = document.getElementById("projectSelect");
+        const projectOpenConfirm = document.getElementById("projectOpenConfirm");
+        const closeProjectModal = () => {
+          if (projectModal) projectModal.classList.remove("active");
+        };
+        if (projectModal) {
+          projectModal.addEventListener("click", (e) => {
+            const target = e.target;
+            if (!target) return;
+            if (target === projectModal) {
+              closeProjectModal();
+              return;
+            }
+            const btn = target.closest("button");
+            if (!btn) return;
+            const action = btn.dataset.action;
+            if (action === "close" || action === "cancel") {
+              closeProjectModal();
+            }
+          });
+        }
+        if (projectOpenConfirm) {
+          projectOpenConfirm.addEventListener("click", async () => {
+            const status = document.getElementById("projectStatus");
+            if (!projectSelect || !projectSelect.value) {
+              if (status) {
+                status.textContent = "???????? ??????.";
+                status.style.color = "#c62828";
+              }
+              return;
+            }
+            let target = null;
+            try {
+              target = JSON.parse(projectSelect.value);
+            } catch (_) {
+              target = null;
+            }
+            if (!target) {
+              if (status) {
+                status.textContent = "?? ??????? ????????? ??????.";
+                status.style.color = "#c62828";
+              }
+              return;
+            }
+            const restore = async (overwrite) => {
+              const restoreResp = await fetch("/project-restore", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
+              });
+              return restoreResp.json().catch(() => ({}));
+            };
+            let restoreData = await restore(false);
+            if (!restoreData.success && restoreData.code === "dest_exists") {
+              const confirmOverwrite = window.confirm("????? ??????? ??? ??????????. ?????????????");
+              if (!confirmOverwrite) {
                 if (status) {
-                  status.textContent = "Отмена восстановления.";
+                  status.textContent = "?????????????? ????????.";
                   status.style.color = "#555";
                 }
+                closeProjectModal();
                 return;
               }
-              const target = options[index];
-              const restore = async (overwrite) => {
-                const restoreResp = await fetch("/project-restore", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
-                });
-                return restoreResp.json().catch(() => ({}));
-              };
+              restoreData = await restore(true);
+            }
+            if (!restoreData.success) {
+              if (status) {
+                status.textContent = restoreData.error || "?????? ??????????????.";
+                status.style.color = "#c62828";
+              }
+              return;
+            }
+            if (status) {
+              status.textContent = "?????? ????????????: " + target.issue;
+              status.style.color = "#2e7d32";
+            }
+            closeProjectModal();
+            setTimeout(() => window.location.reload(), 1200);
+          });
+        }
               let restoreData = await restore(false);
               if (!restoreData.success && restoreData.code === "dest_exists") {
                 const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
@@ -924,10 +1028,9 @@ HTML_TEMPLATE = """
                 
                 setTimeout(() => {
                   notification.remove();
-                  btn.textContent = originalText;
-                  btn.style.background = "#4caf50";
-                  btn.disabled = false;
-                }, 5000);
+                }, 1000);
+                // ????????? ???????? ????? ?????????? XML
+                window.location.reload();
               } else {
                 btn.textContent = "❌ Ошибка";
                 btn.style.background = "#f44336";
@@ -1198,6 +1301,7 @@ HTML_TEMPLATE = """
                   <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
                 </div>
               `;
+              attachRefTextHandlers(refItem);
               refsList.appendChild(refItem);
             });
           }
@@ -1295,6 +1399,81 @@ HTML_TEMPLATE = """
             }
           });
           updateMergeButtons();
+        }
+
+        function attachRefTextHandlers(refItem) {
+          const refText = refItem.querySelector(".ref-text");
+          if (!refText) return;
+          refText.addEventListener("keydown", handleRefKeydown);
+        }
+
+        function handleRefKeydown(event) {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          const refText = event.currentTarget;
+          splitReferenceAtCursor(refText);
+        }
+
+        function splitReferenceAtCursor(refText) {
+          const refItem = refText.closest(".ref-item");
+          if (!refItem) return;
+
+          const fullText = refText.textContent || "";
+          const caretOffset = getCaretOffset(refText);
+          const left = fullText.slice(0, caretOffset).trim();
+          const right = fullText.slice(caretOffset).trim();
+
+          if (!left && !right) return;
+
+          refText.textContent = left;
+
+          const newItem = document.createElement("div");
+          newItem.className = "ref-item";
+          newItem.innerHTML = `
+            <span class="ref-number"></span>
+            <span class="ref-text" contenteditable="true" spellcheck="false">${escapeHtml(right)}</span>
+            <div class="ref-actions">
+              <button class="ref-action-btn merge" onclick="mergeWithNext(this)" title="Объединить со следующим">⇅</button>
+              <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
+            </div>
+          `;
+
+          refItem.insertAdjacentElement("afterend", newItem);
+          attachRefTextHandlers(newItem);
+          renumberReferences();
+          updateMergeButtons();
+          syncReferencesField();
+
+          const newText = newItem.querySelector(".ref-text");
+          if (newText) {
+            placeCaretAtStart(newText);
+          }
+        }
+
+        function getCaretOffset(element) {
+          const selection = window.getSelection();
+          if (!selection || selection.rangeCount === 0) {
+            return (element.textContent || "").length;
+          }
+          const range = selection.getRangeAt(0);
+          if (!element.contains(range.startContainer)) {
+            return (element.textContent || "").length;
+          }
+          const preRange = range.cloneRange();
+          preRange.selectNodeContents(element);
+          preRange.setEnd(range.startContainer, range.startOffset);
+          return preRange.toString().length;
+        }
+
+        function placeCaretAtStart(element) {
+          element.focus();
+          const range = document.createRange();
+          range.selectNodeContents(element);
+          range.collapse(true);
+          const selection = window.getSelection();
+          if (!selection) return;
+          selection.removeAllRanges();
+          selection.addRange(range);
         }
         
         function saveEditedReferences() {
@@ -3245,6 +3424,12 @@ function closeAnnotationModal() {
         const processArchiveBtn = document.getElementById("processArchiveBtn");
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
+        if (openProjectBtn) {
+          openProjectBtn.addEventListener("click", () => {
+            if (window.openProject) window.openProject();
+          });
+        }
+
         const archiveProgress = document.getElementById("archiveProgress");
         const archiveProgressFill = document.getElementById("archiveProgressFill");
         const archiveDetails = document.getElementById("archiveDetails");
@@ -5358,6 +5543,18 @@ MARKUP_TEMPLATE = r"""
 
 <script src="/static/pdf-bbox.js"></script>
 <script>
+  function initPdfBbox() {
+    if (window.PdfBbox && typeof window.PdfBbox.init === "function") {
+      return window.PdfBbox.init.apply(window.PdfBbox, arguments);
+    }
+    return null;
+  }
+  const ensureOverlay = () => null;
+  const renderBboxes = () => null;
+  function convertToPdfPoint() { return null; }
+  function convertToViewportPoint() { return null; }
+</script>
+<script>
 // Глобальные функции для работы с модальным окном списка литературы
 function escapeHtml(text) {
   const div = document.createElement("div");
@@ -5996,6 +6193,7 @@ function viewReferences(fieldId, title) {
           <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
         </div>
       `;
+      attachRefTextHandlers(refItem);
       refsList.appendChild(refItem);
     });
   }
@@ -6105,6 +6303,81 @@ function renumberReferences() {
   });
   // Обновляем кнопки объединения после перенумерации
   updateMergeButtons();
+}
+
+function attachRefTextHandlers(refItem) {
+  const refText = refItem.querySelector(".ref-text");
+  if (!refText) return;
+  refText.addEventListener("keydown", handleRefKeydown);
+}
+
+function handleRefKeydown(event) {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  const refText = event.currentTarget;
+  splitReferenceAtCursor(refText);
+}
+
+function splitReferenceAtCursor(refText) {
+  const refItem = refText.closest(".ref-item");
+  if (!refItem) return;
+
+  const fullText = refText.textContent || "";
+  const caretOffset = getCaretOffset(refText);
+  const left = fullText.slice(0, caretOffset).trim();
+  const right = fullText.slice(caretOffset).trim();
+
+  if (!left && !right) return;
+
+  refText.textContent = left;
+
+  const newItem = document.createElement("div");
+  newItem.className = "ref-item";
+  newItem.innerHTML = `
+    <span class="ref-number"></span>
+    <span class="ref-text" contenteditable="true" spellcheck="false">${escapeHtml(right)}</span>
+    <div class="ref-actions">
+      <button class="ref-action-btn merge" onclick="mergeWithNext(this)" title="Объединить со следующим">⇅</button>
+      <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
+    </div>
+  `;
+
+  refItem.insertAdjacentElement("afterend", newItem);
+  attachRefTextHandlers(newItem);
+  renumberReferences();
+  updateMergeButtons();
+  syncReferencesField();
+
+  const newText = newItem.querySelector(".ref-text");
+  if (newText) {
+    placeCaretAtStart(newText);
+  }
+}
+
+function getCaretOffset(element) {
+  const selection = window.getSelection();
+  if (!selection || selection.rangeCount === 0) {
+    return (element.textContent || "").length;
+  }
+  const range = selection.getRangeAt(0);
+  if (!element.contains(range.startContainer)) {
+    return (element.textContent || "").length;
+  }
+  const preRange = range.cloneRange();
+  preRange.selectNodeContents(element);
+  preRange.setEnd(range.startContainer, range.startOffset);
+  return preRange.toString().length;
+}
+
+function placeCaretAtStart(element) {
+  element.focus();
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  range.collapse(true);
+  const selection = window.getSelection();
+  if (!selection) return;
+  selection.removeAllRanges();
+  selection.addRange(range);
 }
 
 async function processReferencesWithAI(fieldId) {
@@ -8317,6 +8590,34 @@ function collectAuthorsData() {
         extractEndpoint: "/api/pdf-extract-text",
         saveEndpoint: "/api/pdf-save-coordinates",
       });
+      
+      // Устанавливаем ISSN журнала для шаблонов bbox
+      const journalIssn = "{{ journal_issn|default('', true)|e }}";
+      const journalName = "{{ journal_name|default('', true)|e }}";
+      if (journalIssn) {
+        pdfBbox.setIssn(journalIssn, journalName);
+        
+        // Загружаем шаблоны и показываем уведомление если есть предложения
+        pdfBbox.loadTemplateSuggestions(journalIssn).then(data => {
+          if (data && data.suggestions && Object.keys(data.suggestions).length > 0) {
+            const count = Object.keys(data.suggestions).length;
+            const toast = window.toast || ((msg) => console.log(msg));
+            toast(`Доступно ${count} шаблонов bbox для этого журнала. Нажмите "Применить шаблоны" для автозаполнения.`, "info");
+            
+            // Добавляем кнопку применения шаблонов в toolbar
+            const toolbar = document.querySelector('.pdf-bbox-toolbar');
+            if (toolbar && !document.getElementById('applyTemplatesBtn')) {
+              const btn = document.createElement('button');
+              btn.id = 'applyTemplatesBtn';
+              btn.className = 'bbox-btn';
+              btn.style.cssText = 'background: #4caf50; color: white; margin-left: 10px;';
+              btn.innerHTML = '📋 Применить шаблоны (' + count + ')';
+              btn.onclick = () => pdfBbox.showSuggestionsPanel();
+              toolbar.appendChild(btn);
+            }
+          }
+        });
+      }
     }
   });
 })();

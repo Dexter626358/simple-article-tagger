@@ -34,7 +34,7 @@ from app.routes.markup_routes import register_markup_routes
 SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html", ".tex"}
 SUPPORTED_JSON_EXTENSIONS = {".json"}
 ARCHIVE_ROOT_DIRNAME = "processed_archives"
-ARCHIVE_RETENTION_DAYS = 7
+ARCHIVE_RETENTION_DAYS = 2
 
 
 

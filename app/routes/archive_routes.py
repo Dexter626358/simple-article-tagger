@@ -265,19 +265,23 @@ def register_archive_routes(app, ctx):
             "archive_dir": result.get("archive_dir"),
             "moved": result.get("moved", []),
             "issue": issue_names[0],
-        })    @app.route("/project-snapshots")
+        })
+
+    @app.route("/project-snapshots")
     def project_snapshots():
         return jsonify({
             "success": True,
             "snapshots": list_archived_projects(archive_root_dir),
-        })    @app.route("/project-restore", methods=["POST"])
+        })
+
+    @app.route("/project-restore", methods=["POST"])
     def project_restore():
         data = request.get_json(silent=True) or {}
         run_name = (data.get("run") or "").strip()
         issue = (data.get("issue") or "").strip()
         overwrite = bool(data.get("overwrite", False))
         if not run_name or not issue:
-            return jsonify({"success": False, "error": "Не указаны архив и выпуск."}), 400
+            return jsonify({"success": False, "error": "Не указан архив и выпуск."}), 400
         run_names = _sanitize_folder_names([run_name])
         issue_names = _sanitize_folder_names([issue])
         if not run_names or not issue_names:

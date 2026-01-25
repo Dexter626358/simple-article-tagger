@@ -410,7 +410,7 @@ def _strip_latex_comments(text: str) -> str:
 
 
 def _strip_latex_command(text: str, command: str) -> str:
-    pattern = re.compile(rf"\\\\{command}\\*?(?:\\[[^\\]]*\\])?\\{{([^{{}}]*)\\}}")
+    pattern = re.compile(rf"\\{command}\*?(?:\[[^\]]*\])?\{{([^{{}}]*)\}}")
     prev = None
     while prev != text:
         prev = text
@@ -426,21 +426,21 @@ def _latex_to_html(latex_source: str) -> str:
         body = source.split("\\begin{document}", 1)[1]
         source = body.split("\\end{document}", 1)[0]
 
-    source = re.sub(r"\\begin\\{abstract\\}", "\n<<ABSTRACT>>\n", source, flags=re.IGNORECASE)
-    source = re.sub(r"\\end\\{abstract\\}", "\n<<ENDABSTRACT>>\n", source, flags=re.IGNORECASE)
-    source = re.sub(r"\\begin\\{keywords\\}", "\n<<KEYWORDS>>\n", source, flags=re.IGNORECASE)
-    source = re.sub(r"\\end\\{keywords\\}", "\n<<ENDKEYWORDS>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\begin\{abstract\}", "\n<<ABSTRACT>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\end\{abstract\}", "\n<<ENDABSTRACT>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\begin\{keywords\}", "\n<<KEYWORDS>>\n", source, flags=re.IGNORECASE)
+    source = re.sub(r"\\end\{keywords\}", "\n<<ENDKEYWORDS>>\n", source, flags=re.IGNORECASE)
     source = re.sub(
-        r"\\keywords?\\*?\\{([^{}]*)\\}",
+        r"\\keywords?\*?\{([^{}]*)\}",
         lambda m: "\n<<KEYWORDS>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
         flags=re.IGNORECASE,
     )
 
-    source = re.sub(r"\\begin\\{itemize\\}", "\n<<UL>>\n", source)
-    source = re.sub(r"\\end\\{itemize\\}", "\n<<ENDUL>>\n", source)
-    source = re.sub(r"\\begin\\{enumerate\\}", "\n<<OL>>\n", source)
-    source = re.sub(r"\\end\\{enumerate\\}", "\n<<ENDOL>>\n", source)
+    source = re.sub(r"\\begin\{itemize\}", "\n<<UL>>\n", source)
+    source = re.sub(r"\\end\{itemize\}", "\n<<ENDUL>>\n", source)
+    source = re.sub(r"\\begin\{enumerate\}", "\n<<OL>>\n", source)
+    source = re.sub(r"\\end\{enumerate\}", "\n<<ENDOL>>\n", source)
 
     def _replace_item(match: re.Match) -> str:
         label = match.group(1) if match.groups() else None
@@ -448,36 +448,36 @@ def _latex_to_html(latex_source: str) -> str:
             return f"\n<<LI>> {label} "
         return "\n<<LI>> "
 
-    source = re.sub(r"\\item(?:\\[(.*?)\\])?", _replace_item, source)
+    source = re.sub(r"\\item(?:\[(.*?)\])?", _replace_item, source)
 
     source = re.sub(
-        r"\\section\\*?\\{([^{}]*)\\}",
+        r"\\section\*?\{([^{}]*)\}",
         lambda m: "\n<<H2>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
     )
     source = re.sub(
-        r"\\subsection\\*?\\{([^{}]*)\\}",
+        r"\\subsection\*?\{([^{}]*)\}",
         lambda m: "\n<<H3>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
     )
     source = re.sub(
-        r"\\subsubsection\\*?\\{([^{}]*)\\}",
+        r"\\subsubsection\*?\{([^{}]*)\}",
         lambda m: "\n<<H4>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
     )
     source = re.sub(
-        r"\\paragraph\\*?\\{([^{}]*)\\}",
+        r"\\paragraph\*?\{([^{}]*)\}",
         lambda m: "\n<<H5>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
     )
     source = re.sub(
-        r"\\title\\*?\\{([^{}]*)\\}",
+        r"\\title\*?\{([^{}]*)\}",
         lambda m: "\n<<H1>>" + (m.group(1) if m.groups() else "") + "\n",
         source,
     )
 
     source = source.replace("~", " ")
-    source = re.sub(r"\\\\\\s*(\\[[^\\]]*\\])?", "\n", source)
+    source = re.sub(r"\\\\\s*(\[[^\]]*\])?", "\n", source)
     source = source.replace("\\par", "\n")
 
     for cmd in (
@@ -496,28 +496,28 @@ def _latex_to_html(latex_source: str) -> str:
     ):
         source = _strip_latex_command(source, cmd)
 
-    source = re.sub(r"\\cite\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
-    source = re.sub(r"\\ref\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
-    source = re.sub(r"\\eqref\\*?(?:\\[[^\\]]*\\])?\\{[^{}]*\\}", "", source)
+    source = re.sub(r"\\cite\*?(?:\[[^\]]*\])?\{[^{}]*\}", "", source)
+    source = re.sub(r"\\ref\*?(?:\[[^\]]*\])?\{[^{}]*\}", "", source)
+    source = re.sub(r"\\eqref\*?(?:\[[^\]]*\])?\{[^{}]*\}", "", source)
 
-    source = re.sub(r"\\begin\\{[^}]+\\}", "", source)
-    source = re.sub(r"\\end\\{[^}]+\\}", "", source)
+    source = re.sub(r"\\begin\{[^}]+\}", "", source)
+    source = re.sub(r"\\end\{[^}]+\}", "", source)
 
-    source = re.sub(r"\\[a-zA-Z]+\\*?(?:\\[[^\\]]*\\])?", "", source)
+    source = re.sub(r"\\[a-zA-Z]+\*?(?:\[[^\]]*\])?", "", source)
     source = source.replace("{", "").replace("}", "")
     source = re.sub(
-        r"\\$\\$\\s*(.*?)\\s*\\$\\$",
+        r"\$\$\s*(.*?)\s*\$\$",
         lambda m: m.group(1) if m.groups() else m.group(0),
         source,
         flags=re.DOTALL,
     )
     source = re.sub(
-        r"\\$(.*?)\\$",
+        r"\$(.*?)\$",
         lambda m: m.group(1) if m.groups() else m.group(0),
         source,
     )
     source = re.sub(r"[ \\t]+", " ", source)
-    source = re.sub(r"\\n{3,}", "\n\n", source)
+    source = re.sub(r"\n{3,}", "\n\n", source)
 
     html_parts = ['<div class="latex-content">']
     paragraph: list[str] = []
@@ -554,9 +554,14 @@ def _latex_to_html(latex_source: str) -> str:
         if "<<KEYWORDS>>" in line:
             flush_paragraph()
             close_list()
+            tail = line.replace("<<KEYWORDS>>", "").strip()
+            if tail and "<<ENDKEYWORDS>>" not in line:
+                html_parts.append(f'<p class="keywords">{html.escape(tail)}</p>')
+                block_mode = None
+                block_lines = []
+                continue
             block_mode = "keywords"
             block_lines = []
-            tail = line.replace("<<KEYWORDS>>", "").strip()
             if tail:
                 block_lines.append(tail)
             continue
@@ -631,6 +636,10 @@ def _latex_to_html(latex_source: str) -> str:
                 paragraph.append(line)
 
     flush_paragraph()
+    if block_mode and block_lines:
+        text = " ".join(block_lines).strip()
+        if text:
+            html_parts.append(f'<p class="{block_mode}">{html.escape(text)}</p>')
     close_list()
     html_parts.append("</div>")
     return "".join(html_parts)

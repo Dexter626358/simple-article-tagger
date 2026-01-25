@@ -3,7 +3,10 @@ from __future__ import annotations
 import io
 import json
 import re
+from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
 from flask import render_template_string, jsonify, request, send_file, abort
 
@@ -11,10 +14,218 @@ from app.app_dependencies import PDF_TO_HTML_AVAILABLE, extract_text_from_pdf
 from app.app_helpers import get_source_files
 
 
+def _split_merged_words(text: str) -> str:
+    """
+    Минимальная постобработка для случаев, когда слова всё равно слиплись.
+    Применяется только к ОЧЕНЬ длинным словам (>50 символов).
+    """
+    if not text or len(text) < 50:
+        return text
+    
+    # Проверяем, есть ли ОЧЕНЬ длинные слова (>50 символов)
+    words = text.split()
+    very_long = [w for w in words if len(w) > 50]
+    
+    if not very_long:
+        return text
+    
+    result = text
+    
+    # Только самые очевидные случаи: "слово.Слово" → "слово. Слово"
+    result = re.sub(r'([а-яёa-z])\.([А-ЯЁA-Z])', r'\1. \2', result)
+    
+    # Убираем множественные пробелы
+    result = re.sub(r' +', ' ', result)
+    
+    return result.strip()
+
+
+def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float] | None:
+    """
+    ???????? ????? ???? ????????? ?? ???????? ?? ??????????:
+    - RU: "?????????" ? ?? "???????? ?????"
+    - EN: "Abstract" ? ?? "Keywords"
+    ?????????? (top, bottom) ? ??????????? PDF (top/bottom).
+    """
+    try:
+        words = page.extract_words(x_tolerance=1, y_tolerance=3, keep_blank_chars=False)
+    except Exception:
+        words = []
+
+    if not words:
+        return None
+
+    line_tolerance = 3
+    lines = []
+    current_line = []
+    current_top = None
+
+    words_sorted = sorted(words, key=lambda w: (round(w["top"] / line_tolerance), w["x0"]))
+    for w in words_sorted:
+        if current_top is None:
+            current_top = w["top"]
+            current_line = [w]
+        elif abs(w["top"] - current_top) <= line_tolerance:
+            current_line.append(w)
+        else:
+            if current_line:
+                line_top = min(x["top"] for x in current_line)
+                line_bottom = max(x["bottom"] for x in current_line)
+                line_text = " ".join(x["text"] for x in current_line)
+                lines.append({"text": line_text, "top": line_top, "bottom": line_bottom})
+            current_line = [w]
+            current_top = w["top"]
+
+    if current_line:
+        line_top = min(x["top"] for x in current_line)
+        line_bottom = max(x["bottom"] for x in current_line)
+        line_text = " ".join(x["text"] for x in current_line)
+        lines.append({"text": line_text, "top": line_top, "bottom": line_bottom})
+
+    def _simplify_text(value: str) -> str:
+        value = re.sub(r"\s+", " ", value).strip().lower()
+        value = re.sub(r"[^\w\s]", " ", value, flags=re.UNICODE)
+        return re.sub(r"\s+", " ", value).strip()
+
+    heading_idx = None
+    for i, line in enumerate(lines):
+        text = _simplify_text(line["text"])
+        if lang == "ru" and re.search(r"???????", text):
+            heading_idx = i
+            break
+        if lang == "en" and re.search(r"abstract", text):
+            heading_idx = i
+            break
+
+    if heading_idx is None:
+        return None
+
+    start_top = lines[heading_idx]["bottom"] + 2
+
+    end_bottom = None
+    for j in range(heading_idx + 1, len(lines)):
+        text = _simplify_text(lines[j]["text"])
+        if lang == "ru" and re.search(r"??????\w*\s*????\w*", text):
+            end_bottom = lines[j]["top"] - 1
+            break
+        if lang == "en" and re.search(r"keywords?|key\s*words?|index\s*terms?", text):
+            end_bottom = lines[j]["top"] - 1
+            break
+
+    max_ratio = float(options.get("annotation_max_height_ratio", 0.6))
+    min_ratio = float(options.get("annotation_min_height_ratio", 0.12))
+    min_height = page.height * min_ratio
+
+    if end_bottom is not None:
+        if (end_bottom - start_top) < min_height:
+            end_bottom = None
+
+    if end_bottom is None:
+        footer_threshold = page.height * 0.85
+        for line in reversed(lines[heading_idx + 1:]):
+            if line["top"] < footer_threshold:
+                break
+            text = _simplify_text(line["text"])
+            if re.fullmatch(r"\d{1,4}", text) or re.search(r"page|???", text):
+                end_bottom = line["top"] - 1
+                break
+
+    if end_bottom is None:
+        end_bottom = min(page.height, start_top + page.height * max_ratio)
+
+    if end_bottom <= start_top:
+        return None
+
+    return start_top, end_bottom
+
+def _is_garbled_text(text: str, lang: str | None = None) -> bool:
+    """
+    Грубая эвристика: определяет, что текст "каша".
+    Основано на:
+    - средней длине слова
+    - наличии заглавных букв внутри слова
+    - доле слов без гласных
+    """
+    if not text:
+        return False
+
+    words = [w for w in re.split(r"\s+", text) if w]
+    if not words:
+        return False
+
+    avg_len = sum(len(w) for w in words) / len(words)
+    if avg_len > 15:
+        return True
+
+    vowels_ru = set("аеёиоуыэюя")
+    vowels_en = set("aeiouy")
+
+    internal_caps = 0
+    mixed_case = 0
+    no_vowel = 0
+    low_vowel = 0
+
+    for w in words:
+        if len(w) > 3 and any(c.isupper() for c in w[1:]):
+            internal_caps += 1
+        if len(w) > 3 and any(c.isupper() for c in w[1:]) and any(c.islower() for c in w[1:]):
+            mixed_case += 1
+
+        lw = w.lower()
+        has_ru = any(c in vowels_ru for c in lw)
+        has_en = any(c in vowels_en for c in lw)
+        if not (has_ru or has_en):
+            no_vowel += 1
+        else:
+            # Доля гласных в слове
+            vcount = sum(1 for c in lw if c in vowels_ru or c in vowels_en)
+            if len(lw) >= 5 and (vcount / len(lw)) < 0.2:
+                low_vowel += 1
+
+    caps_ratio = internal_caps / len(words)
+    mixed_ratio = mixed_case / len(words)
+    no_vowel_ratio = no_vowel / len(words)
+
+    if caps_ratio > 0.05:
+        return True
+    if mixed_ratio > 0.05:
+        return True
+    if no_vowel_ratio > 0.3:
+        return True
+    if (low_vowel / len(words)) > 0.3:
+        return True
+
+    if lang == "ru" and no_vowel_ratio > 0.25:
+        return True
+    if lang == "en" and no_vowel_ratio > 0.3:
+        return True
+
+    return False
+
+
+def _ocr_extract_text(page, bbox: tuple[float, float, float, float], lang: str) -> str | None:
+    """OCR fallback. Требует установленный pytesseract и Tesseract OCR."""
+    try:
+        import pytesseract  # type: ignore
+    except Exception:
+        return None
+
+    try:
+        cropped = page.crop(bbox)
+        img = cropped.to_image(resolution=300).original
+        text = pytesseract.image_to_string(img, lang=lang)
+        return text
+    except Exception:
+        return None
+
+
 def _normalize_extracted_text(text: str, field_id: str | None, options: dict) -> str:
     if not text or text == "(Текст не найден)":
         return text
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+    
+    # Разбиваем слипшиеся слова (если PDF плохо распознался)
+    cleaned = _split_merged_words(cleaned)
 
     fix_hyphenation = options.get("fix_hyphenation", True)
     if fix_hyphenation:
@@ -64,6 +275,689 @@ def _normalize_extracted_text(text: str, field_id: str | None, options: dict) ->
 
     cleaned = re.sub(r"[ \t]+", " ", cleaned).strip()
     return cleaned
+
+
+class Language(Enum):
+    """Язык текста."""
+
+    RUSSIAN = "ru"
+    ENGLISH = "en"
+    MIXED = "mixed"
+    UNKNOWN = "unknown"
+
+
+@dataclass
+class BBox:
+    """Прямоугольная область в PDF."""
+
+    x1: float
+    y1: float
+    x2: float
+    y2: float
+
+    def normalize(self) -> "BBox":
+        """Нормализует координаты (x1 < x2, y1 < y2)."""
+        return BBox(
+            x1=min(self.x1, self.x2),
+            y1=min(self.y1, self.y2),
+            x2=max(self.x1, self.x2),
+            y2=max(self.y1, self.y2),
+        )
+
+    def add_padding(self, padding_x: float, padding_y: float, page_width: float, page_height: float) -> "BBox":
+        """Добавляет отступы к области."""
+        return BBox(
+            x1=max(0, self.x1 - padding_x),
+            y1=max(0, self.y1 - padding_y),
+            x2=min(page_width, self.x2 + padding_x),
+            y2=min(page_height, self.y2 + padding_y),
+        )
+
+    def is_valid(self) -> bool:
+        """Проверяет валидность области."""
+        return self.x1 < self.x2 and self.y1 < self.y2
+
+    def to_tuple(self) -> Tuple[float, float, float, float]:
+        """Возвращает кортеж координат для pdfplumber."""
+        return (self.x1, self.y1, self.x2, self.y2)
+
+
+@dataclass
+class ExtractionOptions:
+    """Опции извлечения текста."""
+
+    merge_by_field: bool = False
+    annotation_by_heading: bool = True
+    use_ocr_if_garbled: bool = False
+    force_ocr: bool = False
+    ocr_lang: Optional[str] = None
+    fix_hyphenation: bool = True
+    strip_prefix: bool = True
+    join_lines: Optional[bool] = None
+    annotation_max_height_ratio: float = 0.6
+    annotation_min_height_ratio: float = 0.12
+    padding_x: float = 5.0
+    padding_y: float = 3.0
+    line_tolerance: float = 5.0
+
+    @classmethod
+    def from_dict(cls, data: Optional[Dict[str, Any]]) -> "ExtractionOptions":
+        """Создает из словаря."""
+        if not data:
+            return cls()
+        return cls(
+            merge_by_field=bool(data.get("merge_by_field", False)),
+            annotation_by_heading=bool(data.get("annotation_by_heading", True)),
+            use_ocr_if_garbled=bool(data.get("use_ocr_if_garbled", False)),
+            force_ocr=bool(data.get("force_ocr", False)),
+            ocr_lang=data.get("ocr_lang"),
+            fix_hyphenation=bool(data.get("fix_hyphenation", True)),
+            strip_prefix=bool(data.get("strip_prefix", True)),
+            join_lines=data.get("join_lines"),
+            annotation_max_height_ratio=float(data.get("annotation_max_height_ratio", 0.6)),
+            annotation_min_height_ratio=float(data.get("annotation_min_height_ratio", 0.12)),
+            padding_x=float(data.get("padding_x", 5.0)),
+            padding_y=float(data.get("padding_y", 3.0)),
+            line_tolerance=float(data.get("line_tolerance", 5.0)),
+        )
+
+
+class LanguageDetector:
+    """Определение языка текста."""
+
+    @staticmethod
+    def detect(text: str) -> Language:
+        """Определяет основной язык текста."""
+        if not text:
+            return Language.UNKNOWN
+
+        cyrillic_count = sum(1 for c in text if 0x0400 <= ord(c) <= 0x04FF)
+        latin_count = sum(1 for c in text if c.isalpha() and ord(c) < 0x0400)
+
+        if cyrillic_count == 0 and latin_count == 0:
+            return Language.UNKNOWN
+
+        if cyrillic_count > 0 and latin_count > 0:
+            return Language.RUSSIAN if cyrillic_count > latin_count else Language.ENGLISH
+
+        if cyrillic_count > 0:
+            return Language.RUSSIAN
+        if latin_count > 0:
+            return Language.ENGLISH
+
+        return Language.UNKNOWN
+
+    @staticmethod
+    def has_cyrillic(text: str) -> bool:
+        """Проверяет наличие кириллицы."""
+        return any(0x0400 <= ord(c) <= 0x04FF for c in text)
+
+    @staticmethod
+    def has_latin(text: str) -> bool:
+        """Проверяет наличие латиницы."""
+        return any(c.isalpha() and ord(c) < 0x0400 for c in text)
+
+
+class TextQualityAnalyzer:
+    """Анализ качества извлеченного текста."""
+
+    IDEAL_WORD_LENGTH = {
+        Language.RUSSIAN: 6.5,
+        Language.ENGLISH: 5.5,
+        Language.MIXED: 6.0,
+        Language.UNKNOWN: 6.0,
+    }
+
+    MIN_WORD_LENGTH = 3.0
+    MAX_WORD_LENGTH = 15.0
+
+    @staticmethod
+    def calculate_average_word_length(text: str) -> float:
+        """Вычисляет среднюю длину слова."""
+        if not text:
+            return float("inf")
+
+        words = text.split()
+        if not words:
+            return float("inf")
+
+        return sum(len(w) for w in words) / len(words)
+
+    @staticmethod
+    def calculate_short_words_ratio(text: str, threshold: int = 2) -> float:
+        """Вычисляет долю коротких слов."""
+        if not text:
+            return 1.0
+
+        words = text.split()
+        if not words:
+            return 1.0
+
+        short_count = sum(1 for w in words if len(w) <= threshold)
+        return short_count / len(words)
+
+    @classmethod
+    def calculate_quality_score(cls, text: str, language: Language) -> float:
+        """
+        Вычисляет оценку качества текста.
+        Меньше = лучше. 0 = идеально.
+        """
+        if not text or text == "(Текст не найден)":
+            return float("inf")
+
+        avg_length = cls.calculate_average_word_length(text)
+        ideal_length = cls.IDEAL_WORD_LENGTH.get(language, 6.0)
+
+        if cls.MIN_WORD_LENGTH <= avg_length <= cls.MAX_WORD_LENGTH:
+            score = abs(avg_length - ideal_length)
+        else:
+            score = 50.0 + abs(avg_length - ideal_length)
+
+        short_ratio = cls.calculate_short_words_ratio(text)
+        if short_ratio > 0.3:
+            score += short_ratio * 20
+
+        return score
+
+
+class CharacterGapAnalyzer:
+    """Анализ расстояний между символами для определения оптимального x_tolerance."""
+
+    @dataclass
+    class GapStatistics:
+        """Статистика расстояний между символами."""
+
+        median: float
+        p75: float
+        p90: float
+        min_gap: float
+        max_gap: float
+        suggested_x_tolerance: float
+        suggested_space_threshold: Optional[float]
+
+    @classmethod
+    def analyze_gaps(cls, chars: List[Dict[str, Any]]) -> Optional["CharacterGapAnalyzer.GapStatistics"]:
+        """Анализирует расстояния между символами."""
+        if not chars or len(chars) < 2:
+            return None
+
+        gaps = cls._extract_gaps(chars)
+        if not gaps:
+            return None
+
+        gaps_sorted = sorted(gaps)
+        n = len(gaps_sorted)
+
+        stats = cls.GapStatistics(
+            median=gaps_sorted[n // 2],
+            p75=gaps_sorted[int(n * 0.75)],
+            p90=gaps_sorted[int(n * 0.90)],
+            min_gap=gaps_sorted[0],
+            max_gap=gaps_sorted[-1],
+            suggested_x_tolerance=0.0,
+            suggested_space_threshold=None,
+        )
+
+        stats.suggested_x_tolerance, stats.suggested_space_threshold = cls._calculate_x_tolerance(
+            stats, gaps_sorted
+        )
+
+        return stats
+
+    @staticmethod
+    def _extract_gaps(chars: List[Dict[str, Any]]) -> List[float]:
+        """Извлекает расстояния между соседними символами на одной строке."""
+        chars_sorted = sorted(chars, key=lambda c: (c.get("top", 0), c.get("x0", 0)))
+        gaps = []
+
+        for i in range(1, len(chars_sorted)):
+            prev_char = chars_sorted[i - 1]
+            curr_char = chars_sorted[i]
+            if abs(prev_char.get("top", 0) - curr_char.get("top", 0)) < 5:
+                gap = curr_char.get("x0", 0) - prev_char.get("x1", 0)
+                if 0 < gap < 50:
+                    gaps.append(gap)
+
+        return gaps
+
+    @staticmethod
+    def _calculate_x_tolerance(
+        stats: "CharacterGapAnalyzer.GapStatistics", gaps_sorted: List[float]
+    ) -> Tuple[float, Optional[float]]:
+        """Вычисляет оптимальный x_tolerance и порог пробела."""
+        median = stats.median
+        large_gaps = [g for g in gaps_sorted if g > median * 2.5]
+
+        if large_gaps and len(large_gaps) >= 3:
+            max_letter_gap = max(g for g in gaps_sorted if g <= median * 2.5)
+            min_word_gap = min(large_gaps)
+            space_threshold = (max_letter_gap + min_word_gap) / 2
+
+            x_tolerance = min(space_threshold * 0.8, min_word_gap * 0.5)
+            x_tolerance = max(0.5, x_tolerance)
+            return x_tolerance, space_threshold
+
+        x_tolerance = max(1.0, min(10.0, median * 1.5))
+        return x_tolerance, None
+
+
+class TextExtractor:
+    """Извлечение текста из PDF области."""
+
+    def __init__(self, options: ExtractionOptions):
+        self.options = options
+        self.quality_analyzer = TextQualityAnalyzer()
+
+    def extract_from_crop(self, cropped_page, language_hint: Optional[Language] = None) -> str:
+        """Извлекает текст из обрезанной страницы PDF."""
+        chars = getattr(cropped_page, "chars", None) or []
+        gap_stats = CharacterGapAnalyzer.analyze_gaps(chars)
+
+        if gap_stats:
+            x_tolerance = gap_stats.suggested_x_tolerance
+            print(f"DEBUG: x_tolerance={x_tolerance:.2f}, median_gap={gap_stats.median:.2f}")
+        else:
+            x_tolerance = 3.0
+            print(f"DEBUG: x_tolerance={x_tolerance:.2f} (default)")
+
+        candidates = self._try_extraction_methods(cropped_page, x_tolerance)
+        best_text = self._select_best_candidate(candidates, language_hint)
+
+        if gap_stats and self.quality_analyzer.calculate_average_word_length(best_text) > 20:
+            reconstructed = self._reconstruct_from_chars(chars, gap_stats)
+            if reconstructed:
+                avg_reconstructed = self.quality_analyzer.calculate_average_word_length(reconstructed)
+                avg_best = self.quality_analyzer.calculate_average_word_length(best_text)
+                if avg_reconstructed < avg_best and avg_reconstructed < 25:
+                    print(f"DEBUG: Используем реконструированный текст (avg={avg_reconstructed:.1f})")
+                    best_text = reconstructed
+
+        return best_text or "(Текст не найден)"
+
+    def _try_extraction_methods(self, cropped_page, x_tolerance: float) -> List[Tuple[str, str]]:
+        """Пробует разные методы извлечения текста."""
+        candidates = []
+
+        try:
+            try:
+                text = cropped_page.extract_text(x_tolerance=x_tolerance, y_tolerance=5)
+            except TypeError:
+                text = cropped_page.extract_text()
+            if text:
+                candidates.append(("adaptive", text))
+        except Exception as e:
+            print(f"DEBUG: Метод 'adaptive' failed: {e}")
+
+        try:
+            try:
+                text = cropped_page.extract_text(layout=True, x_tolerance=3, y_tolerance=5)
+            except TypeError:
+                text = cropped_page.extract_text()
+            if text:
+                text = re.sub(r" +", " ", text)
+                text = re.sub(r"\n\s*\n+", "\n", text)
+                candidates.append(("layout", text))
+        except Exception as e:
+            print(f"DEBUG: Метод 'layout' failed: {e}")
+
+        try:
+            try:
+                text = cropped_page.extract_text(use_text_flow=True, x_tolerance=2, y_tolerance=5)
+            except TypeError:
+                text = cropped_page.extract_text()
+            if text:
+                candidates.append(("text_flow", text))
+        except Exception as e:
+            print(f"DEBUG: Метод 'text_flow' failed: {e}")
+
+        try:
+            try:
+                text = cropped_page.extract_text(x_tolerance=0.5, y_tolerance=5)
+            except TypeError:
+                text = cropped_page.extract_text()
+            if text:
+                candidates.append(("tight", text))
+        except Exception as e:
+            print(f"DEBUG: Метод 'tight' failed: {e}")
+
+        return candidates
+
+    def _select_best_candidate(self, candidates: List[Tuple[str, str]], language_hint: Optional[Language]) -> str:
+        """Выбирает лучший результат из кандидатов."""
+        if not candidates:
+            return ""
+
+        if language_hint is None:
+            language_hint = LanguageDetector.detect(candidates[0][1])
+
+        best_text = ""
+        best_score = float("inf")
+        best_method = ""
+
+        for method, text in candidates:
+            score = self.quality_analyzer.calculate_quality_score(text, language_hint)
+            if _is_garbled_text(text, language_hint.value if language_hint != Language.UNKNOWN else None):
+                score += 100
+
+            if score < best_score:
+                best_score = score
+                best_text = text
+                best_method = method
+
+        avg_len = self.quality_analyzer.calculate_average_word_length(best_text)
+        print(f"DEBUG: Лучший метод: {best_method}, avg_word_len={avg_len:.1f}, score={best_score:.1f}")
+
+        return best_text
+
+    def _reconstruct_from_chars(
+        self, chars: List[Dict[str, Any]], gap_stats: "CharacterGapAnalyzer.GapStatistics"
+    ) -> Optional[str]:
+        """Реконструирует текст из символов вручную."""
+        if not chars or not gap_stats.suggested_space_threshold:
+            return None
+
+        space_threshold = gap_stats.p90
+
+        chars_sorted = sorted(chars, key=lambda c: (c.get("top", 0), c.get("x0", 0)))
+        lines = []
+        current_line = []
+        current_top = None
+        prev_char = None
+
+        for char in chars_sorted:
+            char_text = char.get("text", "")
+            char_top = char.get("top", 0)
+            char_x0 = char.get("x0", 0)
+
+            if current_top is None or abs(char_top - current_top) > 5:
+                if current_line:
+                    lines.append("".join(current_line))
+                current_line = [char_text]
+                current_top = char_top
+                prev_char = char
+                continue
+
+            if prev_char:
+                gap = char_x0 - prev_char.get("x1", char_x0)
+                if gap > space_threshold:
+                    current_line.append(" ")
+
+            current_line.append(char_text)
+            prev_char = char
+
+        if current_line:
+            lines.append("".join(current_line))
+
+        return "\n".join(lines)
+
+
+class LanguageFilter:
+    """Фильтрация текста по языку."""
+
+    @staticmethod
+    def filter_by_language(
+        text: str,
+        words: List[Dict[str, Any]],
+        target_language: Language,
+        skip_filter: bool = False,
+        line_tolerance: float = 5.0,
+    ) -> str:
+        """
+        Фильтрует текст, оставляя только слова на целевом языке.
+        """
+        if skip_filter or target_language == Language.UNKNOWN:
+            return text
+
+        if not words:
+            return text
+
+        detected = LanguageDetector.detect(text)
+        if detected == target_language:
+            return text
+
+        if target_language == Language.RUSSIAN:
+            filtered_words = [
+                w
+                for w in words
+                if LanguageDetector.has_cyrillic(w["text"]) or not any(c.isalpha() for c in w["text"])
+            ]
+        elif target_language == Language.ENGLISH:
+            filtered_words = [
+                w
+                for w in words
+                if LanguageDetector.has_latin(w["text"]) or not any(c.isalpha() for c in w["text"])
+            ]
+        else:
+            return text
+
+        if not filtered_words:
+            return text
+
+        return LanguageFilter._reconstruct_text_from_words(filtered_words, line_tolerance=line_tolerance)
+
+    @staticmethod
+    def _reconstruct_text_from_words(words: List[Dict[str, Any]], line_tolerance: float = 5.0) -> str:
+        """Восстанавливает текст из списка слов с учетом строк."""
+        lines = []
+        current_line = []
+        current_top = None
+
+        words_sorted = sorted(words, key=lambda w: (round(w["top"] / line_tolerance), w["x0"]))
+
+        for word in words_sorted:
+            word_top = word["top"]
+
+            if current_top is None or abs(word_top - current_top) > line_tolerance:
+                if current_line:
+                    current_line.sort(key=lambda w: w["x0"])
+                    lines.append(current_line)
+                current_line = [word]
+                current_top = word_top
+            else:
+                current_line.append(word)
+
+        if current_line:
+            current_line.sort(key=lambda w: w["x0"])
+            lines.append(current_line)
+
+        return "\n".join([" ".join([w["text"] for w in line]) for line in lines])
+
+
+class PDFTextExtractor:
+    """Главный класс для извлечения текста из областей PDF."""
+
+    RUSSIAN_FIELDS = {
+        "title",
+        "annotation",
+        "keywords",
+        "references_ru",
+        "funding",
+        "author_surname_rus",
+        "author_initials_rus",
+        "author_org_rus",
+        "author_address_rus",
+        "author_other_rus",
+    }
+
+    ENGLISH_FIELDS = {
+        "title_en",
+        "annotation_en",
+        "keywords_en",
+        "references_en",
+        "funding_en",
+        "author_surname_eng",
+        "author_initials_eng",
+        "author_org_eng",
+        "author_address_eng",
+        "author_other_eng",
+    }
+
+    MIXED_LANGUAGE_FIELDS = {"references_ru", "references_en", "annotation", "annotation_en"}
+
+    def __init__(self, options: ExtractionOptions):
+        self.options = options
+        self.text_extractor = TextExtractor(options)
+        self.language_filter = LanguageFilter()
+
+    def extract_from_selection(self, page, selection: Dict[str, Any]) -> Dict[str, Any]:
+        """Извлекает текст из одной выделенной области."""
+        field_id = selection.get("field_id")
+        page_num = selection.get("page", 0)
+
+        target_language = self._get_target_language(field_id)
+        skip_language_filter = field_id in self.MIXED_LANGUAGE_FIELDS
+
+        bbox = self._get_bbox_from_selection(page, selection, field_id)
+
+        if not bbox.is_valid():
+            print(f"WARNING: Невалидная область для {field_id}")
+            return self._create_result(field_id, page_num, bbox, "(Невалидная область)")
+
+        print(f"DEBUG: Обработка {field_id} на странице {page_num}")
+        print(f"DEBUG: Область: {bbox.to_tuple()}")
+
+        try:
+            cropped = page.crop(bbox.to_tuple())
+        except Exception as e:
+            print(f"ERROR: Ошибка crop: {e}")
+            return self._create_result(field_id, page_num, bbox, f"(Ошибка: {e})")
+
+        text = self.text_extractor.extract_from_crop(cropped, target_language)
+
+        try:
+            try:
+                words = cropped.extract_words(x_tolerance=3.0, y_tolerance=5.0, keep_blank_chars=False)
+            except TypeError:
+                words = cropped.extract_words()
+        except Exception as e:
+            print(f"DEBUG: Не удалось извлечь слова: {e}")
+            words = []
+
+        if words and target_language != Language.UNKNOWN:
+            text = self.language_filter.filter_by_language(
+                text,
+                words,
+                target_language,
+                skip_language_filter,
+                line_tolerance=self.options.line_tolerance,
+            )
+
+        if self._should_use_ocr(text, field_id):
+            ocr_text = self._apply_ocr(page, bbox, field_id)
+            if ocr_text:
+                text = ocr_text
+
+        text = _normalize_extracted_text(text, field_id, self.options.__dict__)
+
+        return self._create_result(field_id, page_num, bbox, text)
+
+    def _get_target_language(self, field_id: Optional[str]) -> Language:
+        """Определяет целевой язык для поля."""
+        if not field_id:
+            return Language.UNKNOWN
+
+        if field_id in self.RUSSIAN_FIELDS:
+            return Language.RUSSIAN
+        if field_id in self.ENGLISH_FIELDS:
+            return Language.ENGLISH
+        return Language.UNKNOWN
+
+    def _get_bbox_from_selection(self, page, selection: Dict[str, Any], field_id: Optional[str]) -> BBox:
+        """Получает область из данных выделения."""
+        def _has_manual_bbox(sel: Dict[str, Any]) -> bool:
+            try:
+                x1 = float(sel.get("pdf_x1", 0))
+                y1 = float(sel.get("pdf_y1", 0))
+                x2 = float(sel.get("pdf_x2", 0))
+                y2 = float(sel.get("pdf_y2", 0))
+            except (TypeError, ValueError):
+                return False
+            return abs(x2 - x1) > 1.0 and abs(y2 - y1) > 1.0
+
+        has_manual = _has_manual_bbox(selection)
+
+        if field_id in {"annotation", "annotation_en"} and self.options.annotation_by_heading and not has_manual:
+            lang = "ru" if field_id == "annotation" else "en"
+            block = _find_annotation_block(page, lang, self.options.__dict__)
+            if block:
+                top, bottom = block
+                bbox = BBox(x1=0.0, y1=top, x2=page.width, y2=bottom)
+                # Если пользователь выделял область, расширяем низ блока до границ выделения
+                try:
+                    sel_bbox = BBox(
+                        x1=float(selection.get("pdf_x1", 0)),
+                        y1=float(selection.get("pdf_y1", 0)),
+                        x2=float(selection.get("pdf_x2", 0)),
+                        y2=float(selection.get("pdf_y2", 0)),
+                    ).normalize()
+                    if sel_bbox.is_valid():
+                        bbox = BBox(
+                            x1=0.0,
+                            y1=bbox.y1,
+                            x2=page.width,
+                            y2=max(bbox.y2, sel_bbox.y2),
+                        )
+                except Exception:
+                    pass
+                print(f"DEBUG: Аннотация по заголовку: {bbox.to_tuple()}")
+                return bbox.add_padding(self.options.padding_x, self.options.padding_y, page.width, page.height)
+
+        bbox = BBox(
+            x1=float(selection.get("pdf_x1", 0)),
+            y1=float(selection.get("pdf_y1", 0)),
+            x2=float(selection.get("pdf_x2", 0)),
+            y2=float(selection.get("pdf_y2", 0)),
+        )
+
+        bbox = bbox.normalize()
+        bbox = bbox.add_padding(self.options.padding_x, self.options.padding_y, page.width, page.height)
+        return bbox
+
+    def _should_use_ocr(self, text: str, field_id: Optional[str]) -> bool:
+        """Определяет, нужно ли использовать OCR."""
+        if self.options.force_ocr:
+            return True
+
+        if not self.options.use_ocr_if_garbled:
+            if field_id not in {"annotation", "annotation_en", "references_ru", "references_en"}:
+                return False
+
+        target_lang = self._get_target_language(field_id)
+        lang_hint = target_lang.value if target_lang != Language.UNKNOWN else None
+        return _is_garbled_text(text, lang_hint)
+
+    def _apply_ocr(self, page, bbox: BBox, field_id: Optional[str]) -> Optional[str]:
+        """Применяет OCR к области."""
+        ocr_lang = self.options.ocr_lang
+        if not ocr_lang:
+            target_lang = self._get_target_language(field_id)
+            if target_lang == Language.RUSSIAN:
+                ocr_lang = "rus+eng"
+            elif target_lang == Language.ENGLISH:
+                ocr_lang = "eng+rus"
+            else:
+                ocr_lang = "rus+eng"
+
+        print(f"DEBUG: Применяем OCR (lang={ocr_lang})")
+        try:
+            ocr_text = _ocr_extract_text(page, bbox.to_tuple(), ocr_lang)
+            if ocr_text and ocr_text.strip():
+                print(f"DEBUG: OCR успешно: {ocr_text[:100]}")
+                return ocr_text.strip()
+        except Exception as e:
+            print(f"DEBUG: OCR failed: {e}")
+
+        return None
+
+    @staticmethod
+    def _create_result(field_id: Optional[str], page_num: int, bbox: BBox, text: str) -> Dict[str, Any]:
+        """Создает словарь результата."""
+        return {
+            "field_id": field_id,
+            "page": page_num,
+            "bbox": {"x1": bbox.x1, "y1": bbox.y1, "x2": bbox.x2, "y2": bbox.y2},
+            "text": text,
+        }
 
 def register_pdf_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
@@ -396,440 +1290,97 @@ def register_pdf_routes(app, ctx):
 
     @app.route("/api/pdf-extract-text", methods=["POST"])
     def api_pdf_extract_text():
-        """API endpoint для извлечения текста из выделенных областей PDF."""
+        """API endpoint ??? ?????????? ?????? ?? ?????????? ???????? PDF."""
         try:
             data = request.get_json()
             pdf_filename = data.get("pdf_file")
             selections = data.get("selections", [])
-            options = data.get("options", {}) or {}
-            merge_by_field = bool(options.get("merge_by_field", False))
-            
-            print(f"DEBUG: Запрос извлечения текста из {len(selections)} областей")
-            print(f"DEBUG: PDF файл: {pdf_filename}")
-            
+            options_dict = data.get("options", {}) or {}
+
+            print(f"DEBUG: ?????? ?????????? ?????? ?? {len(selections)} ????????")
+            print(f"DEBUG: PDF ????: {pdf_filename}")
+
             if not pdf_filename:
-                return jsonify({"error": "Не указан файл PDF"}), 400
-            
+                return jsonify({"error": "?? ?????? ???? PDF"}), 400
+
             if not selections:
-                return jsonify({"error": "Нет выделенных областей"}), 400
-            
-            # Безопасность: проверяем путь
+                return jsonify({"error": "??? ?????????? ????????"}), 400
+
             if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
-                return jsonify({"error": "Недопустимый путь к файлу"}), 400
-            
+                return jsonify({"error": "???????????? ???? ? ?????"}), 400
+
             pdf_path = _input_files_dir / pdf_filename
-            
+
             if not pdf_path.exists() or not pdf_path.is_file():
-                print(f"ERROR: Файл не найден: {pdf_path}")
-                return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
-            
-            # Проверяем, что файл находится внутри input_files_dir
+                print(f"ERROR: ???? ?? ??????: {pdf_path}")
+                return jsonify({"error": f"???? ?? ??????: {pdf_filename}"}), 404
+
             try:
                 pdf_path.resolve().relative_to(_input_files_dir.resolve())
             except ValueError:
-                return jsonify({"error": "Недопустимый путь к файлу"}), 400
-            
-            # Извлекаем текст из выделенных областей
+                return jsonify({"error": "???????????? ???? ? ?????"}), 400
+
+            options = ExtractionOptions.from_dict(options_dict)
+
             try:
                 import pdfplumber
+
+                extractor = PDFTextExtractor(options)
                 extracted = []
-                
-                print(f"DEBUG: Открываю PDF: {pdf_path}")
+
+                print(f"DEBUG: ???????? PDF: {pdf_path}")
                 with pdfplumber.open(str(pdf_path)) as pdf:
-                    print(f"DEBUG: PDF содержит {len(pdf.pages)} страниц")
-                    
-                    for idx, selection in enumerate(selections):
+                    print(f"DEBUG: PDF ???????? {len(pdf.pages)} ???????")
+
+                    for selection in selections:
                         page_num = selection.get("page", 0)
-                        field_id = selection.get("field_id")
-                        is_rus_field = field_id in {
-                            "title",
-                            "annotation",
-                            "keywords",
-                            "references_ru",
-                            "funding",
-                            "author_surname_rus",
-                            "author_initials_rus",
-                            "author_org_rus",
-                            "author_address_rus",
-                            "author_other_rus",
-                        }
-                        is_eng_field = field_id in {
-                            "title_en",
-                            "annotation_en",
-                            "keywords_en",
-                            "references_en",
-                            "funding_en",
-                            "author_surname_eng",
-                            "author_initials_eng",
-                            "author_org_eng",
-                            "author_address_eng",
-                            "author_other_eng",
-                        }
-                        print(f"DEBUG: Обработка выделения {idx + 1}: страница {page_num}")
-                        print(f"DEBUG: Координаты: x1={selection.get('pdf_x1')}, y1={selection.get('pdf_y1')}, x2={selection.get('pdf_x2')}, y2={selection.get('pdf_y2')}")
-                        
                         if page_num >= len(pdf.pages):
-                            print(f"WARNING: Страница {page_num} не существует (всего страниц: {len(pdf.pages)})")
+                            print(f"WARNING: ???????? {page_num} ?? ??????????")
                             continue
-                        
+
                         page = pdf.pages[page_num]
-                        page_height = page.height
-                        print(f"DEBUG: Размер страницы: {page.width}x{page_height}")
-                        
-                        # Проверяем координаты
-                        pdf_x1 = float(selection.get("pdf_x1", 0))
-                        pdf_y1 = float(selection.get("pdf_y1", 0))  # Это уже инвертированная координата (top)
-                        pdf_x2 = float(selection.get("pdf_x2", 0))
-                        pdf_y2 = float(selection.get("pdf_y2", 0))  # Это уже инвертированная координата (bottom)
-                        
-                        # Нормализуем координаты
-                        pdf_x1, pdf_x2 = min(pdf_x1, pdf_x2), max(pdf_x1, pdf_x2)
-                        # pdf_y1 и pdf_y2 уже инвертированы в JavaScript, поэтому используем их напрямую
-                        # Но нужно убедиться, что top < bottom
-                        top = min(pdf_y1, pdf_y2)
-                        bottom = max(pdf_y1, pdf_y2)
-                        
-                        # Добавляем отступ для захвата крайних символов
-                        # Увеличенный padding помогает захватить номера страниц и года в конце строк
-                        padding_x = 5  # пиксели по горизонтали
-                        padding_y = 3  # пиксели по вертикали
-                        pdf_x1 = max(0, pdf_x1 - padding_x)
-                        pdf_x2 = min(page.width, pdf_x2 + padding_x)
-                        top = max(0, top - padding_y)
-                        bottom = min(page.height, bottom + padding_y)
-                        
-                        # Убеждаемся, что x1 < x2 и top < bottom
-                        if pdf_x1 >= pdf_x2:
-                            pdf_x1, pdf_x2 = 0, page.width
-                        if top >= bottom:
-                            top, bottom = 0, page.height
-                        
-                        print(f"DEBUG: Область crop: x1={pdf_x1}, top={top}, x2={pdf_x2}, bottom={bottom}")
-                        print(f"DEBUG: Размер страницы: {page.width}x{page.height}")
-                        
-                        # Используем crop для извлечения текста из области
-                        try:
-                            cropped = page.crop((pdf_x1, top, pdf_x2, bottom))
-                            
-                            # Извлекаем текст с настройками для лучшей группировки
-                            # Увеличенные tolerance помогают захватить индексы (sub/sup)
-                            text_simple = cropped.extract_text(
-                                x_tolerance=3,  # допуск по X для объединения символов в слова
-                                y_tolerance=5,  # допуск по Y увеличен для захвата индексов
-                            )
-                            
-                            # Также извлекаем слова для более точного контроля
-                            words = cropped.extract_words(
-                                x_tolerance=3,
-                                y_tolerance=5,  # увеличен для индексов
-                                keep_blank_chars=False,
-                            )
-                            
-                            print(f"DEBUG: Извлеченный текст (простой метод): {text_simple[:100] if text_simple else '(пусто)'}")
-                            print(f"DEBUG: Найдено слов: {len(words)}")
-                            
-                            # Группируем слова по строкам (по Y-координате)
-                            if words:
-                                # Группируем слова по строкам с допуском по Y
-                                line_tolerance = 5  # пиксели
-                                lines = []
-                                current_line = []
-                                current_top = None
-                                
-                                # Сортируем сначала по Y (top), потом по X (x0)
-                                words_sorted_by_y = sorted(words, key=lambda w: (round(w['top'] / line_tolerance), w['x0']))
-                                
-                                for w in words_sorted_by_y:
-                                    if current_top is None:
-                                        current_top = w['top']
-                                        current_line = [w]
-                                    elif abs(w['top'] - current_top) <= line_tolerance:
-                                        # Та же строка
-                                        current_line.append(w)
-                                    else:
-                                        # Новая строка
-                                        if current_line:
-                                            # Сортируем слова в строке по X
-                                            current_line.sort(key=lambda x: x['x0'])
-                                            lines.append(current_line)
-                                        current_line = [w]
-                                        current_top = w['top']
-                                
-                                if current_line:
-                                    current_line.sort(key=lambda x: x['x0'])
-                                    lines.append(current_line)
-                                
-                                # Собираем текст из строк
-                                text_from_words = '\n'.join([' '.join([w['text'] for w in line]) for line in lines])
-                                words_sorted = [w for line in lines for w in line]  # плоский список для дальнейшей обработки
-                                
-                                print(f"DEBUG: Текст из слов (первые 100 символов): {text_from_words[:100]}")
-                                
-                                # Для references и annotation НЕ фильтруем по языку — оставляем весь текст
-                                skip_early_lang_filter = field_id in {
-                                    "references_ru", "references_en", 
-                                    "annotation", "annotation_en"
-                                }
-                                
-                                if not skip_early_lang_filter:
-                                    # Пробуем определить, какой текст нужен (русский или английский)
-                                    has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_from_words)
-                                    has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text_from_words)
-                                    
-                                    print(f"DEBUG: Есть кириллица: {has_cyrillic}, есть латиница: {has_latin}")
-                                    
-                                    # Если есть и русский, и английский текст, определяем, какой преобладает
-                                    if has_cyrillic and has_latin:
-                                        # Разделяем на русские и английские слова
-                                        cyrillic_words = [w for w in words_sorted if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text'])]
-                                        latin_words = [w for w in words_sorted if not any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w['text']) and any(c.isalpha() for c in w['text'])]
-                                        
-                                        # Подсчитываем количество символов в каждом языке
-                                        cyrillic_chars = sum(len(w['text']) for w in cyrillic_words)
-                                        latin_chars = sum(len(w['text']) for w in latin_words)
-                                        
-                                        print(f"DEBUG: Кириллица: {len(cyrillic_words)} слов, {cyrillic_chars} символов")
-                                        print(f"DEBUG: Латиница: {len(latin_words)} слов, {latin_chars} символов")
-                                        
-                                        # Выбираем язык с большим количеством символов
-                                        if cyrillic_chars >= latin_chars:
-                                            if cyrillic_words:
-                                                text_from_words = ' '.join([w['text'] for w in cyrillic_words])
-                                                print(f"DEBUG: Выбран русский текст (преобладает кириллица: {cyrillic_chars} > {latin_chars}): {text_from_words[:100]}")
-                                        else:
-                                            if latin_words:
-                                                text_from_words = ' '.join([w['text'] for w in latin_words])
-                                                print(f"DEBUG: Выбран английский текст (преобладает латиница: {latin_chars} > {cyrillic_chars}): {text_from_words[:100]}")
-                            
-                            # Выбираем лучший метод извлечения
-                            if words and len(words) > 0 and 'text_from_words' in locals() and text_from_words:
-                                # Сравниваем качество двух методов
-                                # Признак плохого извлечения: много коротких "слов" (1-2 символа) подряд
-                                simple_words = text_simple.split() if text_simple else []
-                                grouped_words = text_from_words.split()
-                                
-                                # Считаем долю коротких слов (признак перемешанных символов)
-                                short_simple = sum(1 for w in simple_words if len(w) <= 2) / max(len(simple_words), 1)
-                                short_grouped = sum(1 for w in grouped_words if len(w) <= 2) / max(len(grouped_words), 1)
-                                
-                                print(f"DEBUG: Доля коротких слов - простой: {short_simple:.2f}, группировка: {short_grouped:.2f}")
-                                
-                                # Если в простом методе много коротких слов — используем группировку
-                                if short_simple > 0.3 and short_grouped < short_simple:
-                                    text = text_from_words
-                                    print(f"DEBUG: Используется метод группировки (меньше коротких слов)")
-                                elif text_simple:
-                                    text = text_simple
-                                    print(f"DEBUG: Используется простой метод")
-                                else:
-                                    text = text_from_words
-                                    print(f"DEBUG: Используется метод группировки (простой пуст)")
-                            elif text_simple:
-                                text = text_simple
-                                print(f"DEBUG: Используется простой метод (нет слов)")
-                            else:
-                                text = "(Текст не найден)"
-                            
-                            # Для списка литературы и аннотаций НЕ фильтруем по языку — 
-                            # там могут быть термины, названия методов, имена на латинице
-                            is_references_field = field_id in {"references_ru", "references_en"}
-                            is_annotation_field = field_id in {"annotation", "annotation_en"}
-                            skip_language_filter = is_references_field or is_annotation_field
-                            
-                            # Для русских полей (кроме references и annotation): включаем кириллические слова + цифры/пунктуацию
-                            if is_rus_field and not skip_language_filter:
-                                ru_text = None
-                                if words:
-                                    # Включаем слова с кириллицей ИЛИ без букв (цифры, пунктуация, номера страниц)
-                                    relevant_words = [
-                                        w for w in words_sorted
-                                        if any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in w["text"])
-                                        or not any(c.isalpha() for c in w["text"])  # цифры, пунктуация
-                                    ]
-                                    if relevant_words:
-                                        ru_text = " ".join([w["text"] for w in relevant_words])
-                                if not ru_text and text_simple and any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text_simple):
-                                    ru_text = text_simple
-                                if ru_text:
-                                    text = ru_text
-                                    print(f"DEBUG: Выбран русский текст для поля {field_id}: {text[:100]}")
+                        result = extractor.extract_from_selection(page, selection)
+                        extracted.append(result)
 
-                            # Для английских полей (кроме references и annotation): включаем латинские слова + цифры/пунктуацию
-                            if is_eng_field and not skip_language_filter:
-                                en_text = None
-                                if words:
-                                    # Включаем слова с латиницей ИЛИ без букв (цифры, пунктуация, номера страниц)
-                                    relevant_words = [
-                                        w for w in words_sorted
-                                        if any(c.isalpha() and ord(c) < 0x0400 for c in w["text"])
-                                        or not any(c.isalpha() for c in w["text"])  # цифры, пунктуация
-                                    ]
-                                    if relevant_words:
-                                        en_text = " ".join([w["text"] for w in relevant_words])
-                                if not en_text and text_simple and any(c.isalpha() and ord(c) < 0x0400 for c in text_simple):
-                                    en_text = text_simple
-                                if en_text:
-                                    text = en_text
-                                    print(f"DEBUG: Выбран английский текст для поля {field_id}: {text[:100]}")
+                print(f"DEBUG: ????????? ?????? ?? {len(extracted)} ????????")
 
-                            if text:
-                                text = text.strip()
-                            else:
-                                text = "(Текст не найден)"
-                            
-                            print(f"DEBUG: Финальный извлеченный текст (первые 100 символов): {text[:100]}")
-                            
-                            # Дополнительная проверка: если в тексте есть и русский, и английский,
-                            # определяем преобладающий язык и выбираем соответствующий текст
-                            # НО: для списка литературы и аннотаций пропускаем — там смешанные языки это норма
-                            if text and text != "(Текст не найден)" and not skip_language_filter:
-                                has_cyrillic = any(ord(c) >= 0x0400 and ord(c) <= 0x04FF for c in text)
-                                has_latin = any(c.isalpha() and ord(c) < 0x0400 for c in text)
-                                
-                                if has_cyrillic and has_latin:
-                                    # Подсчитываем общее количество символов каждого языка
-                                    total_cyrillic = sum(1 for c in text if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
-                                    total_latin = sum(1 for c in text if c.isalpha() and ord(c) < 0x0400)
-                                    
-                                    print(f"DEBUG: Финальная проверка - кириллица: {total_cyrillic} символов, латиница: {total_latin} символов")
-                                    
-                                    # Разделяем текст на слова для более точного анализа
-                                    import re
-                                    # Разбиваем на слова, сохраняя пробелы и переносы строк
-                                    words_list = re.findall(r'\S+|\s+', text)
-                                    
-                                    # Определяем язык каждого слова
-                                    cyrillic_parts = []
-                                    latin_parts = []
-                                    current_cyrillic = []
-                                    current_latin = []
-                                    
-                                    for word in words_list:
-                                        word_cyrillic = sum(1 for c in word if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
-                                        word_latin = sum(1 for c in word if c.isalpha() and ord(c) < 0x0400)
-                                        
-                                        if word_cyrillic > word_latin:
-                                            # Преимущественно кириллица
-                                            if current_latin:
-                                                latin_parts.append(''.join(current_latin))
-                                                current_latin = []
-                                            current_cyrillic.append(word)
-                                        elif word_latin > 0:
-                                            # Преимущественно латиница
-                                            if current_cyrillic:
-                                                cyrillic_parts.append(''.join(current_cyrillic))
-                                                current_cyrillic = []
-                                            current_latin.append(word)
-                                        else:
-                                            # Пробелы, знаки препинания - добавляем к текущей группе
-                                            if current_cyrillic:
-                                                current_cyrillic.append(word)
-                                            elif current_latin:
-                                                current_latin.append(word)
-                                    
-                                    # Добавляем оставшиеся части
-                                    if current_cyrillic:
-                                        cyrillic_parts.append(''.join(current_cyrillic))
-                                    if current_latin:
-                                        latin_parts.append(''.join(current_latin))
-                                    
-                                    # Выбираем преобладающий язык
-                                    cyrillic_text = ' '.join(cyrillic_parts).strip()
-                                    latin_text = ' '.join(latin_parts).strip()
-                                    
-                                    print(f"DEBUG: Русские части: {len(cyrillic_parts)}, Английские части: {len(latin_parts)}")
-                                    
-                                    if total_cyrillic > total_latin:
-                                        # Преобладает русский - используем русские части
-                                        if cyrillic_text:
-                                            text = cyrillic_text
-                                            print(f"DEBUG: Выбран русский текст (преобладает кириллица: {total_cyrillic} > {total_latin})")
-                                    else:
-                                        # Преобладает английский - используем английские части
-                                        if latin_text:
-                                            text = latin_text
-                                            print(f"DEBUG: Выбран английский текст (преобладает латиница: {total_latin} > {total_cyrillic})")
-                                    
-                                    # Если разделение не помогло, используем старый метод по строкам
-                                    if not text or text == "(Текст не найден)":
-                                        lines = text.split('\\n') if text else []
-                                        filtered_lines = []
-                                        for line in lines:
-                                            line_cyrillic = sum(1 for c in line if ord(c) >= 0x0400 and ord(c) <= 0x04FF)
-                                            line_latin = sum(1 for c in line if c.isalpha() and ord(c) < 0x0400)
-                                            
-                                            # Выбираем строки с преобладающим языком
-                                            if total_latin > total_cyrillic:
-                                                # Преобладает английский - выбираем строки с латиницей
-                                                if line_latin > line_cyrillic or (line_latin > 0 and line_cyrillic == 0):
-                                                    filtered_lines.append(line)
-                                            else:
-                                                # Преобладает русский - выбираем строки с кириллицей
-                                                if line_cyrillic > line_latin or (line_cyrillic > 0 and line_latin == 0):
-                                                    filtered_lines.append(line)
-                                        
-                                        if filtered_lines:
-                                            text = '\n'.join(filtered_lines).strip()
-                            
-                            extracted.append({
-                                "field_id": field_id,
-                                "page": page_num,
-                                "bbox": {
-                                    "x1": pdf_x1,
-                                    "y1": pdf_y1,
-                                    "x2": pdf_x2,
-                                    "y2": pdf_y2
-                                },
-                                "text": _normalize_extracted_text(text, field_id, options)
-                            })
-                        except Exception as crop_error:
-                            import traceback
-                            error_msg = f"Ошибка при crop: {str(crop_error)}\n{traceback.format_exc()}"
-                            print(f"ERROR: {error_msg}")
-                            extracted.append({
-                                "field_id": field_id,
-                                "page": page_num,
-                                "bbox": {
-                                    "x1": pdf_x1,
-                                    "y1": pdf_y1,
-                                    "x2": pdf_x2,
-                                    "y2": pdf_y2
-                                },
-                                "text": f"(Ошибка извлечения: {str(crop_error)})"
-                            })
-                
-                print(f"DEBUG: Извлечено текста из {len(extracted)} областей")
                 merged = {}
-                if merge_by_field:
-                    for item in sorted(extracted, key=lambda i: (i.get("field_id") or "", i.get("page", 0))):
+                if options.merge_by_field:
+                    for item in sorted(
+                        extracted, key=lambda i: (i.get("field_id") or "", i.get("page", 0))
+                    ):
                         field = item.get("field_id")
                         text = item.get("text")
-                        if not field or not text or text == "(Текст не найден)":
+                        if not field or not text or text == "(????? ?? ??????)":
                             continue
                         merged.setdefault(field, [])
                         merged[field].append(text)
                     merged = {k: "\n".join(v).strip() for k, v in merged.items()}
 
-                return jsonify({
-                    "success": True,
-                    "extracted": extracted,
-                    "merged": merged if merge_by_field else None,
-                })
+                return jsonify(
+                    {
+                        "success": True,
+                        "extracted": extracted,
+                        "merged": merged if options.merge_by_field else None,
+                    }
+                )
+
             except ImportError as e:
-                print(f"ERROR: pdfplumber не установлен: {e}")
-                return jsonify({"error": "pdfplumber не установлен"}), 500
+                print(f"ERROR: pdfplumber ?? ??????????: {e}")
+                return jsonify({"error": "pdfplumber ?? ??????????"}), 500
             except Exception as e:
                 import traceback
-                error_msg = f"Ошибка при извлечении текста: {str(e)}\n{traceback.format_exc()}"
+
+                error_msg = f"?????? ??? ?????????? ??????: {str(e)}\n{traceback.format_exc()}"
                 print(f"ERROR: {error_msg}")
-                return jsonify({"error": f"Ошибка при извлечении текста: {str(e)}"}), 500
-        
+                return jsonify({"error": f"?????? ??? ?????????? ??????: {str(e)}"}), 500
+
         except Exception as e:
             import traceback
-            error_msg = f"Ошибка: {str(e)}\n{traceback.format_exc()}"
+
+            error_msg = f"??????: {str(e)}\n{traceback.format_exc()}"
             print(f"ERROR: {error_msg}")
-            return jsonify({"error": f"Ошибка: {str(e)}"}), 500
-    
+            return jsonify({"error": f"??????: {str(e)}"}), 500
 
     @app.route("/api/pdf-save-coordinates", methods=["POST"])
     def api_pdf_save_coordinates():
@@ -909,4 +1460,247 @@ def register_pdf_routes(app, ctx):
         
         return send_file(pdf_path, mimetype='application/pdf')
     
+    # ==================== BBOX Templates API ====================
+    
+    from bbox_templates import get_template_manager, BboxCoords
+    
+    @app.route("/api/bbox-templates/suggestions", methods=["GET"])
+    def get_bbox_suggestions():
+        """
+        Получить предложения bbox для журнала.
+        
+        Query params:
+            issn: ISSN журнала
+            page_width: ширина страницы PDF (default 595)
+            page_height: высота страницы PDF (default 842)
+        """
+        issn = request.args.get("issn", "")
+        if not issn:
+            return jsonify({"error": "ISSN не указан"}), 400
+        
+        page_width = float(request.args.get("page_width", 595))
+        page_height = float(request.args.get("page_height", 842))
+        
+        manager = get_template_manager()
+        suggestions = manager.get_suggestions_for_journal(issn, page_width, page_height)
+        
+        return jsonify(suggestions)
+    
+    @app.route("/api/bbox-templates/save", methods=["POST"])
+    def save_bbox_template():
+        """
+        Сохранить bbox как образец для шаблона.
+        
+        Body JSON:
+            issn: ISSN журнала
+            journal_name: название журнала (опционально)
+            field_id: ID поля (title, annotation, references_ru, etc.)
+            coords: {page, pdf_x1, pdf_y1, pdf_x2, pdf_y2, page_width, page_height}
+        """
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Нет данных"}), 400
+        
+        issn = data.get("issn", "")
+        if not issn:
+            return jsonify({"error": "ISSN не указан"}), 400
+        
+        field_id = data.get("field_id", "")
+        if not field_id:
+            return jsonify({"error": "field_id не указан"}), 400
+        
+        coords_data = data.get("coords", {})
+        if not coords_data:
+            return jsonify({"error": "coords не указаны"}), 400
+        
+        try:
+            coords = BboxCoords(
+                page=int(coords_data.get("page", 0)),
+                pdf_x1=float(coords_data.get("pdf_x1", 0)),
+                pdf_y1=float(coords_data.get("pdf_y1", 0)),
+                pdf_x2=float(coords_data.get("pdf_x2", 0)),
+                pdf_y2=float(coords_data.get("pdf_y2", 0)),
+                page_width=float(coords_data.get("page_width", 595)),
+                page_height=float(coords_data.get("page_height", 842)),
+            )
+        except (ValueError, TypeError) as e:
+            return jsonify({"error": f"Неверный формат координат: {e}"}), 400
+        
+        manager = get_template_manager()
+        journal_name = data.get("journal_name", "")
+        manager.add_bbox_sample(issn, field_id, coords, journal_name)
+        
+        # Возвращаем обновлённые предложения
+        suggestions = manager.get_suggestions_for_journal(
+            issn, 
+            coords.page_width, 
+            coords.page_height
+        )
+        
+        return jsonify({
+            "success": True,
+            "message": f"Шаблон для {field_id} сохранён",
+            "suggestions": suggestions,
+        })
+    
+    @app.route("/api/bbox-templates/list", methods=["GET"])
+    def list_bbox_templates():
+        """Получить список всех доступных шаблонов."""
+        manager = get_template_manager()
+        templates = manager.list_templates()
+        return jsonify({"templates": templates})
+    
+    @app.route("/api/bbox-templates/delete", methods=["POST"])
+    def delete_bbox_template():
+        """Удалить шаблон для журнала."""
+        data = request.get_json()
+        issn = data.get("issn", "") if data else ""
+        
+        if not issn:
+            return jsonify({"error": "ISSN не указан"}), 400
+        
+        manager = get_template_manager()
+        success = manager.delete_template(issn)
+        
+        if success:
+            return jsonify({"success": True, "message": f"Шаблон для {issn} удалён"})
+        else:
+            return jsonify({"error": "Шаблон не найден"}), 404
+    
+    @app.route("/api/bbox-templates/reset-field", methods=["POST"])
+    def reset_field_template():
+        """Сбросить шаблон для конкретного поля."""
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Нет данных"}), 400
+        
+        issn = data.get("issn", "")
+        field_id = data.get("field_id", "")
+        
+        if not issn:
+            return jsonify({"error": "ISSN не указан"}), 400
+        if not field_id:
+            return jsonify({"error": "field_id не указан"}), 400
+        
+        manager = get_template_manager()
+        template = manager.get_template(issn)
+        
+        if not template:
+            return jsonify({"error": "Шаблон не найден"}), 404
+        
+        if field_id not in template.fields:
+            return jsonify({"error": f"Поле {field_id} не найдено в шаблоне"}), 404
+        
+        # Удаляем поле из шаблона
+        del template.fields[field_id]
+        manager.save_template(template)
+        
+        return jsonify({
+            "success": True,
+            "message": f"Шаблон для поля {field_id} сброшен",
+            "remaining_fields": list(template.fields.keys()),
+        })
+    
+    @app.route("/api/bbox-templates/apply", methods=["POST"])
+    def apply_bbox_template():
+        """
+        Применить шаблон и извлечь текст из всех предложенных областей.
+        
+        Body JSON:
+            issn: ISSN журнала
+            pdf_file: путь к PDF файлу
+            page_width: ширина страницы
+            page_height: высота страницы
+            fields: список полей для извлечения (опционально, если пусто - все)
+        """
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "Нет данных"}), 400
+        
+        issn = data.get("issn", "")
+        pdf_file = data.get("pdf_file", "")
+        
+        if not issn:
+            return jsonify({"error": "ISSN не указан"}), 400
+        if not pdf_file:
+            return jsonify({"error": "PDF файл не указан"}), 400
+        
+        page_width = float(data.get("page_width", 595))
+        page_height = float(data.get("page_height", 842))
+        fields_filter = data.get("fields", [])
+        
+        manager = get_template_manager()
+        suggestions = manager.get_suggestions_for_journal(issn, page_width, page_height)
+        
+        if not suggestions.get("suggestions"):
+            return jsonify({"error": "Нет шаблонов для этого журнала"}), 404
+        
+        # Проверяем путь к PDF
+        if ".." in pdf_file or pdf_file.startswith("/") or pdf_file.startswith("\\"):
+            return jsonify({"error": "Недопустимый путь к файлу"}), 400
+        
+        pdf_path = _input_files_dir / pdf_file
+        if not pdf_path.exists():
+            return jsonify({"error": f"Файл не найден: {pdf_file}"}), 404
+        
+        # Извлекаем текст из каждой области
+        extracted = {}
+        try:
+            import pdfplumber
+            with pdfplumber.open(str(pdf_path)) as pdf:
+                total_pages = len(pdf.pages)
+                
+                for field_id, suggestion in suggestions["suggestions"].items():
+                    if fields_filter and field_id not in fields_filter:
+                        continue
+                    
+                    coords = suggestion["coords"]
+                    page_num = coords["page"]
+                    
+                    # Обработка отрицательных номеров страниц
+                    if page_num < 0:
+                        page_num = total_pages + page_num
+                    
+                    if page_num < 0 or page_num >= total_pages:
+                        continue
+                    
+                    page = pdf.pages[page_num]
+                    
+                    # Извлекаем текст
+                    try:
+                        cropped = page.crop((
+                            coords["pdf_x1"],
+                            coords["pdf_y1"],
+                            coords["pdf_x2"],
+                            coords["pdf_y2"]
+                        ))
+                        text = cropped.extract_text(x_tolerance=3, y_tolerance=5)
+                        
+                        if text:
+                            # Нормализуем текст
+                            options = {
+                                "fix_hyphenation": True,
+                                "strip_prefix": True,
+                                "join_lines": field_id not in {"references_ru", "references_en"},
+                            }
+                            text = _normalize_extracted_text(text, field_id, options)
+                            
+                            extracted[field_id] = {
+                                "text": text,
+                                "confidence": suggestion["confidence"],
+                                "page": page_num,
+                            }
+                    except Exception as e:
+                        print(f"Error extracting {field_id}: {e}")
+                        continue
+        
+        except Exception as e:
+            return jsonify({"error": f"Ошибка при извлечении: {str(e)}"}), 500
+        
+        return jsonify({
+            "success": True,
+            "issn": issn,
+            "pdf_file": pdf_file,
+            "extracted": extracted,
+        })
 

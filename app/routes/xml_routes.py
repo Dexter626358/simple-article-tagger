@@ -25,65 +25,73 @@ def register_xml_routes(app, ctx):
 
     @app.route("/generate-xml", methods=["POST"])
     def generate_xml():
-        """Генерация XML файлов для всех выпусков."""
+        """????????? XML ?????? ??? ???? ????????."""
         try:
             from services.xml_generator_helper import generate_xml_for_all_folders
-            
+
             if not list_of_journals_path.exists():
                 return jsonify({
                     "success": False,
-                    "error": f"Файл data/list_of_journals.json не найден: {list_of_journals_path}"
+                    "error": f"???? data/list_of_journals.json ?? ??????: {list_of_journals_path}"
                 }), 400
-            
-            # Генерируем XML для всех папок
+
             results = generate_xml_for_all_folders(
                 json_input_dir=json_input_dir,
                 xml_output_dir=xml_output_dir,
                 list_of_journals_path=list_of_journals_path
             )
-            
+
             if not results:
                 return jsonify({
                     "success": False,
-                    "error": "Не удалось сгенерировать XML файлы. Проверьте наличие JSON файлов в подпапках."
+                    "error": "?? ??????? ????????????? XML ?????. ????????? ??????? JSON ?????? ? ?????????."
                 }), 400
-            
-            # Возвращаем список файлов для скачивания
+
             files_info = []
             for xml_file_path in results:
                 if xml_file_path.exists() and xml_file_path.is_file():
-                    # Создаем относительный путь от xml_output_dir для URL
                     try:
                         relative_path = xml_file_path.relative_to(xml_output_dir)
-                        # Заменяем обратные слеши на прямые для URL
                         url_path = str(relative_path).replace('\\', '/')
                         files_info.append({
                             "name": xml_file_path.name,
                             "url": f"/download-xml/{url_path}"
                         })
                     except ValueError:
-                        # Если файл не находится внутри xml_output_dir, используем полный путь
                         files_info.append({
                             "name": xml_file_path.name,
                             "url": f"/download-xml/{xml_file_path.name}"
                         })
-            
+
+            # ?????????? ???????? ????????? ?????? ????? ????????? XML
+            try:
+                with progress_lock:
+                    if isinstance(progress_state, dict):
+                        progress_state.update({
+                            "status": "idle",
+                            "processed": 0,
+                            "total": 0,
+                            "message": "",
+                        })
+            except Exception:
+                pass
+
             return jsonify({
                 "success": True,
-                "message": f"Успешно сгенерировано XML файлов: {len(files_info)}",
+                "message": f"??????? ????????????? XML ??????: {len(files_info)}",
                 "files": files_info,
                 "folders": sorted({Path(item["name"]).stem for item in files_info})
             })
-                
+
         except ImportError as e:
             return jsonify({
                 "success": False,
-                "error": f"Модуль xml_generator_helper недоступен: {e}"
+                "error": f"?????? xml_generator_helper ??????????: {e}"
             }), 500
         except Exception as e:
             return jsonify({
                 "success": False,
-                "error": f"Ошибка при генерации XML: {str(e)}"
+                "error": f"?????? ??? ????????? XML: {str(e)}"
             }), 500
 
     @app.route("/download-xml/<path:xml_filename>")

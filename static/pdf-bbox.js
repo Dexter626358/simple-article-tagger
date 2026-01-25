@@ -6,6 +6,10 @@
     selections: [],
     config: {},
     pdfIframe: null,
+    // Шаблоны bbox
+    templateSuggestions: {},
+    currentIssn: null,
+    journalName: null,
   };
 
   const boundOverlays = new WeakSet();
@@ -429,6 +433,19 @@
               defaultApplyExtractedText
             );
             applyFn(selection.field_id, extracted);
+            
+            // Автоматически сохраняем в шаблон если ISSN установлен
+            if (state.currentIssn) {
+              saveToTemplate(selection.field_id, {
+                page: selection.page,
+                pdf_x1: selection.pdf_x1,
+                pdf_y1: selection.pdf_y1,
+                pdf_x2: selection.pdf_x2,
+                pdf_y2: selection.pdf_y2,
+                page_width: pdfWidth,
+                page_height: pdfHeight,
+              });
+            }
           }
         } catch (err) {
           console.warn("PDF extract failed:", err);
@@ -640,6 +657,367 @@
     }
   };
 
+  /* =======================
+     Template Functions
+  ======================= */
+
+  const loadTemplateSuggestions = async (issn, pageWidth = 595, pageHeight = 842) => {
+    if (!issn) return null;
+    
+    state.currentIssn = issn;
+    
+    try {
+      const resp = await fetch(
+        `/api/bbox-templates/suggestions?issn=${encodeURIComponent(issn)}&page_width=${pageWidth}&page_height=${pageHeight}`
+      );
+      const data = await resp.json();
+      
+      if (data.suggestions && Object.keys(data.suggestions).length > 0) {
+        state.templateSuggestions = data.suggestions;
+        state.journalName = data.journal_name || "";
+        console.log(`Loaded ${Object.keys(data.suggestions).length} template suggestions for ${issn}`);
+        return data;
+      }
+    } catch (err) {
+      console.warn("Failed to load template suggestions:", err);
+    }
+    
+    return null;
+  };
+
+  const saveToTemplate = async (fieldId, coords) => {
+    if (!state.currentIssn || !fieldId || !coords) return;
+    
+    try {
+      const resp = await fetch("/api/bbox-templates/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issn: state.currentIssn,
+          journal_name: state.journalName || "",
+          field_id: fieldId,
+          coords: coords,
+        }),
+      });
+      
+      const data = await resp.json();
+      if (data.success && data.suggestions) {
+        state.templateSuggestions = data.suggestions.suggestions || {};
+        console.log(`Saved template for ${fieldId}, confidence: ${data.suggestions.suggestions?.[fieldId]?.confidence || 0}`);
+      }
+    } catch (err) {
+      console.warn("Failed to save to template:", err);
+    }
+  };
+
+  const applySuggestion = async (fieldId) => {
+    const suggestion = state.templateSuggestions[fieldId];
+    if (!suggestion) {
+      notify(`Нет шаблона для поля ${fieldId}`, "error");
+      return null;
+    }
+    
+    const coords = suggestion.coords;
+    const pdfWin = state.pdfIframe?.contentWindow;
+    const app = pdfWin?.PDFViewerApplication;
+    
+    if (!app) return null;
+    
+    // Создаём selection из шаблона
+    const selection = {
+      schema: "pdfbbox-v2",
+      id: window.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      field_id: fieldId,
+      page: coords.page,
+      pdf_x1: coords.pdf_x1,
+      pdf_y1: coords.pdf_y1,
+      pdf_x2: coords.pdf_x2,
+      pdf_y2: coords.pdf_y2,
+      page_width: coords.page_width,
+      page_height: coords.page_height,
+      from_template: true,
+      confidence: suggestion.confidence,
+    };
+    
+    // Удаляем предыдущие bbox для этого поля
+    state.selections = state.selections.filter(s => s.field_id !== fieldId);
+    state.selections.push(selection);
+    renderBboxes(app);
+    
+    // Извлекаем текст
+    const extractEndpoint = getConfig("extractEndpoint", "/api/pdf-extract-text");
+    const isReferencesField = fieldId === "references_ru" || fieldId === "references_en";
+    
+    const options = isReferencesField ? {
+      fix_hyphenation: true,
+      strip_prefix: false,
+      join_lines: false,
+      merge_by_field: false,
+    } : {
+      fix_hyphenation: true,
+      strip_prefix: true,
+      join_lines: true,
+      merge_by_field: false,
+    };
+    
+    try {
+      const resp = await fetch(extractEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdf_file: getConfig("pdfFile", ""),
+          selections: [selection],
+          options: options,
+        }),
+      });
+      
+      const data = await resp.json();
+      const extracted = data?.extracted?.[0]?.text;
+      
+      if (extracted) {
+        const applyFn = getConfig("applyExtractedText", defaultApplyExtractedText);
+        applyFn(fieldId, extracted);
+        notify(`Шаблон применён (уверенность: ${Math.round(suggestion.confidence * 100)}%)`, "info");
+        return extracted;
+      }
+    } catch (err) {
+      console.warn("Failed to apply suggestion:", err);
+    }
+    
+    return null;
+  };
+
+  const applyAllSuggestions = async () => {
+    const suggestions = state.templateSuggestions;
+    if (!suggestions || Object.keys(suggestions).length === 0) {
+      notify("Нет доступных шаблонов", "error");
+      return;
+    }
+    
+    notify(`Применение ${Object.keys(suggestions).length} шаблонов...`, "info");
+    
+    for (const fieldId of Object.keys(suggestions)) {
+      await applySuggestion(fieldId);
+      // Небольшая задержка между запросами
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    
+    notify("Все шаблоны применены", "info");
+  };
+
+  const getSuggestionStatus = () => {
+    const suggestions = state.templateSuggestions;
+    const fields = Object.keys(suggestions);
+    
+    return {
+      available: fields.length > 0,
+      count: fields.length,
+      fields: fields.map(f => ({
+        field_id: f,
+        confidence: suggestions[f].confidence,
+        sample_count: suggestions[f].sample_count,
+      })),
+      issn: state.currentIssn,
+      journal_name: state.journalName,
+    };
+  };
+
+  const showSuggestionsPanel = () => {
+    const status = getSuggestionStatus();
+    if (!status.available) {
+      notify("Нет доступных шаблонов для этого журнала", "info");
+      return;
+    }
+    
+    // Создаём или показываем панель
+    let panel = document.getElementById("bbox-suggestions-panel");
+    if (!panel) {
+      panel = document.createElement("div");
+      panel.id = "bbox-suggestions-panel";
+      panel.style.cssText = `
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: white;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        padding: 20px;
+        z-index: 10000;
+        max-width: 500px;
+        max-height: 80vh;
+        overflow-y: auto;
+      `;
+      document.body.appendChild(panel);
+    }
+    
+    const fieldLabels = {
+      title: "Название (рус)",
+      title_en: "Название (англ)",
+      annotation: "Аннотация (рус)",
+      annotation_en: "Аннотация (англ)",
+      keywords: "Ключевые слова (рус)",
+      keywords_en: "Ключевые слова (англ)",
+      references_ru: "Список литературы (рус)",
+      references_en: "Список литературы (англ)",
+      funding: "Финансирование (рус)",
+      funding_en: "Финансирование (англ)",
+    };
+    
+    let html = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+        <h3 style="margin: 0;">Шаблоны bbox</h3>
+        <button onclick="document.getElementById('bbox-suggestions-panel').style.display='none'" 
+                style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+      </div>
+      <p style="color: #666; margin-bottom: 15px;">
+        Журнал: <strong>${status.journal_name || status.issn}</strong><br>
+        Доступно шаблонов: <strong>${status.count}</strong>
+      </p>
+      <div style="margin-bottom: 15px;">
+    `;
+    
+    for (const field of status.fields) {
+      const label = fieldLabels[field.field_id] || field.field_id;
+      const confidence = Math.round(field.confidence * 100);
+      const color = confidence >= 70 ? "#4caf50" : confidence >= 40 ? "#ff9800" : "#f44336";
+      
+      html += `
+        <div style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; gap: 5px;">
+          <span style="flex: 1;">${label}</span>
+          <span style="color: ${color}; min-width: 40px; text-align: right;">${confidence}%</span>
+          <span style="color: #999; font-size: 11px; min-width: 30px;">(${field.sample_count})</span>
+          <button onclick="window.PdfBbox.applySuggestion('${field.field_id}')" 
+                  style="padding: 4px 10px; cursor: pointer; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 3px;"
+                  title="Применить шаблон">✓</button>
+          <button onclick="window.PdfBbox.resetFieldTemplate('${field.field_id}')" 
+                  style="padding: 4px 10px; cursor: pointer; background: #ffebee; border: 1px solid #ef9a9a; border-radius: 3px;"
+                  title="Сбросить шаблон (удалить образцы)">✕</button>
+        </div>
+      `;
+    }
+    
+    html += `
+      </div>
+      <p style="color: #888; font-size: 12px; margin: 10px 0;">
+        💡 <strong>Подсказка:</strong> Если шаблон промахнулся — просто выделите правильную область вручную. 
+        Новый образец улучшит точность. Кнопка ✕ сбрасывает все образцы для поля.
+      </p>
+      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+        <button onclick="window.PdfBbox.applyAllSuggestions(); document.getElementById('bbox-suggestions-panel').style.display='none';"
+                style="flex: 1; min-width: 120px; padding: 10px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;">
+          ✓ Применить все
+        </button>
+        <button onclick="document.getElementById('bbox-suggestions-panel').style.display='none'"
+                style="flex: 1; min-width: 120px; padding: 10px; background: #eee; border: none; border-radius: 4px; cursor: pointer;">
+          Закрыть
+        </button>
+      </div>
+      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+        <button onclick="window.PdfBbox.resetAllTemplates()"
+                style="width: 100%; padding: 8px; background: #fff; color: #d32f2f; border: 1px solid #d32f2f; border-radius: 4px; cursor: pointer; font-size: 12px;">
+          🗑 Удалить все шаблоны для этого журнала
+        </button>
+      </div>
+    `;
+    
+    panel.innerHTML = html;
+    panel.style.display = "block";
+  };
+
+  const resetFieldTemplate = async (fieldId) => {
+    if (!state.currentIssn || !fieldId) {
+      notify("Не удалось сбросить шаблон", "error");
+      return false;
+    }
+    
+    if (!confirm(`Сбросить все образцы для поля "${fieldId}"?\nЭто удалит накопленные данные шаблона.`)) {
+      return false;
+    }
+    
+    try {
+      const resp = await fetch("/api/bbox-templates/reset-field", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          issn: state.currentIssn,
+          field_id: fieldId,
+        }),
+      });
+      
+      const data = await resp.json();
+      if (data.success) {
+        // Удаляем из локального состояния
+        delete state.templateSuggestions[fieldId];
+        // Удаляем bbox для этого поля
+        state.selections = state.selections.filter(s => s.field_id !== fieldId);
+        
+        // Перерисовываем
+        const pdfWin = state.pdfIframe?.contentWindow;
+        const app = pdfWin?.PDFViewerApplication;
+        if (app) renderBboxes(app);
+        
+        notify(`Шаблон для "${fieldId}" сброшен`, "info");
+        
+        // Обновляем панель
+        showSuggestionsPanel();
+        return true;
+      } else {
+        notify(data.error || "Ошибка сброса шаблона", "error");
+      }
+    } catch (err) {
+      console.warn("Failed to reset field template:", err);
+      notify("Ошибка сброса шаблона", "error");
+    }
+    
+    return false;
+  };
+
+  const resetAllTemplates = async () => {
+    if (!state.currentIssn) {
+      notify("ISSN журнала не установлен", "error");
+      return false;
+    }
+    
+    if (!confirm(`Удалить ВСЕ шаблоны для журнала ${state.currentIssn}?\nЭто действие нельзя отменить.`)) {
+      return false;
+    }
+    
+    try {
+      const resp = await fetch("/api/bbox-templates/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ issn: state.currentIssn }),
+      });
+      
+      const data = await resp.json();
+      if (data.success) {
+        state.templateSuggestions = {};
+        state.selections = [];
+        
+        const pdfWin = state.pdfIframe?.contentWindow;
+        const app = pdfWin?.PDFViewerApplication;
+        if (app) renderBboxes(app);
+        
+        notify("Все шаблоны удалены", "info");
+        
+        // Закрываем панель
+        const panel = document.getElementById("bbox-suggestions-panel");
+        if (panel) panel.style.display = "none";
+        
+        // Удаляем кнопку применения шаблонов
+        const btn = document.getElementById("applyTemplatesBtn");
+        if (btn) btn.remove();
+        
+        return true;
+      }
+    } catch (err) {
+      console.warn("Failed to reset all templates:", err);
+    }
+    
+    return false;
+  };
+
   window.PdfBbox = {
     init,
     setActiveField,
@@ -651,5 +1029,18 @@
       initialized: state.initialized,
       selections: state.selections.map((s) => ({ ...s })),
     }),
+    // Template functions
+    loadTemplateSuggestions,
+    saveToTemplate,
+    applySuggestion,
+    applyAllSuggestions,
+    getSuggestionStatus,
+    showSuggestionsPanel,
+    resetFieldTemplate,
+    resetAllTemplates,
+    setIssn: (issn, journalName = "") => {
+      state.currentIssn = issn;
+      state.journalName = journalName;
+    },
   };
 })();

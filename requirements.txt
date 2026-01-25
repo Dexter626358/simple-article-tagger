@@ -26,3 +26,6 @@ openai>=1.0.0
 
 # Тесты
 pytest>=8.2.0
+
+# WSGI server for production
+gunicorn>=21.2.0

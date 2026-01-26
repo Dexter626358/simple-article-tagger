@@ -25,14 +25,14 @@ def register_xml_routes(app, ctx):
 
     @app.route("/generate-xml", methods=["POST"])
     def generate_xml():
-        """????????? XML ?????? ??? ???? ????????."""
+        """Генерация XML файлов для всех выпусков."""
         try:
             from services.xml_generator_helper import generate_xml_for_all_folders
 
             if not list_of_journals_path.exists():
                 return jsonify({
                     "success": False,
-                    "error": f"???? data/list_of_journals.json ?? ??????: {list_of_journals_path}"
+                    "error": f"Файл data/list_of_journals.json не найден: {list_of_journals_path}"
                 }), 400
 
             results = generate_xml_for_all_folders(
@@ -44,7 +44,7 @@ def register_xml_routes(app, ctx):
             if not results:
                 return jsonify({
                     "success": False,
-                    "error": "?? ??????? ????????????? XML ?????. ????????? ??????? JSON ?????? ? ?????????."
+                    "error": "Не удалось сгенерировать XML файлы. Проверьте наличие JSON файлов и конфигурацию."
                 }), 400
 
             files_info = []
@@ -63,7 +63,7 @@ def register_xml_routes(app, ctx):
                             "url": f"/download-xml/{xml_file_path.name}"
                         })
 
-            # ?????????? ???????? ????????? ?????? ????? ????????? XML
+            # Сбрасываем прогресс после генерации XML
             try:
                 with progress_lock:
                     if isinstance(progress_state, dict):
@@ -78,7 +78,7 @@ def register_xml_routes(app, ctx):
 
             return jsonify({
                 "success": True,
-                "message": f"??????? ????????????? XML ??????: {len(files_info)}",
+                "message": f"Успешно сгенерированы XML файлы: {len(files_info)}",
                 "files": files_info,
                 "folders": sorted({Path(item["name"]).stem for item in files_info})
             })
@@ -86,12 +86,12 @@ def register_xml_routes(app, ctx):
         except ImportError as e:
             return jsonify({
                 "success": False,
-                "error": f"?????? xml_generator_helper ??????????: {e}"
+                "error": f"Модуль xml_generator_helper недоступен: {e}"
             }), 500
         except Exception as e:
             return jsonify({
                 "success": False,
-                "error": f"?????? ??? ????????? XML: {str(e)}"
+                "error": f"Ошибка при генерации XML: {str(e)}"
             }), 500
 
     @app.route("/download-xml/<path:xml_filename>")

@@ -305,8 +305,8 @@ def parse_folder_name(folder_name: str) -> Optional[Dict[str, Any]]:
         .replace("\u2212", "-")
     )
 
-    pattern1 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)$'  # issn_???_?????
-    pattern2 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)_(\d+)$'  # issn_???_???_?????
+    pattern1 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)$'  # issn_год_номер
+    pattern2 = r'^([0-9]{4}-[0-9]{3}[X]|[0-9]{4}-[0-9]{4}[X]?)_(\d{4})_(\d+)_(\d+)$'  # issn_год_том_номер
 
     match1 = re.match(pattern1, folder_name)
     if match1:

@@ -5,7 +5,7 @@ import re
 from pathlib import Path
 from html import unescape
 
-from flask import render_template_string, jsonify, request, abort, send_file
+from flask import render_template_string, jsonify, request, abort, send_file, current_app
 
 from app.app_dependencies import (
     METADATA_MARKUP_AVAILABLE,
@@ -162,11 +162,11 @@ def register_markup_routes(app, ctx):
                     if len(relative_path.parts) > 1:
                         subdir_name = relative_path.parts[0]
                         error_msg = (
-                            f"??????: ?? ?????? ???? ??? {json_filename}<br><br>"
-                            f"?????? ? ????? input_files/{subdir_name}/:<br>"
+                            f"Ошибка: не найден файл для {json_filename}<br><br>"
+                            f"Ожидается в папке input_files/{subdir_name}/:<br>"
                             f"- {json_path.stem}.pdf / {json_path.stem}.docx / {json_path.stem}.rtf / {json_path.stem}.idml / {json_path.stem}.html / {json_path.stem}.tex<br><br>"
                             f"- full_issue.docx / full_issue.rtf / full_issue.html / full_issue.tex (полный выпуск)<br><br>"
-                            f"????????? ???? ?: input_files/{subdir_name}/"
+                            f"Проверьте папку: input_files/{subdir_name}/"
                         )
                     else:
                         error_msg = f"Ошибка: не найден соответствующий файл для {json_filename}"
@@ -493,7 +493,7 @@ def register_markup_routes(app, ctx):
             pdf_for_gpt, file_for_html = find_files_for_json(json_path, _input_files_dir, json_input_dir)
 
             if not file_for_html:
-                return jsonify(error="???? ?????? ?? ?????? ? input_files"), 404
+                return jsonify(error="Ошибка: файл не найден в input_files"), 404
 
             docx_path = file_for_html
             
@@ -773,6 +773,12 @@ def register_markup_routes(app, ctx):
                 return chunks
 
             chunks = _chunk_references(raw_text)
+            current_app.logger.info(
+                "USER references ai start field=%s chunks=%s chars=%s",
+                field_id,
+                len(chunks),
+                len(raw_text),
+            )
 
             # Получаем промпт из prompts.py
             try:
@@ -814,9 +820,30 @@ def register_markup_routes(app, ctx):
                     return template.replace("{references_text}", text)
                 return f"{template}\n\n{text}"
 
-            all_references = []
-            for idx, chunk in enumerate(chunks, start=1):
-                prompt = _build_prompt(base_prompt, chunk)
+            def _looks_like_token_error(err: Exception) -> bool:
+                msg = str(err).lower()
+                return "token" in msg or "context" in msg or "too large" in msg
+
+            def _split_lines_further(text: str, target: int) -> list[str]:
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                if not lines:
+                    return []
+                if len(lines) <= target:
+                    return ["\n".join(lines)]
+                return [
+                    "\n".join(lines[i:i + target])
+                    for i in range(0, len(lines), target)
+                ]
+
+            def _run_chunk(chunk_text: str, chunk_index: int) -> list[str]:
+                current_app.logger.info(
+                    "SYSTEM references ai chunk start field=%s chunk=%s size=%s model=%s",
+                    field_id,
+                    chunk_index,
+                    len(chunk_text),
+                    model,
+                )
+                prompt = _build_prompt(base_prompt, chunk_text)
                 result = extract_metadata_with_gpt(
                     prompt,
                     model=model,
@@ -855,16 +882,55 @@ def register_markup_routes(app, ctx):
                 if not isinstance(references, list):
                     references = [str(references)]
 
-                all_references.extend([r for r in references if str(r).strip()])
+                return [r for r in references if str(r).strip()]
+
+            all_references = []
+            max_prompt_chars = int(references_cfg.get("max_prompt_chars", 20000))
+            for idx, chunk in enumerate(chunks, start=1):
+                if len(chunk) > max_prompt_chars:
+                    current_app.logger.warning(
+                        "SYSTEM references ai chunk too large; splitting field=%s chunk=%s size=%s",
+                        field_id,
+                        idx,
+                        len(chunk),
+                    )
+                    sub_chunks = _split_lines_further(chunk, max(5, chunk_size // 2))
+                else:
+                    sub_chunks = [chunk]
+
+                for sub_idx, sub in enumerate(sub_chunks, start=1):
+                    try:
+                        refs = _run_chunk(sub, idx)
+                        all_references.extend(refs)
+                    except Exception as exc:
+                        if _looks_like_token_error(exc):
+                            current_app.logger.warning(
+                                "SYSTEM references ai token error; retrying smaller field=%s chunk=%s size=%s",
+                                field_id,
+                                idx,
+                                len(sub),
+                            )
+                            smaller = _split_lines_further(sub, max(3, chunk_size // 3))
+                            for sub2 in smaller:
+                                refs2 = _run_chunk(sub2, idx)
+                                all_references.extend(refs2)
+                        else:
+                            raise
 
             # Объединяем в строку с переносами
             normalized_text = "\n".join(all_references)
+            current_app.logger.info(
+                "SYSTEM references ai done field=%s count=%s",
+                field_id,
+                len(all_references),
+            )
             
             return jsonify(success=True, text=normalized_text, count=len(all_references), chunks=len(chunks))
             
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+            current_app.logger.exception("SYSTEM references ai error: %s", e)
             return jsonify(success=False, error=str(e), details=error_details), 500
     
 

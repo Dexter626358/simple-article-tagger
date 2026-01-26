@@ -21,6 +21,7 @@ from typing import Dict, Optional
 from flask import Flask
 
 from app.app_dependencies import WORD_TO_HTML_AVAILABLE
+from app.logger import setup_logging
 from app.routes.index_routes import register_index_routes
 from app.routes.archive_routes import register_archive_routes
 from app.routes.pdf_routes import register_pdf_routes
@@ -66,6 +67,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
 
     # Определяем пути по умолчанию, если не указаны
     script_dir = Path(__file__).parent.absolute()
+    setup_logging(app, script_dir)
 
     # Ensure PDF.js viewer assets are available on Railway (extract from zip on startup).
     try:

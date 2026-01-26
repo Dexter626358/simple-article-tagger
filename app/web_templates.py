@@ -645,15 +645,15 @@ HTML_TEMPLATE = """
                 <div id="projectModal" class="modal">
           <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
-              <h2>??????? ??????</h2>
-              <button type="button" class="modal-close" data-action="close">?</button>
+              <h2>Выбор проекта</h2>
+              <button type="button" class="modal-close" data-action="close">×</button>
             </div>
             <div style="display:flex; flex-direction:column; gap:12px;">
-              <label style="font-weight:600; font-size:14px;">??????</label>
+              <label style="font-weight:600; font-size:14px;">Проект</label>
               <select id="projectSelect" style="width:100%; padding:10px; border:1px solid #ddd; border-radius:4px; font-size:14px;"></select>
               <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:8px;">
-                <button type="button" class="modal-btn modal-btn-cancel" data-action="cancel">??????</button>
-                <button type="button" id="projectOpenConfirm" class="modal-btn modal-btn-save">???????</button>
+                <button type="button" class="modal-btn modal-btn-cancel" data-action="cancel">Отмена</button>
+                <button type="button" id="projectOpenConfirm" class="modal-btn modal-btn-save">Открыть</button>
               </div>
             </div>
           </div>
@@ -661,6 +661,7 @@ HTML_TEMPLATE = """
 <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
           <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="window.saveProject && window.saveProject()">Сохранить проект</button>
           <button type="button" id="openProjectBtn" class="btn-secondary" onclick="window.openProject && window.openProject()">Открыть проект</button>
+          <button type="button" id="deleteProjectBtn" class="btn-secondary" style="background:#ffebee;border-color:#ef9a9a;color:#c62828;" onclick="window.deleteProject && window.deleteProject()">Удалить выпуск</button>
           <span id="projectStatus" class="upload-status"></span>
         </div>
         
@@ -707,7 +708,7 @@ HTML_TEMPLATE = """
           const modal = document.getElementById("projectModal");
           const select = document.getElementById("projectSelect");
           if (status) {
-            status.textContent = "???????? ?????? ????????...";
+            status.textContent = "Загрузка списка проектов...";
             status.style.color = "#555";
           }
           try {
@@ -722,7 +723,7 @@ HTML_TEMPLATE = """
             });
             if (!options.length) {
               if (status) {
-                status.textContent = "??? ??????????? ????????.";
+                status.textContent = "Нет сохраненных проектов.";
                 status.style.color = "#c62828";
               }
               return;
@@ -732,7 +733,7 @@ HTML_TEMPLATE = """
               options.forEach((opt) => {
                 const option = document.createElement("option");
                 option.value = JSON.stringify(opt);
-                option.textContent = `${opt.issue} (????? ${opt.run})`;
+                option.textContent = `${opt.issue} (архив ${opt.run})`;
                 select.appendChild(option);
               });
             }
@@ -744,7 +745,7 @@ HTML_TEMPLATE = """
             }
           } catch (_) {
             if (status) {
-              status.textContent = "?????? ???????? ????????.";
+              status.textContent = "Ошибка загрузки проектов.";
               status.style.color = "#c62828";
             }
           }
@@ -777,7 +778,7 @@ HTML_TEMPLATE = """
             const status = document.getElementById("projectStatus");
             if (!projectSelect || !projectSelect.value) {
               if (status) {
-                status.textContent = "???????? ??????.";
+                status.textContent = "Выберите проект.";
                 status.style.color = "#c62828";
               }
               return;
@@ -790,7 +791,7 @@ HTML_TEMPLATE = """
             }
             if (!target) {
               if (status) {
-                status.textContent = "?? ??????? ????????? ??????.";
+                status.textContent = "Некорректный выбор проекта.";
                 status.style.color = "#c62828";
               }
               return;
@@ -805,10 +806,10 @@ HTML_TEMPLATE = """
             };
             let restoreData = await restore(false);
             if (!restoreData.success && restoreData.code === "dest_exists") {
-              const confirmOverwrite = window.confirm("????? ??????? ??? ??????????. ?????????????");
+              const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
               if (!confirmOverwrite) {
                 if (status) {
-                  status.textContent = "?????????????? ????????.";
+                  status.textContent = "Восстановление отменено.";
                   status.style.color = "#555";
                 }
                 closeProjectModal();
@@ -818,13 +819,13 @@ HTML_TEMPLATE = """
             }
             if (!restoreData.success) {
               if (status) {
-                status.textContent = restoreData.error || "?????? ??????????????.";
+                status.textContent = restoreData.error || "Ошибка восстановления.";
                 status.style.color = "#c62828";
               }
               return;
             }
             if (status) {
-              status.textContent = "?????? ????????????: " + target.issue;
+              status.textContent = "Проект восстановлен: " + target.issue;
               status.style.color = "#2e7d32";
             }
             closeProjectModal();
@@ -975,7 +976,12 @@ HTML_TEMPLATE = """
                 setTimeout(() => {
                   notification.remove();
                 }, 1000);
-                // ????????? ???????? ????? ?????????? XML
+                // Помечаем XML как сгенерированные для текущего выпуска
+                const currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
+                if (currentArchive) {
+                  sessionStorage.setItem(`xml_done_${currentArchive}`, "1");
+                }
+                // Переходим к скачанным XML
                 window.location.reload();
               } else {
                 btn.textContent = "❌ Ошибка";
@@ -3370,6 +3376,7 @@ function closeAnnotationModal() {
         const processArchiveBtn = document.getElementById("processArchiveBtn");
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
+        const deleteProjectBtn = document.getElementById("deleteProjectBtn");
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", () => {
             if (window.openProject) window.openProject();
@@ -3413,14 +3420,23 @@ function closeAnnotationModal() {
               el.textContent = label;
             }
           };
-          setStep(step1, window.currentArchive ? "done" : "active");
-          if (total > 0) {
-            setStep(step2, processedTotal === total ? "done" : "active");
+          const archiveReady = !!window.currentArchive;
+          const status = window.archiveStatus || "idle";
+          const runtimeTotal = Number(window.archiveTotal || 0);
+          const runtimeProcessed = Number(window.archiveProcessed || 0);
+          const step2Done = (status === "done") || (total > 0 && processedTotal === total);
+          const step2Active = archiveReady && !step2Done && (status === "running" || runtimeProcessed > 0 || total > 0);
+          const xmlKey = window.currentArchive ? `xml_done_${window.currentArchive}` : null;
+          const xmlDone = xmlKey ? sessionStorage.getItem(xmlKey) === "1" : false;
+
+          setStep(step1, archiveReady ? "done" : "active");
+          if (archiveReady) {
+            setStep(step2, step2Done ? "done" : (step2Active ? "active" : ""));
           } else {
             setStep(step2, "");
           }
-          if (total > 0 && processedTotal === total) {
-            setStep(step3, "active");
+          if (step2Done) {
+            setStep(step3, xmlDone ? "done" : "active");
           } else {
             setStep(step3, "");
           }
@@ -3430,12 +3446,18 @@ function closeAnnotationModal() {
           const status = data?.status || "idle";
           const processed = Number(data?.processed || 0);
           const total = Number(data?.total || 0);
+          window.archiveStatus = status;
+          window.archiveProcessed = processed;
+          window.archiveTotal = total;
           if (status !== "done") {
             sessionStorage.removeItem(archiveReloadKey);
           }
           if (data?.archive) {
             window.currentArchive = data.archive;
             sessionStorage.setItem("lastArchiveName", data.archive);
+            if (status !== "done") {
+              sessionStorage.removeItem(`xml_done_${data.archive}`);
+            }
           } else if (!window.currentArchive) {
             const cachedArchive = sessionStorage.getItem("lastArchiveName");
             if (cachedArchive) {
@@ -3564,8 +3586,9 @@ function closeAnnotationModal() {
         };
 
         window.saveProject = async () => {
-          const issue = (window.currentArchive || "").trim() || window.prompt("Укажите имя выпуска (папки):");
+          const issue = (window.currentArchive || sessionStorage.getItem("lastArchiveName") || "").trim();
           if (!issue) {
+            setProjectStatus("Нет текущего загруженного выпуска.", "#c62828");
             return;
           }
           setProjectStatus("Сохранение проекта...", "#555");
@@ -3589,6 +3612,13 @@ function closeAnnotationModal() {
 
         window.openProject = async () => {
           setProjectStatus("Загрузка списка проектов...", "#555");
+          const projectModal = document.getElementById("projectModal");
+          const projectSelect = document.getElementById("projectSelect");
+          const projectOpenConfirm = document.getElementById("projectOpenConfirm");
+          if (!projectModal || !projectSelect || !projectOpenConfirm) {
+            setProjectStatus("Окно выбора проектов недоступно.", "#c62828");
+            return;
+          }
           try {
             const resp = await fetch("/project-snapshots");
             const data = await resp.json().catch(() => ({}));
@@ -3603,41 +3633,100 @@ function closeAnnotationModal() {
               setProjectStatus("Нет сохраненных проектов.", "#c62828");
               return;
             }
-            const list = options
-              .map((opt, idx) => `${idx + 1}. ${opt.issue} (архив ${opt.run})`)
-              .join("\\n");
-            const choice = window.prompt(`Выберите проект для восстановления:\\n${list}\\nВведите номер:`);
-            const index = Number(choice) - 1;
-            if (!choice || Number.isNaN(index) || !options[index]) {
-              setProjectStatus("Отмена восстановления.", "#555");
-              return;
-            }
-            const target = options[index];
-            const restore = async (overwrite) => {
-              const restoreResp = await fetch("/project-restore", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
-              });
-              return restoreResp.json().catch(() => ({}));
+            projectSelect.innerHTML = "";
+            options.forEach((opt) => {
+              const item = document.createElement("option");
+              item.value = JSON.stringify(opt);
+              item.textContent = `${opt.issue} (архив ${opt.run})`;
+              projectSelect.appendChild(item);
+            });
+            projectModal.classList.add("active");
+
+            const closeModal = () => projectModal.classList.remove("active");
+            const onBackdrop = (e) => {
+              if (e.target === projectModal) closeModal();
             };
-            let restoreData = await restore(false);
-            if (!restoreData.success && restoreData.code === "dest_exists") {
-              const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
-              if (!confirmOverwrite) {
-                setProjectStatus("Восстановление отменено.", "#555");
+            const onCancel = (e) => {
+              const btn = e.target.closest("button");
+              if (btn && btn.dataset.action === "cancel") closeModal();
+            };
+            projectModal.addEventListener("click", onBackdrop, { once: true });
+            projectModal.addEventListener("click", onCancel, { once: true });
+
+            projectOpenConfirm.onclick = async () => {
+              if (!projectSelect.value) {
+                setProjectStatus("Выберите проект.", "#c62828");
                 return;
               }
-              restoreData = await restore(true);
-            }
-            if (!restoreData.success) {
-              setProjectStatus(restoreData.error || "Ошибка восстановления.", "#c62828");
-              return;
-            }
-            setProjectStatus(`Проект восстановлен: ${target.issue}`, "#2e7d32");
-            setTimeout(() => window.location.reload(), 1200);
+              let target = null;
+              try {
+                target = JSON.parse(projectSelect.value);
+              } catch (_) {
+                target = null;
+              }
+              if (!target) {
+                setProjectStatus("Некорректный выбор проекта.", "#c62828");
+                return;
+              }
+              const restore = async (overwrite) => {
+                const restoreResp = await fetch("/project-restore", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ run: target.run, issue: target.issue, overwrite })
+                });
+                return restoreResp.json().catch(() => ({}));
+              };
+              let restoreData = await restore(false);
+              if (!restoreData.success && restoreData.code === "dest_exists") {
+                const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
+                if (!confirmOverwrite) {
+                  setProjectStatus("Восстановление отменено.", "#555");
+                  closeModal();
+                  return;
+                }
+                restoreData = await restore(true);
+              }
+              if (!restoreData.success) {
+                setProjectStatus(restoreData.error || "Ошибка восстановления.", "#c62828");
+                closeModal();
+                return;
+              }
+              setProjectStatus(`Проект восстановлен: ${target.issue}`, "#2e7d32");
+              closeModal();
+              setTimeout(() => window.location.reload(), 1200);
+            };
           } catch (_) {
             setProjectStatus("Ошибка восстановления.", "#c62828");
+          }
+        };
+
+        window.deleteProject = async () => {
+          const issue = (window.currentArchive || sessionStorage.getItem("lastArchiveName") || "").trim();
+          if (!issue) {
+            setProjectStatus("Нет текущего загруженного выпуска.", "#c62828");
+            return;
+          }
+          const confirmDelete = window.confirm(`Удалить текущий выпуск "${issue}" из input_files/json_input/xml_output? Это действие необратимо.`);
+          if (!confirmDelete) {
+            setProjectStatus("Удаление отменено.", "#555");
+            return;
+          }
+          setProjectStatus("Удаление выпуска...", "#555");
+          try {
+            const resp = await fetch("/project-delete", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ issue })
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+              setProjectStatus(data.error || "Ошибка удаления выпуска.", "#c62828");
+              return;
+            }
+            setProjectStatus(`Выпуск удалён: ${data.issue || issue}`, "#2e7d32");
+            setTimeout(() => window.location.reload(), 1200);
+          } catch (_) {
+            setProjectStatus("Ошибка удаления выпуска.", "#c62828");
           }
         };
 
@@ -3647,6 +3736,9 @@ function closeAnnotationModal() {
 
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", window.openProject);
+        }
+        if (deleteProjectBtn) {
+          deleteProjectBtn.addEventListener("click", window.deleteProject);
         }
 
         if (inputArchiveForm) {
@@ -4626,12 +4718,12 @@ PDF_SELECT_TEMPLATE = ""  # Отключено, страница удалена
       </div>
       <div class="results-panel">
         <div class="search-box">
-          <input id="fieldSearch" type="text" placeholder="????? ?? ?????">
+          <input id="fieldSearch" type="text" placeholder="Поиск по полям">
         </div>
         
         <h3>Извлеченный текст:</h3>
         <div class="field-panel">
-          <h3>?????</h3>
+          <h3>Поля</h3>
           <div id="fieldButtons" class="field-buttons"></div>
           <div id="fieldBlocks" class="field-blocks"></div>
         </div>
@@ -7797,7 +7889,7 @@ function collectAuthorsData() {
     if (!text || !text.trim()) return 0;
     const cleaned = text.trim();
     const langNorm = (lang || "").toLowerCase();
-    // ? ?????????? ????????? ?????? ??????????? ";" (??????? ????? ???? ?????? ??????)
+    // В англоязычных организациях разделитель - ";" (такой формат чаще для англ. организаций)
     if (langNorm.startsWith("en")) {
       return cleaned.includes(";")
         ? cleaned.split(";").map(s => s.trim()).filter(Boolean).length

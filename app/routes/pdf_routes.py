@@ -42,10 +42,10 @@ def _split_merged_words(text: str) -> str:
 
 def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float] | None:
     """
-    ???????? ????? ???? ????????? ?? ???????? ?? ??????????:
-    - RU: "?????????" ? ?? "???????? ?????"
-    - EN: "Abstract" ? ?? "Keywords"
-    ?????????? (top, bottom) ? ??????????? PDF (top/bottom).
+    Ищет блок аннотации на странице по ключевым словам:
+    - RU: "Аннотация" и до "Ключевые слова"
+    - EN: "Abstract" и до "Keywords"
+    Возвращает (top, bottom) в координатах PDF (top/bottom).
     """
     try:
         words = page.extract_words(x_tolerance=1, y_tolerance=3, keep_blank_chars=False)
@@ -90,10 +90,10 @@ def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float
     heading_idx = None
     for i, line in enumerate(lines):
         text = _simplify_text(line["text"])
-        if lang == "ru" and re.search(r"???????", text):
+        if lang == "ru" and re.search(r"\bаннотация\b", text):
             heading_idx = i
             break
-        if lang == "en" and re.search(r"abstract", text):
+        if lang == "en" and re.search(r"\babstract\b", text):
             heading_idx = i
             break
 
@@ -105,10 +105,10 @@ def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float
     end_bottom = None
     for j in range(heading_idx + 1, len(lines)):
         text = _simplify_text(lines[j]["text"])
-        if lang == "ru" and re.search(r"??????\w*\s*????\w*", text):
+        if lang == "ru" and re.search(r"\bключев\w*\s*слов\w*\b", text):
             end_bottom = lines[j]["top"] - 1
             break
-        if lang == "en" and re.search(r"keywords?|key\s*words?|index\s*terms?", text):
+        if lang == "en" and re.search(r"\bkeywords?\b|\bkey\s*words?\b|\bindex\s*terms?\b", text):
             end_bottom = lines[j]["top"] - 1
             break
 
@@ -126,7 +126,7 @@ def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float
             if line["top"] < footer_threshold:
                 break
             text = _simplify_text(line["text"])
-            if re.fullmatch(r"\d{1,4}", text) or re.search(r"page|???", text):
+            if re.fullmatch(r"\d{1,4}", text) or re.search(r"\bpage\b|\bстр\b", text):
                 end_bottom = line["top"] - 1
                 break
 
@@ -137,6 +137,7 @@ def _find_annotation_block(page, lang: str, options: dict) -> tuple[float, float
         return None
 
     return start_top, end_bottom
+
 
 def _is_garbled_text(text: str, lang: str | None = None) -> bool:
     """
@@ -177,7 +178,6 @@ def _is_garbled_text(text: str, lang: str | None = None) -> bool:
         if not (has_ru or has_en):
             no_vowel += 1
         else:
-            # Доля гласных в слове
             vcount = sum(1 for c in lw if c in vowels_ru or c in vowels_en)
             if len(lw) >= 5 and (vcount / len(lw)) < 0.2:
                 low_vowel += 1
@@ -223,19 +223,16 @@ def _normalize_extracted_text(text: str, field_id: str | None, options: dict) ->
     if not text or text == "(Текст не найден)":
         return text
     cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
-    
-    # Разбиваем слипшиеся слова (если PDF плохо распознался)
+
     cleaned = _split_merged_words(cleaned)
 
     fix_hyphenation = options.get("fix_hyphenation", True)
     if fix_hyphenation:
-        # Обрабатываем переносы с переводом строки: "сло-\nво" → "слово"
         cleaned = re.sub(
             r"([A-Za-zА-Яа-яЁё])[-‑–—]\s*\n\s*([a-zа-яё])",
             r"\1\2",
             cleaned,
         )
-        # Обрабатываем переносы с пробелом (из PDF): "сло- во" → "слово"
         cleaned = re.sub(
             r"([A-Za-zА-Яа-яЁё])[-‑–—]\s+([a-zа-яё])",
             r"\1\2",
@@ -255,17 +252,12 @@ def _normalize_extracted_text(text: str, field_id: str | None, options: dict) ->
     if join_lines:
         cleaned = re.sub(r"[ \t]*\n[ \t]*", " ", cleaned)
 
-    # Склеиваем индексы: "С орг" → "С_орг", "N общ" → "N_общ"
-    # Паттерн: одиночная буква + пробел + короткое слово (2-4 буквы, обычно нижний индекс)
-    # Типичные индексы: орг, общ, max, min, opt и т.д.
     cleaned = re.sub(
         r'\b([A-ZА-ЯЁ])\s+(орг|общ|max|min|opt|eff|tot|org|obs|calc|exp|теор|эксп|ср|мин|макс)\b',
         r'\1_\2',
         cleaned,
         flags=re.IGNORECASE
     )
-    
-    # Также обрабатываем случаи когда индекс уже частично склеен: "Сорг" → "С_орг"  
     cleaned = re.sub(
         r'\b([CNPKС])(\s*)(орг|общ|org|tot)\b',
         r'\1_\3',
@@ -1290,35 +1282,35 @@ def register_pdf_routes(app, ctx):
 
     @app.route("/api/pdf-extract-text", methods=["POST"])
     def api_pdf_extract_text():
-        """API endpoint ??? ?????????? ?????? ?? ?????????? ???????? PDF."""
+        """API endpoint для извлечения текста из выделенных областей PDF."""
         try:
             data = request.get_json()
             pdf_filename = data.get("pdf_file")
             selections = data.get("selections", [])
             options_dict = data.get("options", {}) or {}
 
-            print(f"DEBUG: ?????? ?????????? ?????? ?? {len(selections)} ????????")
-            print(f"DEBUG: PDF ????: {pdf_filename}")
+            print(f"DEBUG: Обработка выделенного текста из {len(selections)} областей")
+            print(f"DEBUG: PDF файл: {pdf_filename}")
 
             if not pdf_filename:
-                return jsonify({"error": "?? ?????? ???? PDF"}), 400
+                return jsonify({"error": "Не указан файл PDF"}), 400
 
             if not selections:
-                return jsonify({"error": "??? ?????????? ????????"}), 400
+                return jsonify({"error": "Нет выделенных областей"}), 400
 
             if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
-                return jsonify({"error": "???????????? ???? ? ?????"}), 400
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
 
             pdf_path = _input_files_dir / pdf_filename
 
             if not pdf_path.exists() or not pdf_path.is_file():
-                print(f"ERROR: ???? ?? ??????: {pdf_path}")
-                return jsonify({"error": f"???? ?? ??????: {pdf_filename}"}), 404
+                print(f"ERROR: Файл не найден: {pdf_path}")
+                return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
 
             try:
                 pdf_path.resolve().relative_to(_input_files_dir.resolve())
             except ValueError:
-                return jsonify({"error": "???????????? ???? ? ?????"}), 400
+                return jsonify({"error": "Недопустимый путь к файлу"}), 400
 
             options = ExtractionOptions.from_dict(options_dict)
 
@@ -1328,21 +1320,21 @@ def register_pdf_routes(app, ctx):
                 extractor = PDFTextExtractor(options)
                 extracted = []
 
-                print(f"DEBUG: ???????? PDF: {pdf_path}")
+                print(f"DEBUG: Открываем PDF: {pdf_path}")
                 with pdfplumber.open(str(pdf_path)) as pdf:
-                    print(f"DEBUG: PDF ???????? {len(pdf.pages)} ???????")
+                    print(f"DEBUG: PDF содержит {len(pdf.pages)} страниц")
 
                     for selection in selections:
                         page_num = selection.get("page", 0)
                         if page_num >= len(pdf.pages):
-                            print(f"WARNING: ???????? {page_num} ?? ??????????")
+                            print(f"WARNING: Страница {page_num} вне диапазона")
                             continue
 
                         page = pdf.pages[page_num]
                         result = extractor.extract_from_selection(page, selection)
                         extracted.append(result)
 
-                print(f"DEBUG: ????????? ?????? ?? {len(extracted)} ????????")
+                print(f"DEBUG: Извлечено текста из {len(extracted)} областей")
 
                 merged = {}
                 if options.merge_by_field:
@@ -1351,7 +1343,7 @@ def register_pdf_routes(app, ctx):
                     ):
                         field = item.get("field_id")
                         text = item.get("text")
-                        if not field or not text or text == "(????? ?? ??????)":
+                        if not field or not text or text == "(Текст не найден)":
                             continue
                         merged.setdefault(field, [])
                         merged[field].append(text)
@@ -1366,21 +1358,21 @@ def register_pdf_routes(app, ctx):
                 )
 
             except ImportError as e:
-                print(f"ERROR: pdfplumber ?? ??????????: {e}")
-                return jsonify({"error": "pdfplumber ?? ??????????"}), 500
+                print(f"ERROR: pdfplumber не установлен: {e}")
+                return jsonify({"error": "pdfplumber не установлен"}), 500
             except Exception as e:
                 import traceback
 
-                error_msg = f"?????? ??? ?????????? ??????: {str(e)}\n{traceback.format_exc()}"
+                error_msg = f"Ошибка при извлечении текста: {str(e)}\n{traceback.format_exc()}"
                 print(f"ERROR: {error_msg}")
-                return jsonify({"error": f"?????? ??? ?????????? ??????: {str(e)}"}), 500
+                return jsonify({"error": f"Ошибка при извлечении текста: {str(e)}"}), 500
 
         except Exception as e:
             import traceback
 
-            error_msg = f"??????: {str(e)}\n{traceback.format_exc()}"
+            error_msg = f"Ошибка: {str(e)}\n{traceback.format_exc()}"
             print(f"ERROR: {error_msg}")
-            return jsonify({"error": f"??????: {str(e)}"}), 500
+            return jsonify({"error": f"Ошибка: {str(e)}"}), 500
 
     @app.route("/api/pdf-save-coordinates", methods=["POST"])
     def api_pdf_save_coordinates():

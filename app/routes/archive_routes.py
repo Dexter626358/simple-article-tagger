@@ -18,6 +18,7 @@ from app.app_helpers import (
 )
 
 def register_archive_routes(app, ctx):
+    logger = app.logger
     json_input_dir = ctx.get("json_input_dir")
     words_input_dir = ctx.get("words_input_dir")
     xml_output_dir = ctx.get("xml_output_dir")
@@ -36,8 +37,26 @@ def register_archive_routes(app, ctx):
     SUPPORTED_EXTENSIONS = ctx.get("SUPPORTED_EXTENSIONS")
     SUPPORTED_JSON_EXTENSIONS = ctx.get("SUPPORTED_JSON_EXTENSIONS")
 
+    def _get_latest_issue_dir() -> str | None:
+        candidates = []
+        for base in (_input_files_dir, json_input_dir):
+            if not base or not base.exists() or not base.is_dir():
+                continue
+            for entry in base.iterdir():
+                if entry.is_dir():
+                    try:
+                        mtime = entry.stat().st_mtime
+                    except Exception:
+                        mtime = 0
+                    candidates.append((mtime, entry.name))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        return candidates[0][1]
+
     @app.route("/upload-input-archive", methods=["POST"])
     def upload_input_archive():
+        logger.info("USER upload archive start")
         if "archive" not in request.files:
             return jsonify({"success": False, "error": "Файл архива не найден в запросе."}), 400
         archive_file = request.files["archive"]
@@ -47,6 +66,11 @@ def register_archive_routes(app, ctx):
         data = archive_file.read()
         if not data:
             return jsonify({"success": False, "error": "Файл архива пуст."}), 400
+        logger.info(
+            "SYSTEM upload archive received filename=%s size=%s",
+            archive_file.filename,
+            len(data),
+        )
 
         buffer = io.BytesIO(data)
         if not zipfile.is_zipfile(buffer):
@@ -103,6 +127,12 @@ def register_archive_routes(app, ctx):
                             "error": f"Ошибка конвертации RTF файла {member_name}: {e}"
                         }), 500
 
+        logger.info(
+            "SYSTEM upload archive done name=%s extracted=%s converted=%s",
+            archive_stem,
+            extracted,
+            converted,
+        )
         return jsonify({
             "success": True,
             "message": f"Архив распакован в папку {archive_stem}, файлов: {extracted}, RTF->DOCX: {converted}.",
@@ -115,6 +145,7 @@ def register_archive_routes(app, ctx):
         archive_name = data.get("archive") or last_archive.get("name")
         if not archive_name:
             return jsonify({"success": False, "error": "Архив не выбран."}), 400
+        logger.info("USER process archive start name=%s", archive_name)
         archive_dir = (_input_files_dir / archive_name).resolve()
         if not archive_dir.exists() or not archive_dir.is_dir():
             return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
@@ -148,6 +179,11 @@ def register_archive_routes(app, ctx):
                     config = None
                 pdf_files = sorted(archive_dir.glob("*.pdf"))
                 total = len(pdf_files)
+                logger.info(
+                    "SYSTEM process archive files name=%s pdf_count=%s",
+                    archive_name,
+                    total,
+                )
                 with progress_lock:
                     progress_state["total"] = total
                     progress_state["message"] = "Запуск обработки..."
@@ -165,6 +201,11 @@ def register_archive_routes(app, ctx):
                     extract_metadata_from_pdf(pdf_path, config=config)
                     with progress_lock:
                         progress_state["processed"] = idx
+                logger.info(
+                    "SYSTEM process archive done name=%s processed=%s",
+                    archive_name,
+                    total,
+                )
                 with progress_lock:
                     progress_state.update({
                         "status": "done",
@@ -186,9 +227,13 @@ def register_archive_routes(app, ctx):
         archive_name = None
         with progress_lock:
             archive_name = progress_state.get("archive") or last_archive.get("name")
-            status_payload = {
-                "status": progress_state.get("status"),
-                "processed": progress_state.get("processed", 0),
+        if not archive_name:
+            archive_name = _get_latest_issue_dir()
+            if archive_name:
+                last_archive["name"] = archive_name
+        status_payload = {
+            "status": progress_state.get("status"),
+            "processed": progress_state.get("processed", 0),
                 "total": progress_state.get("total", 0),
                 "message": progress_state.get("message", ""),
                 "archive": archive_name,
@@ -297,3 +342,39 @@ def register_archive_routes(app, ctx):
         )
         status = 200 if result.get("success") else 400
         return jsonify(result), status
+
+    @app.route("/project-delete", methods=["POST"])
+    def project_delete():
+        data = request.get_json(silent=True) or {}
+        issue = (data.get("issue") or last_archive.get("name") or "").strip()
+        if not issue:
+            return jsonify({"success": False, "error": "Не указан выпуск."}), 400
+        issue_names = _sanitize_folder_names([issue])
+        if not issue_names:
+            return jsonify({"success": False, "error": "Недопустимое имя выпуска."}), 400
+        issue_name = issue_names[0]
+
+        removed = []
+        for base_dir, label in (
+            (_input_files_dir, "input_files"),
+            (json_input_dir, "json_input"),
+            (xml_output_dir, "xml_output"),
+        ):
+            if not base_dir:
+                continue
+            target = (base_dir / issue_name).resolve()
+            try:
+                target.resolve().relative_to(base_dir.resolve())
+            except ValueError:
+                continue
+            if target.exists() and target.is_dir():
+                shutil.rmtree(target)
+                removed.append(f"{label}/{issue_name}")
+
+        if not removed:
+            return jsonify({"success": False, "error": f"Выпуск не найден: {issue_name}"}), 404
+
+        if last_archive.get("name") == issue_name:
+            last_archive["name"] = None
+        logger.info("SYSTEM project delete issue=%s removed=%s", issue_name, len(removed))
+        return jsonify({"success": True, "issue": issue_name, "removed": removed})

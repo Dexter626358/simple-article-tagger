@@ -73,6 +73,14 @@
     "use_prompts_module": true,
     "use_cache": true
   },
+  "logging": {
+    "level": "INFO",
+    "filename": "app.log",
+    "when": "midnight",
+    "interval": 1,
+    "backup_count": 14,
+    "utc": false
+  },
   "pdf_to_html": {
     "use_mistral": false,
     "mistral_model": "mistral-large-latest",

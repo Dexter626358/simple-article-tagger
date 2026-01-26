@@ -730,15 +730,58 @@ def register_markup_routes(app, ctx):
             except Exception:
                 pass
             
+            # Настройки чанкинга
+            references_cfg = (config or {}).get("references_ai", {})
+            chunk_size = references_cfg.get("chunk_size", 25)
+            max_chunk_chars = references_cfg.get("max_chunk_chars", 8000)
+            try:
+                chunk_size = int(chunk_size)
+            except Exception:
+                chunk_size = 25
+            if chunk_size <= 0:
+                chunk_size = 25
+            try:
+                max_chunk_chars = int(max_chunk_chars)
+            except Exception:
+                max_chunk_chars = 8000
+            if max_chunk_chars <= 1000:
+                max_chunk_chars = 8000
+
+            def _chunk_references(text: str) -> list[str]:
+                lines = [line.strip() for line in text.splitlines() if line.strip()]
+                if len(lines) >= 2:
+                    if len(lines) <= chunk_size:
+                        return ["\n".join(lines)]
+                    return [
+                        "\n".join(lines[i:i + chunk_size])
+                        for i in range(0, len(lines), chunk_size)
+                    ]
+                # fallback: очень длинная строка без переводов
+                text = text.strip()
+                if len(text) <= max_chunk_chars:
+                    return [text]
+                chunks = []
+                while text:
+                    if len(text) <= max_chunk_chars:
+                        chunks.append(text)
+                        break
+                    cut = text.rfind(".", 0, max_chunk_chars)
+                    if cut < int(max_chunk_chars * 0.6):
+                        cut = max_chunk_chars
+                    chunks.append(text[:cut].strip())
+                    text = text[cut:].lstrip()
+                return chunks
+
+            chunks = _chunk_references(raw_text)
+
             # Получаем промпт из prompts.py
             try:
                 from prompts import Prompts
                 base_prompt = Prompts.get_prompt(prompt_type)
-                prompt = base_prompt.format(references_text=raw_text)
             except Exception as e:
                 # Если не удалось загрузить промпт, используем базовый
                 lang_name = "Русский" if language == "RUS" else "English"
-                prompt = f"""Ты помощник для нормализации библиографических списков научных статей.
+                base_prompt = f"""Ты помощник для нормализации библиографических списков научных статей.
 
 Задача: Разбери предоставленный текст списка литературы и верни нормализованный список, где каждая библиографическая запись находится на отдельной строке.
 
@@ -756,45 +799,60 @@ def register_markup_routes(app, ctx):
 {raw_text}
 
 Верни только валидный JSON без дополнительных комментариев."""
-            
+
             # Используем GPT для обработки
             from services.gpt_extraction import extract_metadata_with_gpt
-            
-            result = extract_metadata_with_gpt(
-                prompt,
-                model=config.get("gpt_extraction", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini",
-                temperature=0.3,
-                api_key=config.get("gpt_extraction", {}).get("api_key") if config else None,
-                config=config
-            )
-            
-            # Извлекаем нормализованный список
-            references = []
-            if isinstance(result, dict) and "references" in result:
-                references = result["references"]
-            elif isinstance(result, list):
-                references = result
-            else:
-                # Пытаемся извлечь из текста ответа
-                response_text = str(result)
-                # Ищем JSON в ответе
-                import re
-                json_match = re.search(r'\{.*"references".*\}', response_text, re.DOTALL)
-                if json_match:
-                    try:
-                        parsed = json.loads(json_match.group(0))
-                        references = parsed.get("references", [])
-                    except:
-                        pass
-                
-                # Если не нашли JSON, разбиваем по строкам
-                if not references:
-                    references = [line.strip() for line in response_text.split("\n") if line.strip() and not line.strip().startswith("{") and not line.strip().startswith("}")]
-            
+
+            model = config.get("gpt_extraction", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini"
+            api_key = config.get("gpt_extraction", {}).get("api_key") if config else None
+
+            all_references = []
+            for idx, chunk in enumerate(chunks, start=1):
+                prompt = base_prompt.format(references_text=chunk)
+                result = extract_metadata_with_gpt(
+                    prompt,
+                    model=model,
+                    temperature=0.3,
+                    api_key=api_key,
+                    config=config
+                )
+
+                # Извлекаем нормализованный список
+                references = []
+                if isinstance(result, dict) and "references" in result:
+                    references = result["references"]
+                elif isinstance(result, list):
+                    references = result
+                else:
+                    # Пытаемся извлечь из текста ответа
+                    response_text = str(result)
+                    # Ищем JSON в ответе
+                    import re
+                    json_match = re.search(r'\{.*"references".*\}', response_text, re.DOTALL)
+                    if json_match:
+                        try:
+                            parsed = json.loads(json_match.group(0))
+                            references = parsed.get("references", [])
+                        except Exception:
+                            pass
+                    
+                    # Если не нашли JSON, разбиваем по строкам
+                    if not references:
+                        references = [
+                            line.strip()
+                            for line in response_text.split("\n")
+                            if line.strip() and not line.strip().startswith("{") and not line.strip().startswith("}")
+                        ]
+
+                if not isinstance(references, list):
+                    references = [str(references)]
+
+                all_references.extend([r for r in references if str(r).strip()])
+
             # Объединяем в строку с переносами
-            normalized_text = "\n".join(references)
+            normalized_text = "\n".join(all_references)
             
-            return jsonify(success=True, text=normalized_text, count=len(references))
+            return jsonify(success=True, text=normalized_text, count=len(all_references), chunks=len(chunks))
             
         except Exception as e:
             import traceback
@@ -846,4 +904,3 @@ def register_markup_routes(app, ctx):
             print(error_msg)
             return jsonify(success=False, error=error_msg), 500
     
-

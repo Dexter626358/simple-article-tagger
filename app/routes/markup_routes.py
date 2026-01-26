@@ -798,7 +798,10 @@ def register_markup_routes(app, ctx):
 Текст для обработки:
 {raw_text}
 
-Верни только валидный JSON без дополнительных комментариев."""
+Верни только валидный JSON без дополнительных комментариев.
+
+Текст для обработки:
+{{references_text}}"""
 
             # Используем GPT для обработки
             from services.gpt_extraction import extract_metadata_with_gpt
@@ -806,9 +809,14 @@ def register_markup_routes(app, ctx):
             model = config.get("gpt_extraction", {}).get("model", "gpt-4o-mini") if config else "gpt-4o-mini"
             api_key = config.get("gpt_extraction", {}).get("api_key") if config else None
 
+            def _build_prompt(template: str, text: str) -> str:
+                if "{references_text}" in template:
+                    return template.replace("{references_text}", text)
+                return f"{template}\n\n{text}"
+
             all_references = []
             for idx, chunk in enumerate(chunks, start=1):
-                prompt = base_prompt.format(references_text=chunk)
+                prompt = _build_prompt(base_prompt, chunk)
                 result = extract_metadata_with_gpt(
                     prompt,
                     model=model,

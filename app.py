@@ -63,8 +63,26 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
     """
     app = Flask(__name__)
     
+
     # Определяем пути по умолчанию, если не указаны
     script_dir = Path(__file__).parent.absolute()
+
+    # Ensure PDF.js viewer assets are available on Railway (extract from zip on startup).
+    try:
+        pdfjs_root = script_dir / "static" / "pdfjs"
+        viewer_html = pdfjs_root / "web" / "viewer.html"
+        if not viewer_html.exists():
+            zip_path = script_dir / "static" / "pdfjs-dist.zip"
+            if zip_path.exists():
+                pdfjs_root.mkdir(parents=True, exist_ok=True)
+                import zipfile
+                with zipfile.ZipFile(zip_path, "r") as zf:
+                    zf.extractall(pdfjs_root)
+                print(f"DEBUG: PDF.js extracted to {pdfjs_root}")
+            else:
+                print("WARNING: pdfjs-dist.zip not found; PDF viewer may be unavailable.")
+    except Exception as exc:
+        print(f"WARNING: failed to prepare PDF.js assets: {exc}")
     
     if xml_output_dir is None:
         xml_output_dir = script_dir / "xml_output"

@@ -617,7 +617,7 @@ HTML_TEMPLATE = """
     <div class="content">
       <div class="upload-panel">
         <div class="upload-title">Загрузка архива input_files</div>
-        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post" onsubmit="event.preventDefault(); window.uploadArchive && window.uploadArchive(); return false;">
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
           <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
           <button type="submit" class="btn-primary">Загрузить ZIP</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
@@ -663,61 +663,7 @@ HTML_TEMPLATE = """
           <button type="button" id="openProjectBtn" class="btn-secondary" onclick="window.openProject && window.openProject()">Открыть проект</button>
           <span id="projectStatus" class="upload-status"></span>
         </div>
-        <script>
-          window.uploadArchive = async () => {
-            const fileInput = document.getElementById("inputArchiveFile");
-            const status = document.getElementById("inputArchiveStatus");
-            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-              if (status) {
-                status.textContent = "Выберите ZIP файл.";
-                status.style.color = "#c62828";
-              }
-              return;
-            }
-            const formData = new FormData();
-            formData.append("archive", fileInput.files[0]);
-            if (status) {
-              status.textContent = "Загрузка архива...";
-              status.style.color = "#555";
-            }
-            try {
-              const response = await fetch("/upload-input-archive", {
-                method: "POST",
-                body: formData
-              });
-              const data = await response.json().catch(() => ({}));
-              if (!response.ok || !data.success) {
-                if (status) {
-                  status.textContent = data.error || "Ошибка загрузки архива.";
-                  status.style.color = "#c62828";
-                }
-                return;
-              }
-              if (status) {
-                status.textContent = data.message || "Архив загружен.";
-                status.style.color = "#2e7d32";
-              }
-              if (data && data.archive) {
-                window.currentArchive = data.archive;
-                sessionStorage.setItem("lastArchiveName", data.archive);
-                const processBtn = document.getElementById("processArchiveBtn");
-                if (processBtn) {
-                  processBtn.disabled = false;
-                }
-                if (status) {
-                  status.textContent = "Архив загружен: " + data.archive;
-                  status.style.color = "#2e7d32";
-                }
-              }
-              setTimeout(() => window.location.reload(), 1200);
-            } catch (_) {
-              if (status) {
-                status.textContent = "Ошибка загрузки архива.";
-                status.style.color = "#c62828";
-              }
-            }
-          };
-        </script>
+        
         <script>
           window.saveProject = async () => {
             const issue = window.prompt("Укажите имя выпуска (папки):");

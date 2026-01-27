@@ -711,6 +711,7 @@ def register_markup_routes(app, ctx):
     def process_references_ai():
         """Обрабатывает список литературы с помощью ИИ прямо в веб-форме."""
         try:
+            request_start = time.time()
             data = request.get_json()
             field_id = data.get("field_id")  # "references_ru" или "references_en"
             raw_text = data.get("text", "")
@@ -848,6 +849,7 @@ def register_markup_routes(app, ctx):
                 ]
 
             def _run_chunk(chunk_text: str, chunk_index: int, retry_count: int = 0) -> list[str]:
+                chunk_start = time.time()
                 current_app.logger.info(
                     "SYSTEM references ai chunk start field=%s chunk=%s size=%s model=%s retry=%s",
                     field_id,
@@ -911,7 +913,23 @@ def register_markup_routes(app, ctx):
                 if not isinstance(references, list):
                     references = [str(references)]
 
-                return [r for r in references if str(r).strip()]
+                cleaned = [r for r in references if str(r).strip()]
+                elapsed = time.time() - chunk_start
+                current_app.logger.info(
+                    "SYSTEM references ai chunk done field=%s chunk=%s elapsed=%.2fs count=%s",
+                    field_id,
+                    chunk_index,
+                    elapsed,
+                    len(cleaned),
+                )
+                if elapsed > 20:
+                    current_app.logger.warning(
+                        "SYSTEM references ai slow chunk field=%s chunk=%s elapsed=%.2fs",
+                        field_id,
+                        chunk_index,
+                        elapsed,
+                    )
+                return cleaned
 
             all_references = []
             max_prompt_chars = int(references_cfg.get("max_prompt_chars", 20000))
@@ -952,17 +970,34 @@ def register_markup_routes(app, ctx):
 
             # Объединяем в строку с переносами
             normalized_text = "\n".join(all_references)
+            total_elapsed = time.time() - request_start
             current_app.logger.info(
-                "SYSTEM references ai done field=%s count=%s",
+                "SYSTEM references ai done field=%s count=%s total_time=%.2fs",
                 field_id,
                 len(all_references),
+                total_elapsed,
             )
             
-            return jsonify(success=True, text=normalized_text, count=len(all_references), chunks=len(chunks))
+            return jsonify(
+                success=True,
+                text=normalized_text,
+                count=len(all_references),
+                chunks=len(chunks),
+                processing_time=round(total_elapsed, 2),
+            )
             
         except Exception as e:
             import traceback
             error_details = traceback.format_exc()
+            try:
+                total_elapsed = time.time() - request_start
+                current_app.logger.exception(
+                    "SYSTEM references ai error after %.2fs: %s",
+                    total_elapsed,
+                    e,
+                )
+            except Exception:
+                pass
             current_app.logger.exception("SYSTEM references ai error: %s", e)
             return jsonify(success=False, error=str(e), details=error_details), 500
     

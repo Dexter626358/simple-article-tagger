@@ -14,8 +14,9 @@ You are an expert in extracting metadata from scientific articles. Analyze the p
 1. **Accuracy**: Extract only information present in the text. Do not generate or invent data.
 2. **Completeness**: Aim for maximum completeness of extracted information.
 3. **Format Preservation**: Do not modify original structure, spelling, or formatting of source data. **IMPORTANT**: Convert UPPERCASE titles to normal case formatting.
-4. **Handling Missing Data**: Use empty strings ("") for text fields or empty arrays ([]) for lists if information is absent.
-5. **JSON Compatibility**: Ensure all text values are properly escaped for JSON format:
+4. **ФОРМАТИРОВАНИЕ**: Для верхних/нижних индексов используй <sup>/<sub>.
+5. **Handling Missing Data**: Use empty strings ("") for text fields or empty arrays ([]) for lists if information is absent.
+6. **JSON Compatibility**: Ensure all text values are properly escaped for JSON format:
    - Use standard ASCII quotes (") instead of typographic quotes ("")
    - Escape internal quotes with backslash (\")
    - Use standard hyphens (-) instead of em-dashes (—)
@@ -277,22 +278,24 @@ IMPORTANT: Join broken lines within a single reference, including DOI/URL split 
 
 4. Приведи оформление к единообразному стилю (например, кавычки, тире, точки и запятые, если они отличаются).
 
-5. Не изменяй суть и порядок библиографических описаний.
+5. Для верхних/нижних индексов используй <sup>/<sub>.
 
-6. Не добавляй и не убирай элементы описания.
+6. Не изменяй суть и порядок библиографических описаний.
 
-7. В конце каждого описания ставь точку, если это соответствует принятому стандарту.
+7. Не добавляй и не убирай элементы описания.
 
-8. Выводи результат как аккуратно отформатированный, удобочитаемый список для сайта.
+8. В конце каждого описания ставь точку, если это соответствует принятому стандарту.
 
-9. **ВАЖНО: Удали строки, которые НЕ являются библиографическими источниками:**
+9. Выводи результат как аккуратно отформатированный, удобочитаемый список для сайта.
+
+10. **ВАЖНО: Удали строки, которые НЕ являются библиографическими источниками:**
    - Заголовки журналов (например, "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
    - Номера выпусков и страниц без авторов (например, "no. 6 2025 52")
    - Служебные строки с фамилиями без полного описания (например, "ВОРОНИН и др. / VORONIN et al.")
    - Строки, содержащие только название журнала, номер, год или страницы без автора и названия публикации
    - Строки, которые явно являются частью оглавления или служебной информации, а не библиографической записью
 
-10. Верни результат в формате JSON: {"references": ["запись 1", "запись 2", ...]}
+11. Верни результат в формате JSON: {"references": ["запись 1", "запись 2", ...]}
 
 Пример входных данных (с примерами строк, которые нужно удалить):
 
@@ -330,20 +333,22 @@ Instructions:
 
 4. Standardize punctuation, quotation marks, dashes, and dots according to standard bibliographic style.
 
-5. Do not change the actual content or order of the references.
+5. Use <sup>/<sub> for superscripts/subscripts.
 
-6. Do not add or remove any bibliographic elements.
+6. Do not change the actual content or order of the references.
 
-7. Output each reference as a single clean line, with proper punctuation at the end (as appropriate).
+7. Do not add or remove any bibliographic elements.
 
-8. **IMPORTANT: Remove lines that are NOT bibliographic references:**
+8. Output each reference as a single clean line, with proper punctuation at the end (as appropriate).
+
+9. **IMPORTANT: Remove lines that are NOT bibliographic references:**
    - Journal titles/headers (e.g., "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
    - Issue numbers and pages without authors (e.g., "no. 6 2025 52")
    - Service lines with surnames without full description (e.g., "VORONIN et al.")
    - Lines containing only journal name, issue number, year, or pages without author and publication title
    - Lines that are clearly part of table of contents or service information, not bibliographic entries
 
-9. Return result in JSON format: {"references": ["entry 1", "entry 2", ...]}
+10. Return result in JSON format: {"references": ["entry 1", "entry 2", ...]}
 
 Example input (with lines to be removed):
 

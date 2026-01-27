@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import os
 import shutil
+import subprocess
+import sys
 import threading
 import zipfile
 from pathlib import Path
@@ -53,6 +56,22 @@ def register_archive_routes(app, ctx):
             return None
         candidates.sort(key=lambda x: x[0], reverse=True)
         return candidates[0][1]
+
+    @app.route("/open-json-input", methods=["GET", "POST"])
+    def open_json_input():
+        try:
+            target_dir = json_input_dir.resolve()
+            target_dir.mkdir(parents=True, exist_ok=True)
+            if sys.platform.startswith("win"):
+                os.startfile(target_dir)  # type: ignore[attr-defined]
+            elif sys.platform.startswith("darwin"):
+                subprocess.Popen(["open", str(target_dir)])
+            else:
+                subprocess.Popen(["xdg-open", str(target_dir)])
+        except Exception as exc:
+            logger.exception("Failed to open json_input folder: %s", exc)
+            return jsonify({"success": False, "error": "Не удалось открыть папку json_input."}), 500
+        return jsonify({"success": True})
 
     @app.route("/upload-input-archive", methods=["POST"])
     def upload_input_archive():

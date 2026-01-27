@@ -15,62 +15,91 @@ HTML_TEMPLATE = """
     }
     body {
       font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      padding: 10px;
+      background: #1e2029;
+      padding: 24px;
       margin: 0;
+      color: #e6e8ee;
     }
     .container {
-      max-width: 1400px;
+      max-width: 1200px;
       margin: 0 auto;
-      background: white;
-      border-radius: 8px;
-      box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+      background: transparent;
+      border-radius: 16px;
+      box-shadow: none;
       min-height: auto;
       height: auto;
       padding-bottom: 20px;
     }
     .header {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: white;
-      padding: 15px 20px;
+      background: #2a2d3a;
+      color: #e6e8ee;
+      padding: 24px;
       text-align: center;
+      border-radius: 16px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
+      border: 1px solid #3a3f52;
     }
     .header h1 {
-      font-size: 22px;
-      margin-bottom: 5px;
+      font-size: 26px;
+      margin-bottom: 6px;
     }
     .header p {
-      opacity: 0.9;
-      font-size: 12px;
+      opacity: 0.85;
+      font-size: 14px;
+      color: #a7aec2;
+    }
+    .header-actions {
+      margin-top: 16px;
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .checkbox-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #d4d8e6;
+      background: #323545;
+      border-radius: 999px;
+      padding: 8px 12px;
+      border: 1px solid #3a3f52;
+    }
+    .checkbox-inline small {
+      color: #9aa2b6;
     }
     .step-bar {
-      margin-top: 12px;
+      margin-top: 16px;
       display: flex;
-      gap: 8px;
+      gap: 10px;
       justify-content: center;
+      align-items: stretch;
       flex-wrap: wrap;
     }
     .step {
+      flex: 1 1 160px;
       display: flex;
       align-items: center;
-      gap: 8px;
-      padding: 6px 10px;
+      justify-content: center;
+      padding: 10px 14px;
       border-radius: 999px;
-      font-size: 12px;
+      font-size: 13px;
       font-weight: 600;
-      color: rgba(255, 255, 255, 0.85);
-      border: 1px solid rgba(255, 255, 255, 0.25);
-      background: rgba(255, 255, 255, 0.08);
+      color: #b7bfd1;
+      border: 1px solid #3a3f52;
+      background: #2f3342;
     }
     .step.active {
-      background: rgba(255, 255, 255, 0.28);
-      border-color: rgba(255, 255, 255, 0.6);
+      background: #6c63ff;
+      border-color: #6c63ff;
       color: #fff;
     }
     .step.done {
-      background: rgba(76, 175, 80, 0.35);
-      border-color: rgba(76, 175, 80, 0.8);
-      color: #fff;
+      background: #243832;
+      border-color: #2f5a46;
+      color: #6dd08a;
     }
     .upload-help ul {
       margin: 0;
@@ -87,27 +116,38 @@ HTML_TEMPLATE = """
       border-radius: 999px;
       font-size: 12px;
       font-weight: 600;
-      color: #1b1b1b;
-      background: #f1f5f9;
-      border: 1px solid #d8e0ff;
+      color: #e6e8ee;
+      background: #303346;
+      border: 1px solid #3a3f52;
     }
     .content {
-      padding: 15px 20px;
+      padding: 20px 0 0 0;
       min-height: auto;
       height: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .card {
+      background: #2a2d3a;
+      border: 1px solid #3a3f52;
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
     }
     .upload-panel {
-      background: #f6f8ff;
-      border: 1px solid #d8e0ff;
-      border-radius: 6px;
-      padding: 12px;
-      margin: 0 0 12px 0;
+      margin: 0;
     }
     .upload-title {
-      font-weight: 600;
+      font-weight: 700;
+      font-size: 16px;
+      color: #e6e8ee;
+      margin-bottom: 4px;
+    }
+    .upload-subtitle {
       font-size: 13px;
-      color: #2c3e50;
-      margin-bottom: 8px;
+      color: #a7aec2;
+      margin-bottom: 12px;
     }
     .upload-form {
       display: flex;
@@ -119,38 +159,46 @@ HTML_TEMPLATE = """
       flex: 1 1 260px;
       padding: 6px;
       font-size: 12px;
-      border: 1px solid #ccd5ff;
+      border: 1px solid #3a3f52;
       border-radius: 4px;
-      background: #fff;
+      background: #232633;
+      color: #e6e8ee;
     }
     .upload-status {
       font-size: 12px;
-      color: #555;
+      color: #a7aec2;
       min-height: 18px;
     }
     .progress-bar {
       position: relative;
       width: 260px;
       height: 10px;
-      background: #e0e0e0;
+      background: #2b2f3d;
       border-radius: 6px;
       overflow: hidden;
     }
     .progress-bar-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #64b5f6, #42a5f5);
+      background: linear-gradient(90deg, #6c63ff, #7f75ff);
       transition: width 0.3s ease;
     }
-    .upload-help {
-      margin-top: 8px;
+    .details-card {
+      margin-top: 10px;
+      background: #2f3342;
+      border: 1px solid #3a3f52;
+      border-radius: 10px;
+      padding: 10px 12px;
       font-size: 12px;
+      color: #c6cbe0;
+    }
+    .details-card summary {
+      cursor: pointer;
       font-weight: 600;
-      color: #7a4b00;
-      background: #fff7e0;
-      border: 1px solid #ffd27d;
-      padding: 8px 10px;
-      border-radius: 4px;
+      color: #cfd4e6;
+    }
+    .details-card ul {
+      margin: 8px 0 0 18px;
     }
     .file-list {
       display: grid;
@@ -224,7 +272,7 @@ HTML_TEMPLATE = """
       display: block;
       font-weight: 600;
       margin-bottom: 8px;
-      color: #333;
+      color: #cfd4e6;
       font-size: 13px;
     }
     .form-field-group input,
@@ -232,40 +280,43 @@ HTML_TEMPLATE = """
     .form-field-group select {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid #3a3f52;
       border-radius: 4px;
       font-size: 14px;
       font-family: inherit;
       transition: border-color 0.2s;
+      background: #232633;
+      color: #e6e8ee;
     }
     .form-field-group input:focus,
     .form-field-group textarea:focus,
     .form-field-group select:focus {
       outline: none;
-      border-color: #2196f3;
-      box-shadow: 0 0 0 3px rgba(33, 150, 243, 0.1);
+      border-color: #6c63ff;
+      box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.2);
     }
     .form-field-group textarea {
       min-height: 60px;
       resize: vertical;
     }
     .form-instructions {
-      background: #fff3cd;
-      border: 1px solid #ffc107;
-      border-radius: 4px;
+      background: #2f3342;
+      border: 1px solid #3a3f52;
+      border-radius: 8px;
       padding: 12px;
       margin-bottom: 20px;
       font-size: 12px;
+      color: #c6cbe0;
     }
     .form-instructions h3 {
       margin: 0 0 8px 0;
-      color: #856404;
+      color: #e6e8ee;
       font-size: 14px;
     }
     .form-instructions ul {
       margin: 0;
       padding-left: 20px;
-      color: #856404;
+      color: #c6cbe0;
     }
     .form-instructions li {
       margin: 4px 0;
@@ -289,13 +340,13 @@ HTML_TEMPLATE = """
       font-weight: 600;
     }
     /* Стили для формы из MARKUP_TEMPLATE */
-    .instructions{background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:15px;margin-bottom:20px;}
-    .instructions h3{margin-bottom:10px;color:#856404;font-size:14px;}
-    .instructions ul{margin-left:20px;color:#856404;}
+    .instructions{background:#2f3342;border:1px solid #3a3f52;border-radius:8px;padding:15px;margin-bottom:20px;color:#c6cbe0;}
+    .instructions h3{margin-bottom:10px;color:#e6e8ee;font-size:14px;}
+    .instructions ul{margin-left:20px;color:#c6cbe0;}
     .instructions li{margin:5px 0;}
     .field-group{margin-bottom:20px;}
-    .field-group label{display:block;font-weight:600;margin-bottom:8px;color:#333;font-size:14px;}
-    .field-group input,.field-group textarea,.field-group select{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;}
+    .field-group label{display:block;font-weight:600;margin-bottom:8px;color:#cfd4e6;font-size:14px;}
+    .field-group input,.field-group textarea,.field-group select{width:100%;padding:10px;border:1px solid #3a3f52;border-radius:4px;font-size:14px;font-family:inherit;background:#232633;color:#e6e8ee;}
     .field-group textarea{min-height:80px;resize:vertical;}
     .selected-lines{margin-top:5px;font-size:12px;color:#666;}
     .keywords-count{margin-top:5px;font-size:12px;color:#666;font-style:italic;}
@@ -448,8 +499,8 @@ HTML_TEMPLATE = """
     .line-editor-content.resizable{resize:both;overflow:auto;min-width:320px;min-height:200px;width:80vw;height:60vh;max-width:95vw;max-height:90vh;}
     .line-editor-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;border-bottom:2px solid #e0e0e0;padding-bottom:10px;}
     .line-editor-header h2{margin:0;color:#333;font-size:18px;}
-    .line-editor-textarea{width:100%;min-height:150px;max-height:400px;padding:12px;border:2px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;background:#f9f9f9;}
-    .line-editor-textarea:focus{outline:none;border-color:#667eea;background:#fff;}
+    .line-editor-textarea{width:100%;min-height:150px;max-height:400px;padding:12px;border:2px solid #3a3f52;border-radius:4px;font-size:14px;font-family:inherit;line-height:1.6;resize:vertical;background:#232633;color:#e6e8ee;}
+    .line-editor-textarea:focus{outline:none;border-color:#6c63ff;background:#1f2230;}
     .annotation-editor-toolbar{display:flex;flex-direction:column;gap:8px;margin:0 0 12px 0;flex-shrink:0;}
     .annotation-toolbar-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}
     .annotation-toolbar-label{font-size:12px;color:#666;font-weight:600;}
@@ -546,12 +597,21 @@ HTML_TEMPLATE = """
     }
     .empty-state {
       text-align: center;
-      padding: 60px 20px;
-      color: #999;
+      padding: 32px 20px;
+      color: #a7aec2;
+      background: #242834;
+      border: 1px dashed #3a3f52;
     }
     .empty-state h3 {
-      margin-bottom: 10px;
-      color: #666;
+      margin-bottom: 8px;
+      color: #e6e8ee;
+      font-size: 18px;
+    }
+    .empty-state code {
+      background: #2f3342;
+      padding: 2px 6px;
+      border-radius: 6px;
+      color: #c6cbe0;
     }
     .back-link {
       display: inline-block;
@@ -593,55 +653,122 @@ HTML_TEMPLATE = """
       margin-bottom: 0.5em;
       color: #2c3e50;
     }
+    .btn,
+    .btn-primary,
+    .btn-secondary,
+    .btn-danger {
+      padding: 10px 18px;
+      border: none;
+      border-radius: 10px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      justify-content: center;
+    }
+    .btn-primary {
+      background: #6c63ff;
+      color: #fff;
+      box-shadow: 0 8px 18px rgba(108, 99, 255, 0.25);
+    }
+    .btn-primary:hover {
+      background: #5a52ea;
+    }
+    .btn-secondary {
+      background: #2f3342;
+      color: #e6e8ee;
+      border: 1px solid #3a3f52;
+    }
+    .btn-secondary:hover {
+      background: #3a3f52;
+    }
+    .btn-danger {
+      background: #3b2527;
+      color: #ff9aa5;
+      border: 1px solid #5a3438;
+    }
+    .btn-danger:hover {
+      background: #4a2b2f;
+    }
+    .btn-hero {
+      padding: 12px 26px;
+      font-size: 15px;
+      border-radius: 12px;
+    }
+    .status-card {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      background: #2f3342;
+      border: 1px solid #3a3f52;
+      border-radius: 10px;
+      font-size: 12px;
+      color: #c6cbe0;
+    }
+    .actions-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .muted-text {
+      color: #a7aec2;
+    }
   </style>
 </head>
 <body>
   <div class="container">
     <div class="header">
-      <h1>📄 Работа с метаданными статей</h1>
-      <p>Выберите JSON файл для разметки</p>
-      <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center;">
+      <h1>Работа с метаданными статей</h1>
+      <p>Загрузите выпуск и сгенерируйте XML</p>
+      <div class="header-actions">
         {% set total_files = files|length %}
         {% set processed_files = files|selectattr('is_processed')|list|length %}
         {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
-        <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
-          📄 Сгенерировать XML
+        <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn btn-primary btn-hero" style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
+          🚀 Сгенерировать XML
         </button>
-        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#333;">
+        <label class="checkbox-inline">
           <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px);">
-          Разрешить XML при неполной обработке
+          Генерировать XML даже при ошибках
+          <small>(не все статьи могут быть обработаны)</small>
         </label>
       </div>
       <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
-        <div class="step" data-step="1" data-label="Шаг 1 • ZIP">Шаг 1 • ZIP</div>
-        <div class="step" data-step="2" data-label="Шаг 2 • Разметка">Шаг 2 • Разметка</div>
-        <div class="step" data-step="3" data-label="Шаг 3 • XML">Шаг 3 • XML</div>
+        <div class="step" data-step="1" data-label="1 Загрузка">1 Загрузка</div>
+        <div class="step" data-step="2" data-label="2 Разметка">2 Разметка</div>
+        <div class="step" data-step="3" data-label="3 Экспорт XML">3 Экспорт XML</div>
       </div>
     </div>
     <div class="content">
-      <div class="upload-panel">
-        <div class="upload-title">Загрузка архива input_files</div>
+      <div class="upload-panel card">
+        <div class="upload-title">📦 Загрузите архив выпуска</div>
+        <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
         <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
           <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
-          <button type="submit" class="btn-primary">Загрузить ZIP</button>
+          <button type="submit" class="btn btn-primary">Загрузить архив</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
         </form>
-        <div class="upload-help">
-          <div style="font-weight: 700; margin-bottom: 6px;">Требования к архиву</div>
-          <ul style="margin-left: 18px;">
+        <details class="details-card">
+          <summary>Показать требования к архиву</summary>
+          <ul>
             <li>📁 Без папок внутри</li>
             <li>🏷 Имя: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code></li>
             <li>📄 Обязательно: PDF статей выпуска</li>
             <li>📝 Дополнительно: DOCX / RTF / HTML / IDML / LaTeX</li>
             <li>📦 Общий файл: <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.tex</code>)</li>
           </ul>
-        </div>
+        </details>
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-          <button type="button" id="processArchiveBtn" class="btn-primary" disabled>Обработать архив</button>
+          <button type="button" id="processArchiveBtn" class="btn btn-primary" disabled>Обработать выпуск</button>
           <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
             <div id="archiveProgressFill" class="progress-bar-fill"></div>
           </div>
-          <span id="archiveProgress" class="upload-status"></span>
+          <span id="archiveProgress" class="status-card"></span>
         </div>
         <div style="margin-top: 6px; display:flex; gap: 10px; flex-wrap: wrap; align-items:center;">
           <span id="archiveDetails" class="upload-status"></span>
@@ -662,11 +789,11 @@ HTML_TEMPLATE = """
             </div>
           </div>
         </div>
-<div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-          <button type="button" id="saveProjectBtn" class="btn-secondary" onclick="window.saveProject && window.saveProject()">Сохранить проект</button>
-          <button type="button" id="openProjectBtn" class="btn-secondary" onclick="window.openProject && window.openProject()">Открыть проект</button>
-          <button type="button" id="deleteProjectBtn" class="btn-secondary" style="background:#ffebee;border-color:#ef9a9a;color:#c62828;" onclick="window.deleteProject && window.deleteProject()">Удалить выпуск</button>
-          <span id="projectStatus" class="upload-status"></span>
+<div class="actions-row" style="margin-top: 10px;">
+          <button type="button" id="saveProjectBtn" class="btn btn-primary" onclick="window.saveProject && window.saveProject()">💾 Сохранить проект</button>
+          <button type="button" id="openProjectBtn" class="btn btn-secondary" onclick="window.openProject && window.openProject()">📂 Открыть проект</button>
+          <button type="button" id="deleteProjectBtn" class="btn btn-danger" onclick="window.deleteProject && window.deleteProject()">🗑 Удалить выпуск</button>
+          <span id="projectStatus" class="upload-status muted-text"></span>
         </div>
         
         <script>
@@ -3398,12 +3525,15 @@ function closeAnnotationModal() {
         };
         </script>
       {% else %}
-        <div class="empty-state">
-          <h3>📁 Папка пуста</h3>
-          <p>В папке json_input не найдено JSON файлов.</p>
-          <p style="margin-top: 20px; font-size: 14px;">
-            Поместите JSON файлы в подпапки вида: <code>issn_год_том_номер</code> или <code>issn_год_номер</code>
+        <div class="empty-state card">
+          <h3>JSON-файлы не найдены</h3>
+          <p>Загрузите или поместите JSON-файлы в папку:</p>
+          <p style="margin-top: 12px; font-size: 14px;">
+            <code>json_input/issn_год_том_номер</code>
           </p>
+          <div style="margin-top: 14px;">
+            <button type="button" id="openJsonFolderBtn" class="btn btn-secondary">📂 Открыть папку</button>
+          </div>
         </div>
       {% endif %}
       <script>
@@ -3412,9 +3542,23 @@ function closeAnnotationModal() {
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
         const deleteProjectBtn = document.getElementById("deleteProjectBtn");
+        const openJsonFolderBtn = document.getElementById("openJsonFolderBtn");
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", () => {
             if (window.openProject) window.openProject();
+          });
+        }
+        if (openJsonFolderBtn) {
+          openJsonFolderBtn.addEventListener("click", async () => {
+            try {
+              const resp = await fetch("/open-json-input");
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                window.alert(data.error || "Не удалось открыть папку.");
+              }
+            } catch (_) {
+              window.alert("Не удалось открыть папку.");
+            }
           });
         }
 
@@ -3521,7 +3665,7 @@ function closeAnnotationModal() {
             archiveDetails.style.color = color || "#555";
           };
           if (status === "running") {
-            archiveProgress.textContent = `Прогресс: ${processed}/${total}`;
+            archiveProgress.textContent = `Обработка: ${processed}/${total}`;
             archiveProgress.style.color = "#555";
             setArchiveDetails("#555");
             if (!archivePollTimer) {
@@ -3530,7 +3674,7 @@ function closeAnnotationModal() {
             return;
           }
           if (status === "done") {
-            archiveProgress.textContent = `Готово: ${processed}/${total}`;
+            archiveProgress.textContent = "Выпуск успешно обработан";
             archiveProgress.style.color = "#2e7d32";
             setArchiveDetails("#2e7d32");
             stopArchivePolling();
@@ -3551,7 +3695,7 @@ function closeAnnotationModal() {
             return;
           }
           if (window.currentArchive) {
-            archiveProgress.textContent = `Готов к обработке: ${window.currentArchive}`;
+            archiveProgress.textContent = `Архив готов: ${window.currentArchive}`;
             archiveProgress.style.color = "#555";
             setArchiveDetails("#555");
             if (archiveProgressFill && status !== "running") {
@@ -3741,7 +3885,7 @@ function closeAnnotationModal() {
             setProjectStatus("Нет текущего загруженного выпуска.", "#c62828");
             return;
           }
-          const confirmDelete = window.confirm(`Удалить текущий выпуск "${issue}" из input_files/json_input/xml_output? Это действие необратимо.`);
+          const confirmDelete = window.confirm(`Вы уверены, что хотите удалить выпуск "${issue}"? Это действие необратимо.`);
           if (!confirmDelete) {
             setProjectStatus("Удаление отменено.", "#555");
             return;
@@ -3907,17 +4051,19 @@ PDF_BBOX_TEMPLATE = """
     .form-group textarea {
       width: 100%;
       padding: 10px;
-      border: 1px solid #ddd;
+      border: 1px solid #3a3f52;
       border-radius: 4px;
       font-size: 14px;
       font-family: inherit;
+      background: #232633;
+      color: #e6e8ee;
     }
     .form-group input:focus,
     .form-group select:focus,
     .form-group textarea:focus {
       outline: none;
-      border-color: #667eea;
-      box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+      border-color: #6c63ff;
+      box-shadow: 0 0 0 3px rgba(108, 99, 255, 0.2);
     }
     .checkbox-group {
       display: flex;
@@ -4993,14 +5139,14 @@ MARKUP_TEMPLATE = r"""
     .line-editor-textarea:focus{outline:none;border-color:#667eea;background:#fff;}
     .line-editor-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:15px;padding-top:15px;border-top:1px solid #e0e0e0;}
 
-    .instructions{background:#fff3cd;border:1px solid #ffc107;border-radius:4px;padding:15px;margin-bottom:20px;}
-    .instructions h3{margin-bottom:10px;color:#856404;}
-    .instructions ul{margin-left:20px;color:#856404;}
+    .instructions{background:#2f3342;border:1px solid #3a3f52;border-radius:8px;padding:15px;margin-bottom:20px;color:#c6cbe0;}
+    .instructions h3{margin-bottom:10px;color:#e6e8ee;}
+    .instructions ul{margin-left:20px;color:#c6cbe0;}
     .instructions li{margin:5px 0;}
 
     .field-group{margin-bottom:20px;}
     .field-group label{display:block;font-weight:600;margin-bottom:8px;color:#333;font-size:14px;}
-    .field-group input,.field-group textarea{width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;font-family:inherit;}
+    .field-group input,.field-group textarea{width:100%;padding:10px;border:1px solid #d6dae3;border-radius:4px;font-size:14px;font-family:inherit;background:#f1f3f8;}
     .field-group textarea{min-height:80px;resize:vertical;}
     .selected-lines{margin-top:5px;font-size:12px;color:#666;}
     .keywords-count{margin-top:5px;font-size:12px;color:#666;font-style:italic;}

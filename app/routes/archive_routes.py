@@ -87,7 +87,7 @@ def register_archive_routes(app, ctx):
                         "Недопустимая структура архива. "
                         "Варианты: файлы в корне или в одной верхней папке (вложенные подпапки теперь допускаются). "
                         f"Проблемный элемент: {bad_name}"
-                    ))
+                    )
                 }), 400
 
             _input_files_dir.mkdir(parents=True, exist_ok=True)

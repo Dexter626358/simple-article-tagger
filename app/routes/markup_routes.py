@@ -966,7 +966,7 @@ def register_markup_routes(app, ctx):
 
                 # Небольшая пауза на Railway, чтобы избегать rate-limit
                 if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
-                    time.sleep(1)
+                    time.sleep(0)
 
             # Объединяем в строку с переносами
             normalized_text = "\n".join(all_references)

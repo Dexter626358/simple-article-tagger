@@ -215,7 +215,7 @@ def extract_metadata_with_gpt(
         # Используем современный API или старый в зависимости от версии библиотеки
         if OPENAI_AVAILABLE and not getattr(globals(), 'OPENAI_LEGACY', False):
             # Современный API (openai >= 1.0.0)
-            client = OpenAI(api_key=api_key)
+            client = OpenAI(api_key=api_key, timeout=60)
             response = client.chat.completions.create(
                 model=model,
                 messages=[

@@ -80,9 +80,14 @@ def register_archive_routes(app, ctx):
         with zipfile.ZipFile(buffer) as zf:
             is_valid, bad_name = validate_zip_members(zf, _input_files_dir)
             if not is_valid:
+                logger.warning("SYSTEM upload archive invalid structure bad_name=%s", bad_name)
                 return jsonify({
                     "success": False,
-                    "error": f"Недопустимая структура архива: {bad_name}"
+                    "error": (
+                        "Недопустимая структура архива. "
+                        "Разрешены файлы в корне или в одной верхней папке без вложенных подпапок. "
+                        f"Проблемный элемент: {bad_name}"
+                    )
                 }), 400
 
             _input_files_dir.mkdir(parents=True, exist_ok=True)

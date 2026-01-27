@@ -192,13 +192,29 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         return None, None
 
     def validate_zip_members(zf: zipfile.ZipFile, dest_dir: Path) -> tuple[bool, str | None]:
+        root_files = False
+        top_dir = None
         for info in zf.infolist():
             if info.is_dir():
                 continue
             member_path = Path(info.filename)
+            # Игнорируем системные файлы macOS
+            if member_path.parts and member_path.parts[0] == "__MACOSX":
+                continue
+            if member_path.name == ".DS_Store":
+                continue
             if member_path.is_absolute() or ".." in member_path.parts:
                 return False, info.filename
-            if len(member_path.parts) > 1:
+            if len(member_path.parts) == 1:
+                root_files = True
+            else:
+                if top_dir is None:
+                    top_dir = member_path.parts[0]
+                elif top_dir != member_path.parts[0]:
+                    return False, info.filename
+                if len(member_path.parts) > 2:
+                    return False, info.filename
+            if root_files and top_dir is not None:
                 return False, info.filename
             try:
                 (dest_dir / member_path).resolve().relative_to(dest_dir.resolve())

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import sys
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 from typing import Any, Dict
@@ -87,8 +89,20 @@ def setup_logging(app: Flask, base_dir: Path) -> None:
     )
     file_handler.setLevel(level)
     file_handler.setFormatter(formatter)
-
     logger.addHandler(file_handler)
+
+    # Mirror logs to stdout on Railway or when explicitly requested.
+    log_to_stdout = str(os.getenv("LOG_TO_STDOUT", "")).lower() in {"1", "true", "yes"}
+    is_railway = any(
+        os.getenv(k)
+        for k in ("RAILWAY_ENVIRONMENT", "RAILWAY_PROJECT_ID", "RAILWAY_SERVICE_ID")
+    )
+    if log_to_stdout or is_railway:
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setLevel(level)
+        stream_handler.setFormatter(formatter)
+        logger.addHandler(stream_handler)
+
     logger.propagate = False
 
     app.logger = logger

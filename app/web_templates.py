@@ -600,13 +600,17 @@ HTML_TEMPLATE = """
     <div class="header">
       <h1>📄 Работа с метаданными статей</h1>
       <p>Выберите JSON файл для разметки</p>
-      <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+      <div style="margin-top: 20px; display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; align-items: center;">
         {% set total_files = files|length %}
         {% set processed_files = files|selectattr('is_processed')|list|length %}
         {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
-        <button id="generateXmlBtn" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
+        <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn-primary" style="padding: 12px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; cursor: pointer; border: none; background: #4caf50; color: white; transition: background 0.2s;{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
           📄 Сгенерировать XML
         </button>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:#333;">
+          <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px);">
+          Разрешить XML при неполной обработке
+        </label>
       </div>
       <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
         <div class="step" data-step="1" data-label="Шаг 1 • ZIP">Шаг 1 • ZIP</div>
@@ -909,9 +913,40 @@ HTML_TEMPLATE = """
           // Обработчик кнопки генерации XML
           const generateXmlBtn = document.getElementById("generateXmlBtn");
           if (generateXmlBtn) {
+            const allowPartialXml = document.getElementById("allowPartialXml");
+            const progressPct = parseInt(generateXmlBtn.dataset.progressPct || "0", 10);
+            const canGenerateXml = progressPct >= 100;
+
+            const updateXmlButtonState = () => {
+              const allow = allowPartialXml && allowPartialXml.checked;
+              if (canGenerateXml || allow) {
+                generateXmlBtn.disabled = false;
+                generateXmlBtn.style.opacity = "1";
+                generateXmlBtn.style.cursor = "pointer";
+                generateXmlBtn.title = allow && !canGenerateXml
+                  ? "XML будет сгенерирован даже при неполной обработке"
+                  : "";
+              } else {
+                generateXmlBtn.disabled = true;
+                generateXmlBtn.style.opacity = "0.6";
+                generateXmlBtn.style.cursor = "not-allowed";
+                generateXmlBtn.title = "Кнопка доступна после обработки 100% файлов";
+              }
+            };
+
+            updateXmlButtonState();
+            if (allowPartialXml) {
+              allowPartialXml.addEventListener("change", updateXmlButtonState);
+            }
+
             generateXmlBtn.addEventListener("click", async function() {
             const btn = this;
             const originalText = btn.textContent;
+
+            if (!canGenerateXml && !(allowPartialXml && allowPartialXml.checked)) {
+              alert("XML доступен после обработки 100% файлов. Включите чек-бокс, если хотите сгенерировать XML раньше.");
+              return;
+            }
             
             // Блокируем кнопку и показываем процесс
             btn.disabled = true;

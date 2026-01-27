@@ -107,6 +107,7 @@ def extract_metadata_with_gpt(
     cache_dir: Optional[Path] = None,
     use_prompts_module: Optional[bool] = None,
     use_cache: Optional[bool] = None,
+    raw_prompt: bool = False,
     config: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
@@ -184,8 +185,11 @@ def extract_metadata_with_gpt(
             "Установите переменную окружения OPENAI_API_KEY или укажите ключ в config.json (gpt_extraction.api_key)"
         )
     
-    # Создаем промпт
-    prompt = create_extraction_prompt(text, use_prompts_module=use_prompts_module)
+    # Создаем промпт (если raw_prompt=True, используем текст как есть)
+    if raw_prompt:
+        prompt = text
+    else:
+        prompt = create_extraction_prompt(text, use_prompts_module=use_prompts_module)
     
     # Хэшируем промпт для кэширования
     prompt_hash = hash_prompt(prompt)

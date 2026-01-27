@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import re
+import os
+import time
 from pathlib import Path
 from html import unescape
 
@@ -747,6 +749,16 @@ def register_markup_routes(app, ctx):
             if max_chunk_chars <= 1000:
                 max_chunk_chars = 8000
 
+            # Railway: более строгие лимиты - уменьшаем чанки
+            if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
+                chunk_size = min(chunk_size, 5)
+                max_chunk_chars = min(max_chunk_chars, 3000)
+                current_app.logger.info(
+                    "SYSTEM references ai railway limits chunk_size=%s max_chunk_chars=%s",
+                    chunk_size,
+                    max_chunk_chars,
+                )
+
             def _chunk_references(text: str) -> list[str]:
                 lines = [line.strip() for line in text.splitlines() if line.strip()]
                 if len(lines) >= 2:
@@ -835,21 +847,38 @@ def register_markup_routes(app, ctx):
                     for i in range(0, len(lines), target)
                 ]
 
-            def _run_chunk(chunk_text: str, chunk_index: int) -> list[str]:
+            def _run_chunk(chunk_text: str, chunk_index: int, retry_count: int = 0) -> list[str]:
                 current_app.logger.info(
-                    "SYSTEM references ai chunk start field=%s chunk=%s size=%s model=%s",
+                    "SYSTEM references ai chunk start field=%s chunk=%s size=%s model=%s retry=%s",
                     field_id,
                     chunk_index,
                     len(chunk_text),
                     model,
+                    retry_count,
                 )
                 prompt = _build_prompt(base_prompt, chunk_text)
+
+                # Быстрая оценка размера промпта (токены ~ символы/4)
+                estimated_tokens = max(1, len(prompt) // 4)
+                current_app.logger.info(
+                    "SYSTEM references ai prompt size chars=%s est_tokens=%s",
+                    len(prompt),
+                    estimated_tokens,
+                )
+
+                # Если слишком большой, просим внешний разбиение
+                if estimated_tokens > 15000:
+                    raise Exception("Prompt too large; needs splitting")
+
+                # На повторах чуть уменьшаем температуру
+                temp = max(0.1, 0.3 - (retry_count * 0.1))
                 result = extract_metadata_with_gpt(
                     prompt,
                     model=model,
-                    temperature=0.3,
+                    temperature=temp,
                     api_key=api_key,
-                    config=config
+                    raw_prompt=True,
+                    config=config,
                 )
 
                 # Извлекаем нормализованный список
@@ -900,7 +929,7 @@ def register_markup_routes(app, ctx):
 
                 for sub_idx, sub in enumerate(sub_chunks, start=1):
                     try:
-                        refs = _run_chunk(sub, idx)
+                        refs = _run_chunk(sub, idx, retry_count=0)
                         all_references.extend(refs)
                     except Exception as exc:
                         if _looks_like_token_error(exc):
@@ -912,10 +941,14 @@ def register_markup_routes(app, ctx):
                             )
                             smaller = _split_lines_further(sub, max(3, chunk_size // 3))
                             for sub2 in smaller:
-                                refs2 = _run_chunk(sub2, idx)
+                                refs2 = _run_chunk(sub2, idx, retry_count=1)
                                 all_references.extend(refs2)
                         else:
                             raise
+
+                # Небольшая пауза на Railway, чтобы избегать rate-limit
+                if os.getenv("RAILWAY_ENVIRONMENT") or os.getenv("RAILWAY_PROJECT_ID"):
+                    time.sleep(1)
 
             # Объединяем в строку с переносами
             normalized_text = "\n".join(all_references)

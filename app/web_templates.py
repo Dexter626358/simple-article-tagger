@@ -3601,10 +3601,8 @@ function closeAnnotationModal() {
           };
           const archiveReady = !!window.currentArchive;
           const status = window.archiveStatus || "idle";
-          const runtimeTotal = Number(window.archiveTotal || 0);
-          const runtimeProcessed = Number(window.archiveProcessed || 0);
-          const step2Done = (status === "done") || (total > 0 && processedTotal === total);
-          const step2Active = archiveReady && !step2Done && (status === "running" || runtimeProcessed > 0 || total > 0);
+          const step2Done = total > 0 && processedTotal === total;
+          const step2Active = archiveReady && !step2Done;
           const xmlKey = window.currentArchive ? `xml_done_${window.currentArchive}` : null;
           const xmlDone = xmlKey ? sessionStorage.getItem(xmlKey) === "1" : false;
 
@@ -5849,6 +5847,15 @@ function splitReferences(text) {
   return refs;
 }
 
+function splitReferencesStrict(text) {
+  const cleaned = normalizeReferenceWhitespace(text);
+  if (!cleaned.trim()) return [];
+  return cleaned
+    .split("\n")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function ensureAnnotationSymbolsData() {
   if (window.__annotationSymbolsData) return;
   window.__annotationSymbolsData = [
@@ -6380,7 +6387,8 @@ function viewReferences(fieldId, title) {
   
   currentRefsFieldId = fieldId;
   
-  const refs = splitReferences(field.value);
+  const useStrictSplit = field.dataset && field.dataset.aiProcessed === "1";
+  const refs = useStrictSplit ? splitReferencesStrict(field.value) : splitReferences(field.value);
   if (refs.length === 0) {
     alert("References list is empty");
     return;
@@ -6636,6 +6644,7 @@ async function processReferencesWithAI(fieldId) {
     const data = await response.json();
     
     if (data.success) {
+      field.dataset.aiProcessed = "1";
       field.value = data.text;
       // Обновляем счетчик
       if (window.updateReferencesCount) {
@@ -8091,8 +8100,11 @@ function collectAuthorsData() {
     countEl.textContent = `Количество организаций: ${count}`;
   };
 
-  window.countReferences = function(text) {
+  window.countReferences = function(text, strict) {
     if (!text || !text.trim()) return 0;
+    if (strict && typeof splitReferencesStrict === "function") {
+      return splitReferencesStrict(text).length;
+    }
     if (typeof splitReferences === "function") {
       return splitReferences(text).length;
     }
@@ -8107,7 +8119,8 @@ function collectAuthorsData() {
     const countEl = document.getElementById(fieldId + "-count");
     if (!field || !countEl) return;
     
-    const count = window.countReferences(field.value);
+    const useStrict = field.dataset && field.dataset.aiProcessed === "1";
+    const count = window.countReferences(field.value, useStrict);
     countEl.textContent = `Количество источников: ${count}`;
   };
 
@@ -8723,13 +8736,19 @@ function collectAuthorsData() {
     if (referencesRuField) {
       if (window.updateReferencesCount) {
         window.updateReferencesCount("references_ru");
-        referencesRuField.addEventListener("input", () => window.updateReferencesCount("references_ru"));
+        referencesRuField.addEventListener("input", () => {
+          referencesRuField.dataset.aiProcessed = "";
+          window.updateReferencesCount("references_ru");
+        });
       }
     }
     if (referencesEnField) {
       if (window.updateReferencesCount) {
         window.updateReferencesCount("references_en");
-        referencesEnField.addEventListener("input", () => window.updateReferencesCount("references_en"));
+        referencesEnField.addEventListener("input", () => {
+          referencesEnField.dataset.aiProcessed = "";
+          window.updateReferencesCount("references_en");
+        });
       }
     }
     

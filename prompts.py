@@ -261,109 +261,107 @@ Return only valid JSON without additional comments or explanations. """
 
     # Промпт для форматирования списка литературы (исправление ошибок OCR)
     REFERENCES_FORMATTING_RUS = """
-IMPORTANT: Join broken lines within a single reference, including DOI/URL split by spaces or line breaks (e.g., "10.31857/ S0301179824020035" -> "10.31857/S0301179824020035").
+Ты — механизм нормализации текста для библиографических ссылок, извлечённых из PDF.
 
-Задание:
+ЗАДАЧА:
+Нормализовать оформление библиографических записей, сохраняя ВСЕ данные без изменений.
 
-Перед тобой — список литературы, полученный с помощью распознавания текста (OCR). В нем уже выверено содержание и порядок источников, но есть технические ошибки форматирования: разрывы слов и инициалов пробелами, лишние пробелы, ошибки переноса, а также нарушение единообразия в оформлении.
-Твоя задача — привести список к аккуратному, читабельному виду для публикации на сайте, не внося никаких изменений в библиографическую информацию, а только исправив форматирование.
+СТРОГИЕ ПРАВИЛА:
 
-Правила:
+1. ЗАПРЕЩЕНО:
+- добавлять какие-либо символы или данные;
+- удалять какие-либо символы или данные;
+- исправлять орфографию имён, названий, журналов, годов, томов, выпусков, страниц;
+- переводить текст;
+- менять порядок элементов внутри записи;
+- интерпретировать или «улучшать» содержание.
 
-1. Убери лишние пробелы внутри слов, фамилий, инициалов и между ними (например, "Ве с е л о в а И . С ." → "Веселова И. С.").
+2. РАЗРЕШЕНО ТОЛЬКО:
+- убирать разрывы строк внутри одной записи;
+- убирать лишние пробелы;
+- убирать переносы слов, вызванные разрывами строк;
+- объединять фрагменты одной записи в одну строку.
 
-2. Убери разрывы строк внутри одной записи (одна публикация — одна строка).
+3. ФОРМАТ ВЫВОДА:
+- каждая запись — ОДНА строка;
+- БЕЗ нумерации (удали «1.», «2.» и т.п.);
+- сохраняй исходную пунктуацию и разделители (//, ., :, №, V., P. и т.п.);
+- верни результат ТОЛЬКО в JSON-формате: {"references": ["запись 1", "запись 2", ...]};
+- никаких дополнительных комментариев или текста;
+- для верхних/нижних индексов используй <sup>/<sub>.
 
-3. Исправь переносы внутри слов (например, "му- зыкальной" → "музыкальной").
+4. ЦЕЛОСТНОСТЬ ДАННЫХ:
+все символы из входа должны присутствовать в выходе, кроме:
+  * символов разрыва строк,
+  * лишних пробелов,
+  * переносов, возникших из-за разрыва строк.
 
-4. Приведи оформление к единообразному стилю (например, кавычки, тире, точки и запятые, если они отличаются).
+5. ЗАПРЕЩЕНО:
+- сводки;
+- объяснения;
+- комментарии;
+- метаданные;
+- заголовки.
 
-5. Для верхних/нижних индексов используй <sup>/<sub>.
+Ты должен работать как механический обработчик текста, а не как редактор.
 
-6. Не изменяй суть и порядок библиографических описаний.
+ВХОД:
+[сырой текст списка литературы из PDF]
 
-7. Не добавляй и не убирай элементы описания.
-
-8. В конце каждого описания ставь точку, если это соответствует принятому стандарту.
-
-9. Выводи результат как аккуратно отформатированный, удобочитаемый список для сайта.
-
-10. **ВАЖНО: Удали строки, которые НЕ являются библиографическими источниками:**
-   - Заголовки журналов (например, "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
-   - Номера выпусков и страниц без авторов (например, "no. 6 2025 52")
-   - Служебные строки с фамилиями без полного описания (например, "ВОРОНИН и др. / VORONIN et al.")
-   - Строки, содержащие только название журнала, номер, год или страницы без автора и названия публикации
-   - Строки, которые явно являются частью оглавления или служебной информации, а не библиографической записью
-
-11. Верни результат в формате JSON: {"references": ["запись 1", "запись 2", ...]}
-
-Пример входных данных (с примерами строк, которые нужно удалить):
-
-IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS no. 6 2025 52 ВОРОНИН и др. / VORONIN et al.
-1. Ве с е л о в а И . С . Жесты публичной лаудации: доступы к благу // Комплекс Чебурашки, или Общество послушания: Сб. статей. СПб.: Пропповский центр, 2012. C. 11–49.
-2. До р о хо в а Е . А . Фольклорная комиссия Союза композиторов России и изучение традиционной му- зыкальной культуры Русского Севера // Рябининские чтения. Петрозаводск: Музей-заповедник «Кижи», 2007. С. 290–292.
-
-Пример ожидаемого результата (служебные строки удалены):
-
-1. Веселова И. С. Жесты публичной лаудации: доступы к благу // Комплекс Чебурашки, или Общество послушания: Сб. статей. СПб.: Пропповский центр, 2012. С. 11–49.
-2. Дорохова Е. А. Фольклорная комиссия Союза композиторов России и изучение традиционной музыкальной культуры Русского Севера // Рябининские чтения. Петрозаводск: Музей-заповедник «Кижи», 2007. С. 290–292.
-
-Выполни форматирование для всего приведенного ниже списка литературы:
-
-{references_text}
-
-Верни только валидный JSON без дополнительных комментариев.
+ВЫХОД:
+валидный JSON вида {"references": ["запись 1", "запись 2", ...]}
 """
 
     REFERENCES_FORMATTING_ENG = """
-Task:
+You are a text normalization engine for bibliographic references extracted from PDF files.
 
-You are given a bibliography list generated via OCR. The content is already checked for accuracy, but there are technical formatting issues: words and initials are split by spaces, there are extra spaces, line breaks, hyphenated word splits, and inconsistencies in punctuation.
-Your task is to correct only the formatting and output a clean, consistent, web-friendly bibliography list.
+TASK:
+Normalize the formatting of bibliographic entries while preserving ALL bibliographic data exactly.
 
-Instructions:
+STRICT RULES:
 
-1. Remove extra spaces inside words, surnames, and initials.
+1. DO NOT:
+- add any characters or data;
+- remove any characters or data;
+- change spelling of names, titles, journals, years, volumes, issues, pages;
+- translate text;
+- reorder elements inside a reference;
+- interpret or correct content.
 
-2. Merge any split lines belonging to the same reference.
-   - Join broken DOI/URL fragments split by spaces or line breaks (e.g., "10.31857/ S0301179824020035" -> "10.31857/S0301179824020035").
+2. YOU MAY ONLY:
+- remove line breaks inside a single reference;
+- remove extra spaces;
+- remove hyphenation caused by line breaks;
+- merge fragmented parts of one reference into one line.
 
+3. OUTPUT FORMAT:
+- each bibliographic entry must be on ONE line;
+- NO numbering (remove "1.", "2.", etc.);
+- preserve original punctuation and separators (//, ., :, №, V., P., etc.);
+- return ONLY valid JSON: {"references": ["entry 1", "entry 2", ...]};
+- no additional comments or text;
+- use <sup>/<sub> for superscripts/subscripts.
 
-3. Restore hyphenated words to their correct form.
+4. DATA INTEGRITY:
+- all characters from the input must be present in the output, except:
+  * line break characters,
+  * extra spaces,
+  * hyphenation caused by line breaks.
 
-4. Standardize punctuation, quotation marks, dashes, and dots according to standard bibliographic style.
+5. FORBIDDEN:
+- summaries,
+- explanations,
+- comments,
+- metadata,
+- headings.
 
-5. Use <sup>/<sub> for superscripts/subscripts.
+You must behave as a mechanical text processor, not as an editor.
 
-6. Do not change the actual content or order of the references.
+INPUT:
+[raw PDF-extracted references]
 
-7. Do not add or remove any bibliographic elements.
-
-8. Output each reference as a single clean line, with proper punctuation at the end (as appropriate).
-
-9. **IMPORTANT: Remove lines that are NOT bibliographic references:**
-   - Journal titles/headers (e.g., "IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS")
-   - Issue numbers and pages without authors (e.g., "no. 6 2025 52")
-   - Service lines with surnames without full description (e.g., "VORONIN et al.")
-   - Lines containing only journal name, issue number, year, or pages without author and publication title
-   - Lines that are clearly part of table of contents or service information, not bibliographic entries
-
-10. Return result in JSON format: {"references": ["entry 1", "entry 2", ...]}
-
-Example input (with lines to be removed):
-
-IZVESTIYA RAN. ENERGETIKA / BULLETIN OF THE RAS. ENERGETICS no. 6 2025 52 VORONIN et al.
-1. V e s e l o v a , I . S . Gestures of public laudation: access to the good. The Cheburashka complex, or the Obedience Society: Collection of articles. St. Petersburg, 2012. P. 11–49. (In Russ.)
-
-Expected output (service lines removed):
-
-1. Veselova, I. S. Gestures of public laudation: access to the good. The Cheburashka complex, or the Obedience Society: Collection of articles. St. Petersburg, 2012. P. 11–49. (In Russ.)
-
-Format the following bibliography list:
-
-{references_text}
-
-Return only valid JSON without additional comments.
+OUTPUT:
+valid JSON like {"references": ["entry 1", "entry 2", ...]}
 """
 
     @classmethod

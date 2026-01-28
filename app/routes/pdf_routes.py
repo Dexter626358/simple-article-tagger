@@ -843,6 +843,59 @@ class PDFTextExtractor:
 
         return self._create_result(field_id, page_num, bbox, text)
 
+    def _snap_bbox_to_line(self, page, bbox: BBox) -> Optional[BBox]:
+        """Пытается расширить выделение до границ одной текстовой строки."""
+        try:
+            try:
+                words = page.extract_words(x_tolerance=2.0, y_tolerance=3.0, keep_blank_chars=False)
+            except TypeError:
+                words = page.extract_words()
+        except Exception:
+            words = []
+
+        if not words:
+            return None
+
+        line_tol = max(1.0, float(self.options.line_tolerance))
+        lines: list[dict[str, float]] = []
+        for w in sorted(words, key=lambda item: (round(item["top"] / line_tol), item["x0"])):
+            if not lines or abs(w["top"] - lines[-1]["top"]) > line_tol:
+                lines.append({
+                    "top": w["top"],
+                    "bottom": w["bottom"],
+                    "x0": w["x0"],
+                    "x1": w["x1"],
+                })
+            else:
+                line = lines[-1]
+                line["top"] = min(line["top"], w["top"])
+                line["bottom"] = max(line["bottom"], w["bottom"])
+                line["x0"] = min(line["x0"], w["x0"])
+                line["x1"] = max(line["x1"], w["x1"])
+
+        center_y = (bbox.y1 + bbox.y2) / 2
+        best_line = None
+        best_score = None
+        for line in lines:
+            line_center = (line["top"] + line["bottom"]) / 2
+            if abs(line_center - center_y) > line_tol * 3:
+                continue
+            overlap = max(0.0, min(line["bottom"], bbox.y2) - max(line["top"], bbox.y1))
+            score = (-overlap, abs(line_center - center_y))
+            if best_score is None or score < best_score:
+                best_score = score
+                best_line = line
+
+        if not best_line:
+            return None
+
+        return BBox(
+            x1=float(best_line["x0"]),
+            y1=float(best_line["top"]),
+            x2=float(best_line["x1"]),
+            y2=float(best_line["bottom"]),
+        )
+
     def _get_target_language(self, field_id: Optional[str]) -> Language:
         """Определяет целевой язык для поля."""
         if not field_id:
@@ -902,6 +955,11 @@ class PDFTextExtractor:
         )
 
         bbox = bbox.normalize()
+        bbox_height = bbox.y2 - bbox.y1
+        if field_id in {"references_ru", "references_en"} and bbox_height <= max(18.0, self.options.line_tolerance * 4):
+            snapped = self._snap_bbox_to_line(page, bbox)
+            if snapped and snapped.is_valid():
+                bbox = snapped
         bbox = bbox.add_padding(self.options.padding_x, self.options.padding_y, page.width, page.height)
         return bbox
 

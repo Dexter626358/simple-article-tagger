@@ -21,6 +21,42 @@ from app.app_dependencies import (
 
 SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html", ".tex"}
 
+def _load_word_to_html_config(config: Optional[Dict]) -> Dict:
+    if isinstance(config, dict):
+        return config.get("word_to_html", {}) or {}
+    try:
+        base_dir = Path(__file__).resolve().parents[1]
+        config_path = base_dir / "config.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                loaded = json.load(f)
+            if isinstance(loaded, dict):
+                return loaded.get("word_to_html", {}) or {}
+    except Exception:
+        return {}
+    return {}
+
+
+def _resolve_style_map(style_map_value: object) -> Optional[str]:
+    if not style_map_value:
+        return None
+    if isinstance(style_map_value, list):
+        items = [str(item).strip() for item in style_map_value if str(item).strip()]
+        return "\n".join(items) if items else None
+    if isinstance(style_map_value, str):
+        raw = style_map_value.strip()
+        if not raw:
+            return None
+        base_dir = Path(__file__).resolve().parents[1]
+        for candidate in (Path(raw), base_dir / raw):
+            if candidate.exists() and candidate.is_file():
+                try:
+                    return candidate.read_text(encoding="utf-8")
+                except Exception:
+                    pass
+        return raw
+    return None
+
 def is_json_processed(json_path: Path) -> bool:
     """
     Проверяет, обработан ли JSON файл через веб-интерфейс.
@@ -733,12 +769,17 @@ def convert_file_to_html(
         raise RuntimeError("word_to_html недоступен")
     
     try:
+        word_cfg = _load_word_to_html_config(config)
+        style_map_text = _resolve_style_map(word_cfg.get("style_map"))
+        include_default_style_map = bool(word_cfg.get("include_default_style_map", True))
+        include_metadata = bool(word_cfg.get("include_metadata", False))
+
         html_body, warnings = convert_to_html(
             file_path,
-            style_map_text=None,
-            include_default_style_map=True,
+            style_map_text=style_map_text,
+            include_default_style_map=include_default_style_map,
             use_word_reader=use_word_reader,
-            include_metadata=False,
+            include_metadata=include_metadata,
         )
         
         # Объединяем параграфы с DOI/URL с предыдущими

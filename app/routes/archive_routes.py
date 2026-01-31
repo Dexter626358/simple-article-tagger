@@ -303,6 +303,16 @@ def register_archive_routes(app, ctx):
             xml_output_dir=xml_output_dir
         )
         removed_old = cleanup_old_archives(archive_root_dir, retention_days)
+
+        # Reset current archive state so UI can start a new issue
+        last_archive["name"] = None
+        if progress_state is not None:
+            with progress_lock:
+                progress_state["status"] = "idle"
+                progress_state["processed"] = 0
+                progress_state["total"] = 0
+                progress_state["message"] = ""
+                progress_state["archive"] = None
         
         return jsonify({
             "success": True,

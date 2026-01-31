@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional, Iterable
@@ -38,17 +39,63 @@ def escape(s: object) -> str:
     """Безопасное HTML-экранирование (включая None)."""
     return _html.escape(str(s or ""), quote=True)
 
+_TABLE_TAG_RE = re.compile(r"<table(?P<attrs>[^>]*)>", re.IGNORECASE)
+
+def _postprocess_tables(html_content: str) -> str:
+    if "<table" not in html_content.lower():
+        return html_content
+
+    def _inject_table_class(match: re.Match[str]) -> str:
+        attrs = match.group("attrs") or ""
+        class_match = re.search(r'class="([^"]*)"', attrs, flags=re.IGNORECASE)
+        if class_match:
+            classes = class_match.group(1)
+            if "docx-table" in classes.split():
+                return match.group(0)
+            new_classes = f"{classes} docx-table".strip()
+            new_attrs = re.sub(
+                r'class="([^"]*)"',
+                f'class="{new_classes}"',
+                attrs,
+                flags=re.IGNORECASE,
+            )
+            return f"<table{new_attrs}>"
+        return f'<table class="docx-table"{attrs}>'
+
+    html_content = _TABLE_TAG_RE.sub(_inject_table_class, html_content)
+    html_content = re.sub(
+        r"(?i)<table\\b",
+        '<div class="table-wrap"><table',
+        html_content,
+    )
+    html_content = re.sub(
+        r"(?i)</table>",
+        "</table></div>",
+        html_content,
+    )
+    return html_content
+
 
 DEFAULT_STYLE_MAP: list[str] = [
+    "p[style-name='Title'] => h1.title:fresh",
+    "p[style-name='Subtitle'] => h2.subtitle:fresh",
     "p[style-name='Heading 1'] => h1:fresh",
     "p[style-name='Heading 2'] => h2:fresh",
     "p[style-name='Heading 3'] => h3:fresh",
     "p[style-name='Heading 4'] => h4:fresh",
     "p[style-name='Heading 5'] => h5:fresh",
     "p[style-name='Heading 6'] => h6:fresh",
+    "p[style-name='List Paragraph'] => p.list-paragraph",
+    "p[style-name='Caption'] => p.caption",
     "r[style-name='Strong'] => strong",
+    "r[style-name='Emphasis'] => em",
+    "r[style-name='Underline'] => span.underline",
+    "r[style-name='Small Caps'] => span.small-caps",
+    "r[style-name='Subscript'] => sub",
+    "r[style-name='Superscript'] => sup",
+    "r[style-name='Code'] => code",
     "p[style-name='Quote'] => blockquote > p:fresh",
-    "p[style-name='Intense Quote'] => blockquote > p:fresh",
+    "p[style-name='Intense Quote'] => blockquote.intense > p:fresh",
 ]
 
 
@@ -81,7 +128,12 @@ def convert_docx_to_html(
     convert_options = {}
 
     if style_map_text:
-        convert_options["style_map"] = _normalize_style_map(style_map_text)
+        normalized = _normalize_style_map(style_map_text)
+        if include_default_style_map:
+            default_map = "\n".join(DEFAULT_STYLE_MAP)
+            convert_options["style_map"] = f"{default_map}\n{normalized}" if normalized else default_map
+        else:
+            convert_options["style_map"] = normalized
     elif include_default_style_map:
         convert_options["style_map"] = "\n".join(DEFAULT_STYLE_MAP)
 
@@ -95,7 +147,7 @@ def convert_docx_to_html(
     messages = result.messages or []
     # mammoth обычно даёт list[dict], но пользователю проще list[str]
     warnings = [str(m) for m in messages] if isinstance(messages, list) else [str(messages)]
-    return html_content, warnings
+    return _postprocess_tables(html_content), warnings
 
 
 def blocks_to_html(blocks: Iterable[object], include_metadata: bool = False) -> str:
@@ -211,6 +263,10 @@ def create_full_html_page(html_body: str, title: str = "Документ", css: 
          max-width: 900px; margin: 0 auto; padding: 20px; color: #333; background: #fff; }
   p { margin: 1em 0; text-align: justify; }
   blockquote { border-left: 4px solid #3498db; margin: 1em 0; padding-left: 1em; color: #555; font-style: italic; }
+  .table-wrap { overflow-x: auto; }
+  table.docx-table { width: 100%; border-collapse: collapse; margin: 1em 0; font-size: 0.95em; }
+  table.docx-table th, table.docx-table td { border: 1px solid #d9dbe2; padding: 6px 8px; vertical-align: top; }
+  table.docx-table thead th { background: #f2f4f8; font-weight: 600; }
 </style>
 """
     return f"""<!DOCTYPE html>

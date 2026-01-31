@@ -398,6 +398,9 @@ HTML_TEMPLATE = """
     .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
     .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
     .refs-modal-content{overflow-y:auto;}
+    .refs-modal-content,
+    .refs-modal-content .ref-text,
+    .refs-modal-content .ref-text[contenteditable="true"]{font-family:"Segoe UI","Segoe UI Symbol","Arial Unicode MS",Arial,sans-serif;}
     .annotation-modal-content{height:80vh;min-height:0;}
     .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
@@ -406,8 +409,8 @@ HTML_TEMPLATE = """
     .refs-list{margin:0;padding:0;}
     .ref-item{background:#f8f9fa;border-left:4px solid #2196f3;padding:15px;margin-bottom:10px;border-radius:4px;line-height:1.6;position:relative;}
     .ref-number{display:inline-block;width:30px;font-weight:600;color:#2196f3;vertical-align:top;}
-    .ref-text{margin-left:35px;color:#333;min-height:20px;}
-    .ref-text[contenteditable="true"]{outline:2px solid #2196f3;outline-offset:2px;padding:8px;border-radius:4px;background:#fff;cursor:text;}
+    .ref-text{margin-left:35px;color:#333;min-height:24px;line-height:1.7;padding:3px 0;display:block;overflow:visible;}
+    .ref-text[contenteditable="true"]{outline:2px solid #2196f3;outline-offset:2px;padding:8px 10px 10px;border-radius:4px;background:#fff;cursor:text;line-height:1.7;overflow:visible;}
     .ref-text[contenteditable="true"]:focus{background:#fff;box-shadow:0 0 0 3px rgba(33,150,243,0.2);}
     .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:20px;border-top:2px solid #e0e0e0;}
     .modal-btn{padding:10px 20px;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;transition:all .2s;}
@@ -677,6 +680,11 @@ HTML_TEMPLATE = """
     .btn-primary:hover {
       background: #5a52ea;
     }
+    .btn.is-disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      pointer-events: auto;
+    }
     .btn-secondary {
       background: #2f3342;
       color: #e6e8ee;
@@ -764,7 +772,7 @@ HTML_TEMPLATE = """
           </ul>
         </details>
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
-          <button type="button" id="processArchiveBtn" class="btn btn-primary" disabled>Обработать выпуск</button>
+          <button type="button" id="processArchiveBtn" class="btn btn-primary">Обработать выпуск с помощью ИИ</button>
           <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
             <div id="archiveProgressFill" class="progress-bar-fill"></div>
           </div>
@@ -1138,12 +1146,15 @@ HTML_TEMPLATE = """
                 setTimeout(() => {
                   notification.remove();
                 }, 1000);
-                // Помечаем XML как сгенерированные для текущего выпуска
+                // Сбрасываем состояние выпуска, чтобы можно было загрузить новый архив
                 const currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
                 if (currentArchive) {
-                  sessionStorage.setItem(`xml_done_${currentArchive}`, "1");
+                  sessionStorage.removeItem(`xml_done_${currentArchive}`);
                 }
-                // Переходим к скачанным XML
+                sessionStorage.removeItem("lastArchiveName");
+                sessionStorage.removeItem("archive_done_reloaded");
+                window.currentArchive = null;
+                // Переходим к начальному состоянию
                 window.location.reload();
               } else {
                 btn.textContent = "❌ Ошибка";
@@ -3636,6 +3647,10 @@ function closeAnnotationModal() {
               sessionStorage.removeItem(`xml_done_${data.archive}`);
             }
           } else if (!window.currentArchive) {
+              updateArchiveUi({ status: "idle", archive: null });
+              alert("??????? ????????? ????? ???????, ????? ??????? ?????????.");
+              return;
+            }
             const cachedArchive = sessionStorage.getItem("lastArchiveName");
             if (cachedArchive) {
               window.currentArchive = cachedArchive;
@@ -3643,7 +3658,9 @@ function closeAnnotationModal() {
           }
           updateSteps();
           if (processArchiveBtn) {
-            processArchiveBtn.disabled = !window.currentArchive || status === "running";
+            const disabled = !window.currentArchive || status === "running";
+            processArchiveBtn.classList.toggle("is-disabled", disabled);
+            processArchiveBtn.setAttribute("aria-disabled", disabled ? "true" : "false");
           }
           if (!archiveProgress) return;
           if (archiveProgressFill) {
@@ -3722,10 +3739,27 @@ function closeAnnotationModal() {
         };
         fetchArchiveStatus();
 
+        if (!window.toast) {
+          window.toast = function(message) {
+            const notification = document.createElement("div");
+            notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            setTimeout(() => {
+              notification.remove();
+            }, 2000);
+          };
+        }
+
         if (processArchiveBtn) {
           processArchiveBtn.addEventListener("click", async () => {
             if (!window.currentArchive) {
               updateArchiveUi({ status: "idle", archive: null });
+              window.toast("Сначала загрузите архив выпуска, затем нажмите обработку.");
+              return;
+            }
+            if (processArchiveBtn.classList.contains("is-disabled")) {
+              window.toast("Подождите завершения текущей обработки.");
               return;
             }
             if (archiveProgress) {
@@ -5018,6 +5052,35 @@ VIEWER_TEMPLATE = """
       margin-bottom: 0.5em;
       color: #2c3e50;
     }
+    .viewer-content ul,
+    .viewer-content ol {
+      margin: 0.8em 0 0.8em 1.6em;
+    }
+    .viewer-content li {
+      margin: 0.3em 0;
+    }
+    .viewer-content .table-wrap {
+      overflow-x: auto;
+    }
+    .viewer-content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1em 0;
+      font-size: 0.95em;
+    }
+    .viewer-content table.docx-table {
+      min-width: 100%;
+    }
+    .viewer-content th,
+    .viewer-content td {
+      border: 1px solid #d9dbe2;
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+    .viewer-content thead th {
+      background: #f2f4f8;
+      font-weight: 600;
+    }
     .viewer-content sup {
       font-size: 0.7em;
       vertical-align: super;
@@ -5031,6 +5094,27 @@ VIEWER_TEMPLATE = """
     }
     .viewer-content strong {
       font-weight: 600;
+    }
+    .viewer-content .underline {
+      text-decoration: underline;
+    }
+    .viewer-content .small-caps {
+      font-variant: small-caps;
+      letter-spacing: 0.02em;
+    }
+    .viewer-content .caption {
+      color: #5c6370;
+      font-size: 0.9em;
+    }
+    .viewer-content .list-paragraph {
+      margin-left: 1.2em;
+    }
+    .viewer-content code {
+      font-family: Consolas, Monaco, monospace;
+      background: #f4f6f8;
+      border: 1px solid #e2e6ee;
+      border-radius: 3px;
+      padding: 0 4px;
     }
     .viewer-pdf {
       padding: 30px;
@@ -5171,6 +5255,9 @@ MARKUP_TEMPLATE = r"""
     .modal.active{display:flex;align-items:center;justify-content:center;}
     .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;}
     .refs-modal-content{overflow-y:auto;}
+    .refs-modal-content,
+    .refs-modal-content .ref-text,
+    .refs-modal-content .ref-text[contenteditable="true"]{font-family:"Segoe UI","Segoe UI Symbol","Arial Unicode MS",Arial,sans-serif;}
     .annotation-modal-content{height:80vh;min-height:0;}
     .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
@@ -5179,8 +5266,8 @@ MARKUP_TEMPLATE = r"""
     .refs-list{margin:0;padding:0;}
     .ref-item{background:#f8f9fa;border-left:4px solid #2196f3;padding:15px;margin-bottom:10px;border-radius:4px;line-height:1.6;position:relative;}
     .ref-number{display:inline-block;width:30px;font-weight:600;color:#2196f3;vertical-align:top;}
-    .ref-text{margin-left:35px;color:#333;min-height:20px;}
-    .ref-text[contenteditable="true"]{outline:2px solid #2196f3;outline-offset:2px;padding:8px;border-radius:4px;background:#fff;cursor:text;}
+    .ref-text{margin-left:35px;color:#333;min-height:24px;line-height:1.7;padding:3px 0;display:block;overflow:visible;}
+    .ref-text[contenteditable="true"]{outline:2px solid #2196f3;outline-offset:2px;padding:8px 10px 10px;border-radius:4px;background:#fff;cursor:text;line-height:1.7;overflow:visible;}
     .ref-text[contenteditable="true"]:focus{background:#fff;box-shadow:0 0 0 3px rgba(33,150,243,0.2);}
     .modal-footer{display:flex;justify-content:flex-end;gap:10px;margin-top:20px;padding-top:20px;border-top:2px solid #e0e0e0;}
     .modal-btn{padding:10px 20px;border:none;border-radius:4px;cursor:pointer;font-size:14px;font-weight:600;transition:all .2s;}
@@ -7814,7 +7901,13 @@ function collectAuthorsData() {
     return match ? match[1] : null;
   }
 
-  function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
+  const AUTO_EXTRACT_AUTHOR_CODES = false;
+
+function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
+    if (!AUTO_EXTRACT_AUTHOR_CODES) {
+      return;
+    }
+
     // Автоматически извлекает все доступные данные автора из строки и заполняет соответствующие поля
     // Это полезно, когда в одной строке содержится несколько данных (SPIN, email, AuthorID и т.д.)
     // skipField - поле, которое уже заполнено и не нужно извлекать повторно
@@ -7822,7 +7915,7 @@ function collectAuthorsData() {
     // Небольшая задержка, чтобы убедиться, что основное поле уже заполнено
     setTimeout(() => {
       // Извлекаем email, если он еще не заполнен и это не то поле, которое мы только что заполнили
-      if (skipField !== "email") {
+      if (!skip.has("email")) {
         const emailField = $(`.author-input[data-field="email"][data-lang="RUS"][data-index="${authorIndex}"]`);
         if (emailField) {
           const currentValue = emailField.value.trim();
@@ -7842,7 +7935,7 @@ function collectAuthorsData() {
       }
       
       // Извлекаем SPIN, если он еще не заполнен и это не то поле, которое мы только что заполнили
-      if (skipField !== "spin") {
+      if (!skip.has("spin")) {
         const spinField = $(`.author-input[data-field="spin"][data-lang="CODES"][data-index="${authorIndex}"]`);
         if (spinField) {
           const currentValue = spinField.value.trim();
@@ -7857,7 +7950,7 @@ function collectAuthorsData() {
       }
       
       // Извлекаем ORCID, если он еще не заполнен и это не то поле, которое мы только что заполнили
-      if (skipField !== "orcid") {
+      if (!skip.has("orcid")) {
         const orcidField = $(`.author-input[data-field="orcid"][data-lang="CODES"][data-index="${authorIndex}"]`);
         if (orcidField) {
           const currentValue = orcidField.value.trim();
@@ -7872,7 +7965,7 @@ function collectAuthorsData() {
       }
       
       // Извлекаем Scopus ID, если он еще не заполнен и это не то поле, которое мы только что заполнили
-      if (skipField !== "scopusid") {
+      if (!skip.has("scopusid")) {
         const scopusField = $(`.author-input[data-field="scopusid"][data-lang="CODES"][data-index="${authorIndex}"]`);
         if (scopusField) {
           const currentValue = scopusField.value.trim();
@@ -7887,7 +7980,7 @@ function collectAuthorsData() {
       }
       
       // Извлекаем Researcher ID, если он еще не заполнен и это не то поле, которое мы только что заполнили
-      if (skipField !== "researcherid") {
+      if (!skip.has("researcherid")) {
         const researcherField = $(`.author-input[data-field="researcherid"][data-lang="CODES"][data-index="${authorIndex}"]`);
         if (researcherField) {
           const currentValue = researcherField.value.trim();
@@ -8021,16 +8114,20 @@ function collectAuthorsData() {
 
   function extractUDC(text) {
     if (!text) return null;
-    const udcPatterns = [
-      /(?:УДК|UDC)\s*:?\s*([0-9.]+(?:[-–—][0-9.]+)?)/i,
-      /\b([0-9]{1,3}(?:\.[0-9]+)*(?:[-–—][0-9.]+)?)\b/,
-    ];
-    for (const pattern of udcPatterns) {
-      const match = text.match(pattern);
-      if (match) return match[1].trim();
+    // ????? ??? ????? ???/UDC ?? ????? ?????? (????? ????? ????????????)
+    const prefixRe = new RegExp("(?:\\u0423\\u0414\\u041a|UDC)\\s*:?\\s*([^\\n]+)", "i");
+    const match = text.match(prefixRe);
+    if (match) {
+      return match[1]
+        .replace(/\s+/g, " ")
+        .replace(/\s*[.;,]\s*$/g, "")
+        .trim();
     }
     return null;
   }
+
+
+
 
   function extractYear(text) {
     if (!text) return null;
@@ -8276,7 +8373,116 @@ function collectAuthorsData() {
     return 0;
   }
 
-  function applySelectionToField(fieldId) {
+  function extractSurnameFromText(text) {
+    const raw = String(text || "").replace(/\s+/g, " ").trim();
+    if (!raw) return "";
+    const cleaned = raw
+      .replace(/^\d+[)\.]?\s+/, "")
+      .replace(/[,:;]+/g, " ")
+      .trim();
+    if (!cleaned) return "";
+    const parts = cleaned.split(" ").filter(Boolean);
+    if (!parts.length) return "";
+
+    const LETTER = "[A-Za-z\\u0410-\\u042F\\u0401\\u0430-\\u044F\\u0451]";
+    const DASH_RE = new RegExp("[\\u2013\\u2014-]", "g");
+    const RE_INITIAL_1 = new RegExp("^" + LETTER + "\\\\.$");
+    const RE_INITIAL_2 = new RegExp("^" + LETTER + "\\\\." + LETTER + "\\\\.?$");
+    const RE_INITIAL_H = new RegExp("^" + LETTER + "\\\\.-" + LETTER + "\\\\.?$");
+    const RE_INITIAL_3 = new RegExp("^" + LETTER + "\\\\." + LETTER + "\\\\.-" + LETTER + "\\\\.?$");
+
+    const isInitial = (token) => {
+      const t = String(token || "").replace(DASH_RE, "-");
+      return RE_INITIAL_1.test(t)
+        || RE_INITIAL_2.test(t)
+        || RE_INITIAL_H.test(t)
+        || RE_INITIAL_3.test(t);
+    };
+
+    const particles = new Set([
+      "da","de","del","della","di","du","des","la","le",
+      "van","von","der","den","ter","ten","zu","zur","zum",
+      "al","el","bin","ibn","dos","das","do","d'","o'",
+      "st.","st","saint","san","sant"
+    ]);
+
+    const nonInitials = parts.filter(p => !isInitial(p));
+    if (nonInitials.length) {
+      let idx = nonInitials.length - 1;
+      let surnameParts = [nonInitials[idx].replace(/[\.]+$/g, "")];
+
+      while (idx - 1 >= 0) {
+        const prev = nonInitials[idx - 1];
+        const prevNorm = prev.toLowerCase().replace(/[\.]+$/g, "");
+        if (particles.has(prevNorm)) {
+          surnameParts.unshift(prev.replace(/[\.]+$/g, ""));
+          idx -= 1;
+        } else {
+          break;
+        }
+      }
+
+      return surnameParts.join(" ");
+    }
+
+    return parts[parts.length - 1].replace(/[\.]+$/g, "");
+  }
+
+
+function extractInitialsFromText(text) {
+    const raw = String(text || "");
+    if (!raw.trim()) return "";
+
+    const LETTER = "[A-Za-z\\u0410-\\u042F\\u0401\\u0430-\\u044F\\u0451]";
+    const DASH_RE = new RegExp("[\\u2013\\u2014-]", "g");
+    const RE_INITIAL_1 = new RegExp("^" + LETTER + "\\\\.$");
+    const RE_INITIAL_2 = new RegExp("^" + LETTER + "\\\\." + LETTER + "\\\\.?$");
+    const RE_INITIAL_H = new RegExp("^" + LETTER + "\\\\.-" + LETTER + "\\\\.?$");
+    const RE_INITIAL_3 = new RegExp("^" + LETTER + "\\\\." + LETTER + "\\\\.-" + LETTER + "\\\\.?$");
+
+    const compactRe = new RegExp(LETTER + "\\\\.?\\\\s*" + LETTER + "?\\\\.?", "g");
+    const compactMatches = raw.match(compactRe) || [];
+    for (const m of compactMatches) {
+      const cleaned = m.replace(/\s+/g, "");
+      if (RE_INITIAL_2.test(cleaned)) {
+        return cleaned[0] + "." + " " + cleaned[2] + ".";
+      }
+    }
+
+    const cleaned = raw
+      .replace(/\s+/g, " ")
+      .replace(/^\d+[)\.]?\s+/, "")
+      .replace(/[,:;]+/g, " ")
+      .trim();
+    if (!cleaned) return "";
+    const parts = cleaned.split(" ").filter(Boolean);
+    if (!parts.length) return "";
+
+    const spaced = parts.filter(p => {
+      const t = String(p || "").replace(DASH_RE, "-");
+      return RE_INITIAL_1.test(t) || RE_INITIAL_2.test(t) || RE_INITIAL_H.test(t) || RE_INITIAL_3.test(t);
+    });
+    if (spaced.length) {
+      return spaced.join(" ");
+    }
+
+    const letters = parts.slice(0, 2).map(p => p[0]).filter(Boolean);
+    if (letters.length) {
+      return letters.map(ch => ch + ".").join(" ");
+    }
+
+    return "";
+  }
+
+
+
+
+
+
+
+
+
+function applySelectionToField(fieldId) {
     const texts = getSelectedTexts();
     if (!texts.length) return;
     const fullText = texts.join(" ");
@@ -8296,11 +8502,11 @@ function collectAuthorsData() {
       if (fieldName === "surname") {
         if (!lang) return;
         targetField = $(`.author-input[data-field="surname"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        value = fullText.trim();
+        value = extractSurnameFromText(fullText);
       } else if (fieldName === "initials") {
         if (!lang) return;
         targetField = $(`.author-input[data-field="initials"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        value = fullText.trim();
+        value = extractInitialsFromText(fullText);
       } else if (fieldName === "org") {
         if (!lang) return;
         targetField = $(`.author-input[data-field="orgName"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
@@ -8353,7 +8559,7 @@ function collectAuthorsData() {
         }
         value = orcid;
         // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем orcid, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, "orcid");
+        autoExtractAuthorDataFromLine(fullText, authorIndex, ["orcid", "spin"]);
       } else if (fieldName === "scopusid") {
         targetField = $(`.author-input[data-field="scopusid"][data-lang="CODES"][data-index="${authorIndex}"]`);
         if (!targetField) {
@@ -8459,7 +8665,12 @@ function collectAuthorsData() {
       }
     } else if (fieldId === "udc") {
       const udc = extractUDC(fullText);
-      value = udc ? udc : fullText.trim();
+      if (udc) {
+        value = udc;
+      } else {
+        const udcRe = new RegExp("^\\s*(?:\u0423\u0414\u041a|UDC)\\s*", "i");
+        value = fullText.replace(udcRe, "").trim();
+      }
     } else if (fieldId === "funding" || fieldId === "funding_en") {
       const funding = processFunding(fullText, fieldId === "funding_en" ? "en" : "ru");
       value = funding;
@@ -8477,7 +8688,7 @@ function collectAuthorsData() {
         return;
       }
     } else {
-      value = fullText;
+      value = fullText.trim();
     }
     field.value = value;
     field.focus();

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import html
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -145,10 +146,52 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     # Создаем список всех блочных элементов с их позициями в документе
     # Это позволяет обработать их в правильном порядке
     elements = []
+
+    def _is_inside_ranges(pos: int, ranges: List[tuple[int, int]]) -> bool:
+        return any(start <= pos < end for start, end in ranges)
+
+    def _html_to_text(fragment: str) -> str:
+        if not fragment:
+            return ""
+        fragment = re.sub(r'(?i)<br\\s*/?>', "\n", fragment)
+        fragment = re.sub(r'<[^>]+>', '', fragment)
+        fragment = html.unescape(fragment)
+        fragment = fragment.replace("\r\n", "\n").replace("\r", "\n")
+        return " ".join(line.strip() for line in fragment.split("\n") if line.strip()).strip()
+
+    table_ranges: List[tuple[int, int]] = []
+    table_pattern = r'<table[^>]*>(.*?)</table>'
+    for tmatch in re.finditer(table_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        table_start, table_end = tmatch.start(), tmatch.end()
+        table_ranges.append((table_start, table_end))
+        table_html = tmatch.group(0)
+
+        row_pattern = r'<tr[^>]*>(.*?)</tr>'
+        for rmatch in re.finditer(row_pattern, table_html, re.DOTALL | re.IGNORECASE):
+            row_html = rmatch.group(0)
+            cell_pattern = r'<t[hd][^>]*>(.*?)</t[hd]>'
+            cells = [
+                _html_to_text(cmatch.group(1))
+                for cmatch in re.finditer(cell_pattern, row_html, re.DOTALL | re.IGNORECASE)
+            ]
+            if not cells:
+                continue
+            cells = [c for c in cells if c]
+            if not cells:
+                continue
+            row_text = " | ".join(cells)
+            elements.append({
+                'start': table_start + rmatch.start(),
+                'end': table_start + rmatch.end(),
+                'type': 'table-row',
+                'content': row_text
+            })
     
     # 1. Находим все элементы списков <li>
     list_pattern = r'<li[^>]*>(.*?)</li>'
     for match in re.finditer(list_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        if _is_inside_ranges(match.start(), table_ranges):
+            continue
         elements.append({
             'start': match.start(),
             'end': match.end(),
@@ -159,6 +202,8 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     # 2. Находим все параграфы <p>
     paragraph_pattern = r'<p[^>]*>(.*?)</p>'
     for match in re.finditer(paragraph_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        if _is_inside_ranges(match.start(), table_ranges):
+            continue
         content = match.group(1)
         # Пропускаем параграфы, которые содержат списки (они будут обработаны через <li>)
         if not re.search(r'<li[^>]*>', content, re.IGNORECASE):
@@ -172,6 +217,8 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     # 3. Находим все заголовки <h1>-<h6>
     heading_pattern = r'<h[1-6][^>]*>(.*?)</h[1-6]>'
     for match in re.finditer(heading_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        if _is_inside_ranges(match.start(), table_ranges):
+            continue
         elements.append({
             'start': match.start(),
             'end': match.end(),
@@ -182,6 +229,8 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     # 4. Находим div элементы (только те, что не содержат других блочных элементов)
     div_pattern = r'<div[^>]*>(.*?)</div>'
     for match in re.finditer(div_pattern, html_content, re.DOTALL | re.IGNORECASE):
+        if _is_inside_ranges(match.start(), table_ranges):
+            continue
         content = match.group(1)
         # Пропускаем div, если внутри есть другие блочные элементы
         if not re.search(r'<(p|ul|ol|li|h[1-6])[^>]*>', content, re.IGNORECASE):
@@ -198,8 +247,10 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     # Обрабатываем элементы в порядке их появления
     for elem in elements:
         content = elem['content']
-        text_clean = re.sub(r'<[^>]+>', '', content)
-        text_clean = text_clean.strip()
+        if elem.get('type') == 'table-row':
+            text_clean = str(content).strip()
+        else:
+            text_clean = _html_to_text(content)
         
         if text_clean:
             lines.append({

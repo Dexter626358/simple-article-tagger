@@ -440,6 +440,98 @@ def generate_xml_for_output_folder(
     if not XML_GENERATOR_AVAILABLE:
         print("❌ Ошибка: xml_generator недоступен")
         return None
+
+
+def generate_xml_for_archive_dir(
+    archive_dir: Path,
+    list_of_journals_path: Path,
+) -> Optional[Path]:
+    """
+    Генерирует XML файл для выпуска на основе JSON файлов в папке архива.
+
+    Структура:
+      input_files/<архив>/json/*.json
+      input_files/<архив>/xml/<архив>.xml
+    """
+    if not XML_GENERATOR_AVAILABLE:
+        print("❌ Ошибка: xml_generator недоступен")
+        return None
+
+    if not archive_dir.exists() or not archive_dir.is_dir():
+        print(f"⚠ Папка архива не найдена: {archive_dir}")
+        return None
+
+    json_folder_path = archive_dir / "json"
+    if not json_folder_path.exists() or not json_folder_path.is_dir():
+        print(f"⚠ Папка с JSON не найдена: {json_folder_path}")
+        return None
+
+    folder_name = archive_dir.name
+    json_files = list(json_folder_path.glob("*.json"))
+    if not json_files:
+        print(f"⚠ В папке {json_folder_path} не найдено JSON файлов")
+        return None
+
+    print(f"📄 Найдено {len(json_files)} JSON файлов в папке {json_folder_path}")
+
+    issue_pages = analyze_issue_pages(json_files)
+    if issue_pages:
+        print(f"📄 Диапазон страниц выпуска: {issue_pages}")
+    else:
+        print("⚠ Не удалось определить диапазон страниц выпуска")
+
+    config = create_config_from_folder_and_journal(folder_name, list_of_journals_path)
+    if not config:
+        print(f"❌ Не удалось создать конфигурацию для папки {folder_name}")
+        return None
+
+    if issue_pages:
+        config["issue"]["pages"] = issue_pages
+
+    try:
+        tree = create_xml_issue(config)
+        root = tree.getroot()
+
+        issue_elem = root.find("issue")
+        if issue_elem is None:
+            print("❌ Ошибка: не найден элемент issue в XML структуре")
+            return None
+
+        articles_elem = issue_elem.find("articles")
+        if articles_elem is None:
+            print("❌ Ошибка: не найден элемент articles в XML структуре")
+            return None
+
+        for json_file in sorted(json_files):
+            try:
+                article_elem = json_to_article_xml(json_file)
+                articles_elem.append(article_elem)
+                print(f"   ✓ Добавлена статья: {json_file.name}")
+            except Exception as e:
+                print(f"   ⚠ Ошибка при обработке {json_file.name}: {e}")
+
+        xml_folder_path = archive_dir / "xml"
+        xml_folder_path.mkdir(parents=True, exist_ok=True)
+        xml_filename = f"{folder_name}.xml"
+        xml_path = save_xml_to_file(tree, xml_filename, str(xml_folder_path))
+
+        print(f"✅ XML файл успешно создан: {xml_path}")
+
+        print("\n🔍 Валидация XML файла...")
+        is_valid, errors = validate_xml_against_schema(xml_path)
+        if is_valid:
+            print("✅ XML файл прошел валидацию успешно!")
+        else:
+            print("❌ XML файл содержит ошибки валидации:")
+            print("-" * 60)
+            for i, error in enumerate(errors, 1):
+                print(f"   {i}. {error}")
+            print("-" * 60)
+            print(f"   Всего найдено ошибок: {len(errors)}")
+        return xml_path
+    except Exception as e:
+        print(f"❌ Ошибка при создании XML: {e}")
+        return None
     
     # Путь к папке с JSON файлами
     json_folder_path = json_input_dir / folder_name

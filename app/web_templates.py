@@ -746,6 +746,73 @@ HTML_TEMPLATE = """
           <small>(не все статьи могут быть обработаны)</small>
         </label>
       </div>
+      <script>
+        window.handleArchiveUpload = window.handleArchiveUpload || function(event) {
+          if (event && event.preventDefault) event.preventDefault();
+          const fileInput = document.getElementById("inputArchiveFile");
+          const status = document.getElementById("inputArchiveStatus");
+          if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+            if (status) {
+              status.textContent = "Выберите ZIP файл.";
+              status.style.color = "#c62828";
+            }
+            return false;
+          }
+          const formData = new FormData();
+          formData.append("archive", fileInput.files[0]);
+          if (status) {
+            status.textContent = "Загрузка архива...";
+            status.style.color = "#555";
+          }
+          fetch("/upload-input-archive", {
+            method: "POST",
+            body: formData
+          })
+            .then((response) => response.json().catch(() => ({})).then((data) => ({ response, data })))
+            .then(({ response, data }) => {
+              if (!response.ok || !data.success) {
+                if (status) {
+                  status.textContent = data.error || "Ошибка загрузки архива.";
+                  status.style.color = "#c62828";
+                }
+                return;
+              }
+              if (status) {
+                status.textContent = data.message || "Архив загружен.";
+                status.style.color = "#2e7d32";
+              }
+              const form = document.getElementById("inputArchiveForm");
+              if (form) {
+                const existing = document.getElementById("archiveUploadNotice");
+                if (existing) existing.remove();
+                const notice = document.createElement("div");
+                notice.id = "archiveUploadNotice";
+                notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
+                notice.textContent = "Архив успешно загружен. Нажмите «Обработать выпуск», чтобы начать обработку.";
+                form.appendChild(notice);
+              }
+              if (data.archive) {
+                window.currentArchive = data.archive;
+                sessionStorage.setItem("lastArchiveName", data.archive);
+              }
+              if (typeof fetchArchiveStatus === "function") {
+                fetchArchiveStatus();
+              } else if (typeof updateArchiveUi === "function") {
+                updateArchiveUi({ status: "idle", archive: data.archive });
+              } else if (processArchiveBtn) {
+                processArchiveBtn.classList.remove("is-disabled");
+                processArchiveBtn.removeAttribute("aria-disabled");
+              }
+            })
+            .catch(() => {
+              if (status) {
+                status.textContent = "Ошибка загрузки архива.";
+                status.style.color = "#c62828";
+              }
+            });
+          return false;
+        };
+      </script>
       <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
         <div class="step" data-step="1" data-label="1 Загрузка">1 Загрузка</div>
         <div class="step" data-step="2" data-label="2 Разметка">2 Разметка</div>
@@ -756,9 +823,9 @@ HTML_TEMPLATE = """
       <div class="upload-panel card">
         <div class="upload-title">📦 Загрузите архив выпуска</div>
         <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
-        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post" onsubmit="event.preventDefault(); if (window.handleArchiveUpload) { window.handleArchiveUpload(event); } return false;">
           <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
-          <button type="submit" class="btn btn-primary">Загрузить архив</button>
+          <button type="button" id="uploadArchiveBtn" class="btn btn-primary" onclick="if (window.handleArchiveUpload) { window.handleArchiveUpload(event); } else { alert('Ошибка: обработчик загрузки не инициализирован'); }">Загрузить архив</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
         </form>
         <details class="details-card">
@@ -872,7 +939,8 @@ HTML_TEMPLATE = """
               options.forEach((opt) => {
                 const option = document.createElement("option");
                 option.value = JSON.stringify(opt);
-                option.textContent = `${opt.issue} (архив ${opt.run})`;
+                const runLabel = opt.run === "current" ? "текущий" : `архив ${opt.run}`;
+                option.textContent = `${opt.issue} (${runLabel})`;
                 select.appendChild(option);
               });
             }
@@ -1124,16 +1192,9 @@ HTML_TEMPLATE = """
                     await downloadFile(file.url, file.name);
                   }
                   
-                  if (data.folders && data.folders.length > 0) {
-                    try {
-                      await fetch("/finalize-archive", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ folders: data.folders })
-                      });
-                    } catch (archiveError) {
-                      console.warn("Не удалось архивировать результаты:", archiveError);
-                    }
+                  const currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
+                  if (currentArchive) {
+                    sessionStorage.setItem(`xml_done_${currentArchive}`, "1");
                   }
                 }
                 
@@ -1154,7 +1215,6 @@ HTML_TEMPLATE = """
                 sessionStorage.removeItem("lastArchiveName");
                 sessionStorage.removeItem("archive_done_reloaded");
                 window.currentArchive = null;
-                // Переходим к начальному состоянию
                 window.location.reload();
               } else {
                 btn.textContent = "❌ Ошибка";
@@ -3540,10 +3600,10 @@ function closeAnnotationModal() {
           <h3>JSON-файлы не найдены</h3>
           <p>Загрузите или поместите JSON-файлы в папку:</p>
           <p style="margin-top: 12px; font-size: 14px;">
-            <code>json_input/issn_год_том_номер</code>
+            <code>input_files/имя_архива/json</code>
           </p>
           <div style="margin-top: 14px;">
-            <button type="button" id="openJsonFolderBtn" class="btn btn-secondary">📂 Открыть папку</button>
+            <button type="button" id="openJsonFolderBtn" class="btn btn-secondary">📂 Открыть папку выпуска</button>
           </div>
         </div>
       {% endif %}
@@ -3578,6 +3638,7 @@ function closeAnnotationModal() {
         const archiveDetails = document.getElementById("archiveDetails");
         const projectStatus = document.getElementById("projectStatus");
         const stepBar = document.getElementById("stepBar");
+        const allowPartialXml = document.getElementById("allowPartialXml");
         window.currentArchive = window.currentArchive || null;
         let archivePollTimer = null;
         const archiveReloadKey = "archive_done_reloaded";
@@ -3596,6 +3657,7 @@ function closeAnnotationModal() {
           const step1 = stepBar.querySelector('[data-step="1"]');
           const step2 = stepBar.querySelector('[data-step="2"]');
           const step3 = stepBar.querySelector('[data-step="3"]');
+          const allowPartialXml = document.getElementById("allowPartialXml");
           const setStep = (el, state) => {
             if (!el) return;
             const label = el.dataset.label || el.textContent || "";
@@ -3616,14 +3678,18 @@ function closeAnnotationModal() {
           const step2Active = archiveReady && !step2Done;
           const xmlKey = window.currentArchive ? `xml_done_${window.currentArchive}` : null;
           const xmlDone = xmlKey ? sessionStorage.getItem(xmlKey) === "1" : false;
+          const allowXml = allowPartialXml && allowPartialXml.checked;
 
           setStep(step1, archiveReady ? "done" : "active");
           if (archiveReady) {
-            setStep(step2, step2Done ? "done" : (step2Active ? "active" : ""));
+            const step2State = allowXml && !step2Done ? "" : (step2Done ? "done" : (step2Active ? "active" : ""));
+            setStep(step2, step2State);
           } else {
             setStep(step2, "");
           }
           if (step2Done) {
+            setStep(step3, xmlDone ? "done" : "active");
+          } else if (allowXml && archiveReady) {
             setStep(step3, xmlDone ? "done" : "active");
           } else {
             setStep(step3, "");
@@ -3647,10 +3713,6 @@ function closeAnnotationModal() {
               sessionStorage.removeItem(`xml_done_${data.archive}`);
             }
           } else if (!window.currentArchive) {
-              updateArchiveUi({ status: "idle", archive: null });
-              alert("??????? ????????? ????? ???????, ????? ??????? ?????????.");
-              return;
-            }
             const cachedArchive = sessionStorage.getItem("lastArchiveName");
             if (cachedArchive) {
               window.currentArchive = cachedArchive;
@@ -3728,6 +3790,12 @@ function closeAnnotationModal() {
           stopArchivePolling();
         };
 
+        if (allowPartialXml) {
+          allowPartialXml.addEventListener("change", () => {
+            updateSteps();
+          });
+        }
+
         const fetchArchiveStatus = async () => {
           try {
             const resp = await fetch("/process-archive-status");
@@ -3757,6 +3825,10 @@ function closeAnnotationModal() {
               updateArchiveUi({ status: "idle", archive: null });
               window.toast("Сначала загрузите архив выпуска, затем нажмите обработку.");
               return;
+            }
+            const uploadNotice = document.getElementById("archiveUploadNotice");
+            if (uploadNotice) {
+              uploadNotice.remove();
             }
             if (processArchiveBtn.classList.contains("is-disabled")) {
               window.toast("Подождите завершения текущей обработки.");
@@ -3815,6 +3887,9 @@ function closeAnnotationModal() {
               return;
             }
             setProjectStatus(`Проект сохранен: ${data.issue || issue}`, "#2e7d32");
+            sessionStorage.removeItem("lastArchiveName");
+            sessionStorage.removeItem("archive_done_reloaded");
+            window.currentArchive = null;
             setTimeout(() => window.location.reload(), 1200);
           } catch (_) {
             setProjectStatus("Ошибка сохранения проекта.", "#c62828");
@@ -3848,7 +3923,8 @@ function closeAnnotationModal() {
             options.forEach((opt) => {
               const item = document.createElement("option");
               item.value = JSON.stringify(opt);
-              item.textContent = `${opt.issue} (архив ${opt.run})`;
+              const runLabel = opt.run === "current" ? "текущий" : `архив ${opt.run}`;
+              item.textContent = `${opt.issue} (${runLabel})`;
               projectSelect.appendChild(item);
             });
             projectModal.classList.add("active");
@@ -3952,55 +4028,62 @@ function closeAnnotationModal() {
           deleteProjectBtn.addEventListener("click", window.deleteProject);
         }
 
-        if (inputArchiveForm) {
-          inputArchiveForm.addEventListener("submit", async (event) => {
-            event.preventDefault();
-            const fileInput = document.getElementById("inputArchiveFile");
-            const status = document.getElementById("inputArchiveStatus");
-            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-              if (status) {
-                status.textContent = "Выберите ZIP файл.";
-                status.style.color = "#c62828";
-              }
-              return;
-            }
-            const formData = new FormData();
-            formData.append("archive", fileInput.files[0]);
+        window.handleArchiveUpload = async (event) => {
+          if (event && event.preventDefault) event.preventDefault();
+          const fileInput = document.getElementById("inputArchiveFile");
+          const status = document.getElementById("inputArchiveStatus");
+          if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
             if (status) {
-              status.textContent = "Загрузка архива...";
-              status.style.color = "#555";
+              status.textContent = "Выберите ZIP файл.";
+              status.style.color = "#c62828";
             }
-            try {
-              const response = await fetch("/upload-input-archive", {
-                method: "POST",
-                body: formData
-              });
-              const data = await response.json().catch(() => ({}));
-              if (!response.ok || !data.success) {
-                if (status) {
-                  status.textContent = data.error || "Ошибка загрузки архива.";
-                  status.style.color = "#c62828";
-                }
-                return;
-              }
+            return false;
+          }
+          const formData = new FormData();
+          formData.append("archive", fileInput.files[0]);
+          if (status) {
+            status.textContent = "Загрузка архива...";
+            status.style.color = "#555";
+          }
+          try {
+            const response = await fetch("/upload-input-archive", {
+              method: "POST",
+              body: formData
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !data.success) {
               if (status) {
-                status.textContent = data.message || "Архив загружен.";
-                status.style.color = "#2e7d32";
-              }
-              const notice = document.createElement("div");
-              notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
-              notice.textContent = "Архив успешно загружен.";
-              inputArchiveForm.appendChild(notice);
-              setTimeout(() => {
-                window.location.reload();
-              }, 4000);
-            } catch (error) {
-              if (status) {
-                status.textContent = "Ошибка загрузки архива.";
+                status.textContent = data.error || "Ошибка загрузки архива.";
                 status.style.color = "#c62828";
               }
+              return false;
             }
-          });
+            if (status) {
+              status.textContent = data.message || "Архив загружен.";
+              status.style.color = "#2e7d32";
+            }
+            const notice = document.createElement("div");
+            notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
+            notice.textContent = "Архив успешно загружен.";
+            inputArchiveForm.appendChild(notice);
+            setTimeout(() => {
+              window.location.reload();
+            }, 4000);
+          } catch (error) {
+            if (status) {
+              status.textContent = "Ошибка загрузки архива.";
+              status.style.color = "#c62828";
+            }
+          }
+          return false;
+        };
+
+        if (inputArchiveForm) {
+          inputArchiveForm.addEventListener("submit", window.handleArchiveUpload);
+        }
+        const uploadArchiveBtn = document.getElementById("uploadArchiveBtn");
+        if (uploadArchiveBtn) {
+          uploadArchiveBtn.addEventListener("click", window.handleArchiveUpload);
         }
       </script>
     </div>

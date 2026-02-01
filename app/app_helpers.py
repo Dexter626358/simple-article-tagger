@@ -21,6 +21,47 @@ from app.app_dependencies import (
 
 SUPPORTED_EXTENSIONS = {".docx", ".rtf", ".pdf", ".idml", ".html", ".tex"}
 
+def get_issue_dirs(input_files_dir: Path, issue_name: str) -> Dict[str, Path]:
+    issue_dir = input_files_dir / issue_name
+    return {
+        "issue_dir": issue_dir,
+        "raw_dir": issue_dir / "raw",
+        "json_dir": issue_dir / "json",
+        "xml_dir": issue_dir / "xml",
+        "state_dir": issue_dir / "state",
+    }
+
+
+def ensure_issue_dirs(input_files_dir: Path, issue_name: str) -> Dict[str, Path]:
+    dirs = get_issue_dirs(input_files_dir, issue_name)
+    for key, path in dirs.items():
+        if key != "issue_dir":
+            path.mkdir(parents=True, exist_ok=True)
+    return dirs
+
+
+def load_issue_state(input_files_dir: Path, issue_name: str) -> Dict:
+    dirs = get_issue_dirs(input_files_dir, issue_name)
+    state_path = dirs["state_dir"] / "progress.json"
+    if not state_path.exists():
+        return {}
+    try:
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_issue_state(input_files_dir: Path, issue_name: str, data: Dict) -> None:
+    dirs = ensure_issue_dirs(input_files_dir, issue_name)
+    state_path = dirs["state_dir"] / "progress.json"
+    state = load_issue_state(input_files_dir, issue_name)
+    state.update(data or {})
+    state.setdefault("archive", issue_name)
+    if "created_at" not in state:
+        state["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    state["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%S")
+    state_path.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+
 def _load_word_to_html_config(config: Optional[Dict]) -> Dict:
     if isinstance(config, dict):
         return config.get("word_to_html", {}) or {}
@@ -93,10 +134,10 @@ def is_json_processed(json_path: Path) -> bool:
 def get_json_files(json_input_dir: Path) -> list[dict]:
     """
     Получает список JSON файлов из указанной директории и всех подпапок.
-    JSON файлы могут находиться в подпапках вида issn_год_том_номер или issn_год_номер.
+    JSON файлы ожидаются в структуре input_files/<архив>/json/*.json.
     
     Args:
-        json_input_dir: Путь к директории с JSON файлами
+        json_input_dir: Путь к директории с JSON файлами (обычно input_files)
         
     Returns:
         Список словарей с информацией о файлах (включая относительный путь)
@@ -105,13 +146,16 @@ def get_json_files(json_input_dir: Path) -> list[dict]:
         return []
     
     files = []
+    has_json_subdir = any(p.name == "json" for p in json_input_dir.rglob("json"))
     # Рекурсивный поиск всех JSON файлов
     for file_path in sorted(json_input_dir.rglob("*.json"), key=lambda x: (x.parent.name, x.name)):
         try:
-            # Пропускаем файлы в корне json_input (если они там есть)
-            # Работаем только с файлами в подпапках
-            if file_path.parent == json_input_dir:
-                continue
+            if has_json_subdir:
+                # Работаем только с файлами внутри подпапки "json"
+                if "json" not in {p.name for p in file_path.parents}:
+                    continue
+                if file_path.parent.name != "json":
+                    continue
             
             stat = file_path.stat()
             size_kb = stat.st_size / 1024
@@ -119,6 +163,7 @@ def get_json_files(json_input_dir: Path) -> list[dict]:
             
             # Относительный путь от json_input_dir
             relative_path = file_path.relative_to(json_input_dir)
+            issue_name = file_path.parent.parent.name if file_path.parent.name == "json" else file_path.parent.name
             
             # Проверяем, обработан ли файл
             is_processed = is_json_processed(file_path)
@@ -148,6 +193,7 @@ def get_json_files(json_input_dir: Path) -> list[dict]:
                 "is_processed": is_processed,  # Флаг обработки
                 "pages_start": pages_start,  # Начальная страница для сортировки (None если нет)
                 "pages": pages_str,  # Строка с номерами страниц
+                "issue_name": issue_name,
             })
         except Exception:
             continue
@@ -155,9 +201,9 @@ def get_json_files(json_input_dir: Path) -> list[dict]:
     # Сортируем файлы: сначала по подпапке, затем по номерам страниц (если есть)
     # Файлы без страниц идут в конец
     files.sort(key=lambda x: (
-        x["path"].parent.name,  # Сначала по подпапке
-        (x["pages_start"] if x["pages_start"] is not None else float('inf')),  # Затем по начальной странице
-        x["display_name"]  # В конце по имени файла
+        x.get("issue_name", ""),
+        (x["pages_start"] if x["pages_start"] is not None else float('inf')),
+        x["display_name"],
     ))
     
     return files
@@ -199,8 +245,6 @@ def archive_processed_folders(
     folder_names: list[str],
     archive_root_dir: Path,
     input_files_dir: Path,
-    json_input_dir: Path,
-    xml_output_dir: Path,
 ) -> dict:
     """Move processed folders into a time-stamped archive run folder."""
     folder_names = _sanitize_folder_names(folder_names)
@@ -213,25 +257,20 @@ def archive_processed_folders(
         run_dir = archive_root_dir / f"{stamp}_{int(time.time())}"
     moved = []
     for folder_name in folder_names:
-        for base_dir, subdir in (
-            (input_files_dir, "input_files"),
-            (json_input_dir, "json_input"),
-            (xml_output_dir, "xml_output"),
-        ):
-            src = base_dir / folder_name
-            if not src.exists():
-                continue
-            dest_base = run_dir / subdir
-            dest_base.mkdir(parents=True, exist_ok=True)
-            dest = dest_base / folder_name
-            try:
-                if dest.exists():
-                    suffix = str(int(time.time()))
-                    dest = dest_base / f"{folder_name}_{suffix}"
-                shutil.move(str(src), str(dest))
-                moved.append(str(dest))
-            except Exception as exc:
-                print(f"WARNING: failed to archive {src}: {exc}")
+        src = input_files_dir / folder_name
+        if not src.exists():
+            continue
+        dest_base = run_dir / "projects"
+        dest_base.mkdir(parents=True, exist_ok=True)
+        dest = dest_base / folder_name
+        try:
+            if dest.exists():
+                suffix = str(int(time.time()))
+                dest = dest_base / f"{folder_name}_{suffix}"
+            shutil.move(str(src), str(dest))
+            moved.append(str(dest))
+        except Exception as exc:
+            print(f"WARNING: failed to archive {src}: {exc}")
     return {"archive_dir": str(run_dir), "moved": moved}
 
 
@@ -244,10 +283,8 @@ def list_archived_projects(archive_root_dir: Path) -> list[dict]:
         if not run_dir.is_dir():
             continue
         issues: set[str] = set()
-        for sub in ("input_files", "json_input", "xml_output"):
-            subdir = run_dir / sub
-            if not subdir.exists() or not subdir.is_dir():
-                continue
+        subdir = run_dir / "projects"
+        if subdir.exists() and subdir.is_dir():
             for issue_dir in subdir.iterdir():
                 if issue_dir.is_dir():
                     issues.add(issue_dir.name)
@@ -259,13 +296,21 @@ def list_archived_projects(archive_root_dir: Path) -> list[dict]:
     return runs
 
 
+def list_current_projects(input_files_dir: Path) -> list[str]:
+    if not input_files_dir.exists() or not input_files_dir.is_dir():
+        return []
+    issues = []
+    for entry in sorted(input_files_dir.iterdir()):
+        if entry.is_dir():
+            issues.append(entry.name)
+    return issues
+
+
 def restore_archived_project(
     archive_root_dir: Path,
     run_name: str,
     issue_name: str,
     input_files_dir: Path,
-    json_input_dir: Path,
-    xml_output_dir: Path,
     overwrite: bool = False,
 ) -> dict:
     """Restore archived issue folders back into working directories."""
@@ -274,26 +319,21 @@ def restore_archived_project(
         return {"success": False, "error": f"Архив не найден: {run_name}"}
 
     moved: list[str] = []
-    for base_dir, subdir in (
-        (input_files_dir, "input_files"),
-        (json_input_dir, "json_input"),
-        (xml_output_dir, "xml_output"),
-    ):
-        src = run_dir / subdir / issue_name
-        if not src.exists() or not src.is_dir():
-            continue
-        dest = base_dir / issue_name
-        if dest.exists():
-            if not overwrite:
-                return {
-                    "success": False,
-                    "error": f"Папка уже существует: {dest}",
-                    "code": "dest_exists",
-                }
-            shutil.rmtree(dest)
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
-        moved.append(str(dest))
+    src = run_dir / "projects" / issue_name
+    if not src.exists() or not src.is_dir():
+        return {"success": False, "error": f"Папка проекта не найдена: {issue_name}"}
+    dest = input_files_dir / issue_name
+    if dest.exists():
+        if not overwrite:
+            return {
+                "success": False,
+                "error": f"Папка уже существует: {dest}",
+                "code": "dest_exists",
+            }
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(src), str(dest))
+    moved.append(str(dest))
 
     if not moved:
         return {

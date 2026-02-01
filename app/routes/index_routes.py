@@ -30,6 +30,11 @@ def register_index_routes(app, ctx):
     def index():
         """Главная страница со списком JSON файлов."""
         files = get_json_files(json_input_dir)
+        issue_name = (last_archive.get("name") or "").strip() if isinstance(last_archive, dict) else ""
+        if issue_name:
+            files = [f for f in files if f.get("issue_name") == issue_name]
+        else:
+            files = []
         return render_template_string(HTML_TEMPLATE, files=files)
     
 

@@ -52,6 +52,7 @@ class Config:
             "directories": {
                 "json_input": "json_input",
                 "words_input": "words_input",
+                "input_files": "input_files",
                 "output": "output",
                 "xml_output": "xml_output",
                 "html_output": "html_output",

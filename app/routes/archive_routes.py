@@ -18,6 +18,10 @@ from app.app_helpers import (
     list_archived_projects,
     restore_archived_project,
     _sanitize_folder_names,
+    ensure_issue_dirs,
+    save_issue_state,
+    load_issue_state,
+    list_current_projects,
 )
 
 def register_archive_routes(app, ctx):
@@ -42,16 +46,16 @@ def register_archive_routes(app, ctx):
 
     def _get_latest_issue_dir() -> str | None:
         candidates = []
-        for base in (_input_files_dir, json_input_dir):
-            if not base or not base.exists() or not base.is_dir():
-                continue
-            for entry in base.iterdir():
-                if entry.is_dir():
-                    try:
-                        mtime = entry.stat().st_mtime
-                    except Exception:
-                        mtime = 0
-                    candidates.append((mtime, entry.name))
+        base = _input_files_dir
+        if not base or not base.exists() or not base.is_dir():
+            return None
+        for entry in base.iterdir():
+            if entry.is_dir():
+                try:
+                    mtime = entry.stat().st_mtime
+                except Exception:
+                    mtime = 0
+                candidates.append((mtime, entry.name))
         if not candidates:
             return None
         candidates.sort(key=lambda x: x[0], reverse=True)
@@ -60,7 +64,11 @@ def register_archive_routes(app, ctx):
     @app.route("/open-json-input", methods=["GET", "POST"])
     def open_json_input():
         try:
-            target_dir = json_input_dir.resolve()
+            archive_name = last_archive.get("name")
+            if archive_name:
+                target_dir = (_input_files_dir / archive_name / "json").resolve()
+            else:
+                target_dir = _input_files_dir.resolve()
             target_dir.mkdir(parents=True, exist_ok=True)
             if sys.platform.startswith("win"):
                 os.startfile(target_dir)  # type: ignore[attr-defined]
@@ -69,8 +77,8 @@ def register_archive_routes(app, ctx):
             else:
                 subprocess.Popen(["xdg-open", str(target_dir)])
         except Exception as exc:
-            logger.exception("Failed to open json_input folder: %s", exc)
-            return jsonify({"success": False, "error": "Не удалось открыть папку json_input."}), 500
+            logger.exception("Failed to open project folder: %s", exc)
+            return jsonify({"success": False, "error": "Не удалось открыть папку проекта."}), 500
         return jsonify({"success": True})
 
     @app.route("/upload-input-archive", methods=["POST"])
@@ -113,8 +121,9 @@ def register_archive_routes(app, ctx):
             archive_stem = Path(archive_file.filename).stem.strip()
             if not archive_stem:
                 return jsonify({"success": False, "error": "Не удалось определить имя архива."}), 400
-            archive_dir = (_input_files_dir / archive_stem).resolve()
-            archive_dir.mkdir(parents=True, exist_ok=True)
+            archive_dirs = ensure_issue_dirs(_input_files_dir, archive_stem)
+            archive_dir = archive_dirs["issue_dir"].resolve()
+            raw_dir = archive_dirs["raw_dir"]
             last_archive["name"] = archive_stem
             with progress_lock:
                 progress_state.update({
@@ -124,13 +133,24 @@ def register_archive_routes(app, ctx):
                     "message": "",
                     "archive": archive_stem
                 })
+            save_issue_state(
+                _input_files_dir,
+                archive_stem,
+                {
+                    "status": "uploaded",
+                    "processed": 0,
+                    "total": 0,
+                    "message": "Архив распакован",
+                    "archive": archive_stem,
+                },
+            )
             extracted = 0
             converted = 0
             for info in zf.infolist():
                 if info.is_dir():
                     continue
                 member_name = Path(info.filename).name
-                target_path = (archive_dir / member_name).resolve()
+                target_path = (raw_dir / member_name).resolve()
                 with zf.open(info) as src, open(target_path, "wb") as dst:
                     shutil.copyfileobj(src, dst)
                 extracted += 1
@@ -157,6 +177,17 @@ def register_archive_routes(app, ctx):
             extracted,
             converted,
         )
+        save_issue_state(
+            _input_files_dir,
+            archive_stem,
+            {
+                "status": "uploaded",
+                "processed": 0,
+                "total": extracted,
+                "message": "Архив распакован",
+                "archive": archive_stem,
+            },
+        )
         return jsonify({
             "success": True,
             "message": f"Архив распакован в папку {archive_stem}, файлов: {extracted}, RTF->DOCX: {converted}.",
@@ -173,6 +204,12 @@ def register_archive_routes(app, ctx):
         archive_dir = (_input_files_dir / archive_name).resolve()
         if not archive_dir.exists() or not archive_dir.is_dir():
             return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
+        raw_dir = archive_dir / "raw"
+        json_dir = archive_dir / "json"
+        if raw_dir.exists():
+            pdf_root = raw_dir
+        else:
+            pdf_root = archive_dir
         with progress_lock:
             if progress_state.get("status") == "running":
                 return jsonify({"success": False, "error": "Обработка уже выполняется."}), 409
@@ -201,7 +238,7 @@ def register_archive_routes(app, ctx):
                     config = get_config()
                 except Exception:
                     config = None
-                pdf_files = sorted(archive_dir.glob("*.pdf"))
+                pdf_files = sorted(pdf_root.glob("*.pdf"))
                 total = len(pdf_files)
                 logger.info(
                     "SYSTEM process archive files name=%s pdf_count=%s",
@@ -222,9 +259,31 @@ def register_archive_routes(app, ctx):
                     with progress_lock:
                         progress_state["processed"] = idx - 1
                         progress_state["message"] = f"Обработка: {pdf_path.name}"
-                    extract_metadata_from_pdf(pdf_path, config=config)
+                    save_issue_state(
+                        _input_files_dir,
+                        archive_name,
+                        {
+                            "status": "running",
+                            "processed": idx - 1,
+                            "total": total,
+                            "message": f"Обработка: {pdf_path.name}",
+                            "archive": archive_name,
+                        },
+                    )
+                    extract_metadata_from_pdf(pdf_path, config=config, json_output_dir=json_dir)
                     with progress_lock:
                         progress_state["processed"] = idx
+                    save_issue_state(
+                        _input_files_dir,
+                        archive_name,
+                        {
+                            "status": "running",
+                            "processed": idx,
+                            "total": total,
+                            "message": "Обработка в процессе",
+                            "archive": archive_name,
+                        },
+                    )
                 logger.info(
                     "SYSTEM process archive done name=%s processed=%s",
                     archive_name,
@@ -235,12 +294,32 @@ def register_archive_routes(app, ctx):
                         "status": "done",
                         "message": "Обработка завершена."
                     })
+                save_issue_state(
+                    _input_files_dir,
+                    archive_name,
+                    {
+                        "status": "done",
+                        "processed": total,
+                        "total": total,
+                        "message": "Обработка завершена",
+                        "archive": archive_name,
+                    },
+                )
             except Exception as e:
                 with progress_lock:
                     progress_state.update({
                         "status": "error",
                         "message": f"Ошибка обработки: {e}"
                     })
+                save_issue_state(
+                    _input_files_dir,
+                    archive_name,
+                    {
+                        "status": "error",
+                        "message": f"Ошибка обработки: {e}",
+                        "archive": archive_name,
+                    },
+                )
 
         thread = threading.Thread(target=worker, daemon=True)
         thread.start()
@@ -251,27 +330,32 @@ def register_archive_routes(app, ctx):
         archive_name = None
         with progress_lock:
             archive_name = progress_state.get("archive") or last_archive.get("name")
-        if not archive_name:
-            archive_name = _get_latest_issue_dir()
-            if archive_name:
-                last_archive["name"] = archive_name
         status_payload = {
             "status": progress_state.get("status"),
             "processed": progress_state.get("processed", 0),
-                "total": progress_state.get("total", 0),
-                "message": progress_state.get("message", ""),
-                "archive": archive_name,
-            }
+            "total": progress_state.get("total", 0),
+            "message": progress_state.get("message", ""),
+            "archive": archive_name,
+        }
         if archive_name:
             archive_dir = (_input_files_dir / archive_name).resolve()
             if archive_dir.exists() and archive_dir.is_dir():
-                pdf_files = list(archive_dir.glob("*.pdf"))
+                raw_dir = archive_dir / "raw"
+                pdf_root = raw_dir if raw_dir.exists() else archive_dir
+                pdf_files = list(pdf_root.glob("*.pdf"))
                 extra_files = [
-                    p for p in archive_dir.iterdir()
+                    p for p in pdf_root.iterdir()
                     if p.is_file() and p.suffix.lower() != ".pdf"
                 ]
                 status_payload["pdf_count"] = len(pdf_files)
                 status_payload["extra_count"] = len(extra_files)
+                if status_payload["status"] in (None, "idle"):
+                    state = load_issue_state(_input_files_dir, archive_name)
+                    if state:
+                        status_payload["status"] = state.get("status") or status_payload["status"]
+                        status_payload["processed"] = state.get("processed", status_payload["processed"])
+                        status_payload["total"] = state.get("total", status_payload["total"])
+                        status_payload["message"] = state.get("message", status_payload["message"])
         return jsonify(status_payload)
 
     @app.route("/finalize-archive", methods=["POST"])
@@ -299,8 +383,6 @@ def register_archive_routes(app, ctx):
             folder_names=folder_names,
             archive_root_dir=archive_root_dir,
             input_files_dir=_input_files_dir,
-            json_input_dir=json_input_dir,
-            xml_output_dir=xml_output_dir
         )
         removed_old = cleanup_old_archives(archive_root_dir, retention_days)
 
@@ -336,9 +418,16 @@ def register_archive_routes(app, ctx):
             folder_names=issue_names,
             archive_root_dir=archive_root_dir,
             input_files_dir=_input_files_dir,
-            json_input_dir=json_input_dir,
-            xml_output_dir=xml_output_dir,
         )
+        # Reset current archive state so UI can start a new issue
+        last_archive["name"] = None
+        if progress_state is not None:
+            with progress_lock:
+                progress_state["status"] = "idle"
+                progress_state["processed"] = 0
+                progress_state["total"] = 0
+                progress_state["message"] = ""
+                progress_state["archive"] = None
         return jsonify({
             "success": True,
             "archive_dir": result.get("archive_dir"),
@@ -348,9 +437,13 @@ def register_archive_routes(app, ctx):
 
     @app.route("/project-snapshots")
     def project_snapshots():
+        current_issues = list_current_projects(_input_files_dir)
+        snapshots = list_archived_projects(archive_root_dir)
+        if current_issues:
+            snapshots.insert(0, {"run": "current", "issues": current_issues})
         return jsonify({
             "success": True,
-            "snapshots": list_archived_projects(archive_root_dir),
+            "snapshots": snapshots,
         })
 
     @app.route("/project-restore", methods=["POST"])
@@ -365,13 +458,14 @@ def register_archive_routes(app, ctx):
         issue_names = _sanitize_folder_names([issue])
         if not run_names or not issue_names:
             return jsonify({"success": False, "error": "Недопустимое имя архива или выпуска."}), 400
+        if run_names[0] == "current":
+            last_archive["name"] = issue_names[0]
+            return jsonify({"success": True, "moved": [], "issue": issue_names[0]})
         result = restore_archived_project(
             archive_root_dir=archive_root_dir,
             run_name=run_names[0],
             issue_name=issue_names[0],
             input_files_dir=_input_files_dir,
-            json_input_dir=json_input_dir,
-            xml_output_dir=xml_output_dir,
             overwrite=overwrite,
         )
         status = 200 if result.get("success") else 400
@@ -389,21 +483,15 @@ def register_archive_routes(app, ctx):
         issue_name = issue_names[0]
 
         removed = []
-        for base_dir, label in (
-            (_input_files_dir, "input_files"),
-            (json_input_dir, "json_input"),
-            (xml_output_dir, "xml_output"),
-        ):
-            if not base_dir:
-                continue
-            target = (base_dir / issue_name).resolve()
-            try:
-                target.resolve().relative_to(base_dir.resolve())
-            except ValueError:
-                continue
-            if target.exists() and target.is_dir():
-                shutil.rmtree(target)
-                removed.append(f"{label}/{issue_name}")
+        base_dir = _input_files_dir
+        target = (base_dir / issue_name).resolve()
+        try:
+            target.resolve().relative_to(base_dir.resolve())
+        except ValueError:
+            target = None
+        if target and target.exists() and target.is_dir():
+            shutil.rmtree(target)
+            removed.append(f"input_files/{issue_name}")
 
         if not removed:
             return jsonify({"success": False, "error": f"Выпуск не найден: {issue_name}"}), 404

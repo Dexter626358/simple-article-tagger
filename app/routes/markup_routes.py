@@ -20,7 +20,7 @@ from app.app_dependencies import (
     json_structure_to_form_data,
     find_docx_for_json,
 )
-from app.app_helpers import convert_file_to_html, merge_doi_url_in_html
+from app.app_helpers import convert_file_to_html, merge_doi_url_in_html, save_issue_state, is_json_processed
 from app.web_templates import VIEWER_TEMPLATE, MARKUP_TEMPLATE
 
 def register_markup_routes(app, ctx):
@@ -1039,6 +1039,30 @@ def register_markup_routes(app, ctx):
             
             # Сохраняем обновленный JSON обратно в исходный файл в json_input
             save_json_metadata(updated_json, json_path)
+
+            try:
+                relative = json_path.relative_to(json_input_dir)
+                issue_name = relative.parts[0] if relative.parts else ""
+            except Exception:
+                issue_name = ""
+            if issue_name:
+                json_dir = json_input_dir / issue_name / "json"
+                total = len(list(json_dir.glob("*.json"))) if json_dir.exists() else 0
+                processed = 0
+                if json_dir.exists():
+                    for path in json_dir.glob("*.json"):
+                        if is_json_processed(path):
+                            processed += 1
+                save_issue_state(
+                    _input_files_dir,
+                    issue_name,
+                    {
+                        "status": "markup",
+                        "processed": processed,
+                        "total": total,
+                        "message": "Разметка обновлена",
+                    },
+                )
             
             return jsonify(success=True, filename=str(json_path))
         except Exception as e:

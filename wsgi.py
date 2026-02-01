@@ -19,11 +19,11 @@ def _load_create_app() -> callable:
 
 
 base_dir = Path(__file__).parent.resolve()
-json_input_dir = Path(os.getenv("JSON_INPUT_DIR", str(base_dir / "json_input")))
+input_files_dir = Path(os.getenv("INPUT_FILES_DIR", str(base_dir / "input_files")))
+json_input_dir = Path(os.getenv("JSON_INPUT_DIR", str(input_files_dir)))
 words_input_dir = Path(os.getenv("WORDS_INPUT_DIR", str(base_dir / "words_input")))
 xml_output_dir = Path(os.getenv("XML_OUTPUT_DIR", str(base_dir / "xml_output")))
 list_of_journals_path = Path(os.getenv("LIST_OF_JOURNALS_PATH", str(base_dir / "data" / "list_of_journals.json")))
-input_files_dir = Path(os.getenv("INPUT_FILES_DIR", str(base_dir / "input_files")))
 
 create_app = _load_create_app()
 app = create_app(

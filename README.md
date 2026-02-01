@@ -245,9 +245,7 @@ converters/                   # PDF/Word/RTF converters and helpers
 scripts/                      # CLI tools and one-off scripts
 data/                         # list_of_journals.json, xml_schema.xsd
 static/                       # static web assets
-input_files/                  # uploaded archives and source files
-json_input/                   # extracted JSON metadata
-xml_output/                   # generated XML
+input_files/                  # projects per archive (raw/json/xml/state)
 processed_archives/           # archived runs
 requirements.txt
 README.md

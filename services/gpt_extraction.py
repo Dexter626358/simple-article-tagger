@@ -311,9 +311,9 @@ def extract_metadata_from_pdf(
     """
     Извлекает метаданные из PDF файла: читает текст и отправляет его в GPT.
     
-    Автоматически сохраняет JSON файл в json_input с сохранением структуры папок:
-    - Если PDF находится в input_files/2619-1601_2024_4/article.pdf,
-      то JSON будет сохранен в json_input/2619-1601_2024_4/article.json
+    Автоматически сохраняет JSON файл в папку архива:
+    - Если PDF находится в input_files/<архив>/raw/article.pdf,
+      то JSON будет сохранен в input_files/<архив>/json/article.json
     
     Args:
         pdf_path: Путь к PDF файлу
@@ -323,7 +323,7 @@ def extract_metadata_from_pdf(
         cache_dir: Директория для кэширования результатов (если None, берется из конфига)
         use_word_reader: Использовать ли word_reader для извлечения текста (не используется для PDF)
         config: Объект конфигурации (опционально)
-        json_output_dir: Директория для сохранения JSON (если None, используется json_input с сохранением структуры папок)
+        json_output_dir: Директория для сохранения JSON (если None, используется input_files/<архив>/json)
         
     Returns:
         Словарь с извлеченными метаданными
@@ -435,19 +435,7 @@ def extract_metadata_from_pdf(
     
     # Определяем путь для сохранения JSON
     if json_output_dir is None:
-        # Если не указана директория, используем json_input с сохранением структуры папок
-        if config:
-            try:
-                json_input_dir = config.get_path("directories.json_input")
-            except Exception:
-                json_input_dir = Path("json_input")
-        else:
-            json_input_dir = Path("json_input")
-        
-        # Определяем родительскую папку PDF (относительно input_files)
-        pdf_path_abs = pdf_path.resolve()
-        
-        # Пробуем найти input_files в пути
+        # Если не указана директория, используем input_files/<архив>/json
         if config:
             try:
                 pdf_input_dir = config.get_path("directories.input_files")
@@ -455,27 +443,27 @@ def extract_metadata_from_pdf(
                 pdf_input_dir = Path("input_files")
         else:
             pdf_input_dir = Path("input_files")
-        
+
+        pdf_path_abs = pdf_path.resolve()
         pdf_input_dir_abs = pdf_input_dir.resolve()
-        
-        # Если PDF находится внутри input_files, сохраняем структуру папок
+
         try:
             pdf_relative = pdf_path_abs.relative_to(pdf_input_dir_abs)
-            # Получаем родительскую папку PDF (например, "2619-1601_2024_4")
-            pdf_parent_folder = pdf_relative.parent
-            
-            # Создаем соответствующую папку в json_input
-            output_folder = json_input_dir / pdf_parent_folder
+            # Ожидаем структуру input_files/<архив>/raw/<file>.pdf
+            parts = list(pdf_relative.parts)
+            archive_name = parts[0] if parts else ""
+            if archive_name:
+                output_folder = pdf_input_dir_abs / archive_name / "json"
+            else:
+                output_folder = pdf_input_dir_abs / "json"
             output_folder.mkdir(parents=True, exist_ok=True)
-            
-            # Имя JSON файла = имя PDF файла (без расширения) + .json
             json_filename = pdf_path.stem + ".json"
             json_output_path = output_folder / json_filename
         except ValueError:
-            # Если PDF не находится внутри input_files, сохраняем в корень json_input
-            json_input_dir.mkdir(parents=True, exist_ok=True)
+            # Если PDF не находится внутри input_files, сохраняем рядом с PDF
+            output_folder = pdf_path_abs.parent
             json_filename = pdf_path.stem + ".json"
-            json_output_path = json_input_dir / json_filename
+            json_output_path = output_folder / json_filename
     else:
         # Используем указанную директорию
         json_output_dir = Path(json_output_dir)

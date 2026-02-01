@@ -150,12 +150,14 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         issue_dir = input_dir / subdir_name
         if not issue_dir.exists() or not issue_dir.is_dir():
             return None, None
+        raw_dir = issue_dir / "raw"
+        source_dir = raw_dir if raw_dir.exists() else issue_dir
 
-        pdf_files = list(issue_dir.glob("*.pdf"))
-        word_files = list(issue_dir.glob("*.docx")) + list(issue_dir.glob("*.rtf"))
-        idml_files = list(issue_dir.glob("*.idml"))
-        html_files = list(issue_dir.glob("*.html"))
-        tex_files = list(issue_dir.glob("*.tex"))
+        pdf_files = list(source_dir.glob("*.pdf"))
+        word_files = list(source_dir.glob("*.docx")) + list(source_dir.glob("*.rtf"))
+        idml_files = list(source_dir.glob("*.idml"))
+        html_files = list(source_dir.glob("*.html"))
+        tex_files = list(source_dir.glob("*.tex"))
 
         pdf_for_article = next((p for p in pdf_files if p.stem == json_stem), None)
         pdf_full_issue = next((p for p in pdf_files if p.stem == "full_issue"), None)
@@ -266,7 +268,7 @@ def main() -> int:
     parser.add_argument(
         "--json-input-dir",
         default=None,
-        help="Путь к папке с JSON файлами (по умолчанию: json_input)"
+        help="Путь к папке с JSON файлами (по умолчанию: input_files)"
     )
     parser.add_argument(
         "--words-input-dir",
@@ -299,19 +301,6 @@ def main() -> int:
     
     script_dir = Path(__file__).parent.resolve()
     
-    # Определяем директорию с JSON файлами
-    if args.json_input_dir:
-        json_input_dir = Path(args.json_input_dir)
-        if not json_input_dir.is_absolute():
-            json_input_dir = script_dir / json_input_dir
-    else:
-        json_input_dir = script_dir / "json_input"
-    
-    if not json_input_dir.exists():
-        json_input_dir.mkdir(parents=True, exist_ok=True)
-        print(f"⚠ Создана папка: {json_input_dir}")
-        print("   Поместите JSON файлы в подпапки вида: issn_год_том_номер или issn_год_номер")
-    
     # Определяем директорию с DOCX/RTF файлами
     if args.words_input_dir:
         words_input_dir = Path(args.words_input_dir)
@@ -336,6 +325,14 @@ def main() -> int:
         input_files_dir.mkdir(parents=True, exist_ok=True)
         print(f"⚠ Создана папка: {input_files_dir}")
         print("   Поместите файлы (PDF, DOCX, RTF) в подпапки вида: issn_год_том_номер или issn_год_номер")
+
+    # Определяем директорию с JSON файлами
+    if args.json_input_dir:
+        json_input_dir = Path(args.json_input_dir)
+        if not json_input_dir.is_absolute():
+            json_input_dir = script_dir / json_input_dir
+    else:
+        json_input_dir = input_files_dir
     
     app = create_app(
         json_input_dir, 
@@ -355,7 +352,7 @@ def main() -> int:
     print("\n" + "=" * 80)
     print("🌐 Веб-приложение для работы с метаданными")
     print("=" * 80)
-    print(f"📁 Папка с JSON файлами: {json_input_dir}")
+    print(f"📁 Папка с JSON файлами: {json_input_dir} (внутри архивов: json/)")
     print(f"📁 Папка с DOCX/RTF файлами: {words_input_dir}")
     print(f"📁 Единая папка с входными файлами (PDF, DOCX, RTF): {input_files_dir}")
     if args.use_word_reader:

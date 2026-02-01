@@ -94,6 +94,7 @@ json_input/
 # Входные файлы статей (Word, RTF, PDF)
 words_input/
 pdf_articles_input/
+input_files/
 
 # Выходные файлы
 xml_output/

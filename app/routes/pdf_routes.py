@@ -1450,7 +1450,9 @@ def register_pdf_routes(app, ctx):
             # Создаем имя файла для сохранения координат
             pdf_path = Path(pdf_filename)
             output_filename = pdf_path.stem + "_bbox.json"
-            output_path = json_input_dir / output_filename
+            issue_name = pdf_path.parts[0] if pdf_path.parts else "unknown"
+            output_path = (input_files_dir / issue_name / "state" / output_filename)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             
             # Подготавливаем данные для сохранения
             output_data = {

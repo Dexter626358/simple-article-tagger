@@ -876,9 +876,10 @@ HTML_TEMPLATE = """
           </div>
         </div>
         <div class="actions-row" style="margin-top: 10px;">
-          <button type="button" id="saveProjectBtn" class="btn btn-primary" onclick="window.saveProject && window.saveProject()">💾 Сохранить проект</button>
-          <button type="button" id="openProjectBtn" class="btn btn-secondary" onclick="window.openProject && window.openProject()">📂 Открыть проект</button>
-          <button type="button" id="deleteProjectBtn" class="btn btn-danger" onclick="window.deleteProject && window.deleteProject()">🗑 Удалить выпуск</button>
+          <button type="button" id="saveProjectBtn" class="btn btn-primary">💾 Сохранить проект</button>
+          <button type="button" id="openProjectBtn" class="btn btn-secondary">📂 Открыть проект</button>
+          <button type="button" id="deleteProjectBtn" class="btn btn-danger">🗑 Удалить выпуск</button>
+          <button type="button" id="resetSessionBtn" class="btn btn-danger">Сбросить сессию</button>
           <button type="button" id="downloadProjectBtn" class="btn btn-secondary">⬇ Скачать проект</button>
           <button type="button" id="restoreProjectBtn" class="btn btn-secondary">📤 Восстановить проект</button>
           <input type="file" id="restoreProjectArchiveInput" accept=".zip,application/zip" style="display:none;">
@@ -3627,6 +3628,7 @@ function closeAnnotationModal() {
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
         const deleteProjectBtn = document.getElementById("deleteProjectBtn");
+        const resetSessionBtn = document.getElementById("resetSessionBtn");
         const downloadProjectBtn = document.getElementById("downloadProjectBtn");
         const restoreProjectBtn = document.getElementById("restoreProjectBtn");
         const restoreProjectArchiveInput = document.getElementById("restoreProjectArchiveInput");
@@ -4095,6 +4097,34 @@ function closeAnnotationModal() {
           }
         };
 
+        window.resetSession = async () => {
+          const confirmReset = window.confirm("Сбросить сессию? Текущий загруженный выпуск и прогресс этой сессии будут удалены.");
+          if (!confirmReset) {
+            setProjectStatus("Сброс отменен.", "#555");
+            return;
+          }
+          setProjectStatus("Сброс сессии...", "#555");
+          try {
+            const resp = await fetch("/session-reset", { method: "POST" });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+              setProjectStatus(data.error || "Ошибка сброса сессии.", "#c62828");
+              return;
+            }
+            sessionStorage.removeItem("lastArchiveName");
+            sessionStorage.removeItem("archive_done_reloaded");
+            Object.keys(sessionStorage).forEach((key) => {
+              if (key && key.startsWith("xml_done_")) {
+                sessionStorage.removeItem(key);
+              }
+            });
+            setProjectStatus("Сессия сброшена.", "#2e7d32");
+            setTimeout(() => window.location.reload(), 400);
+          } catch (_) {
+            setProjectStatus("Ошибка сброса сессии.", "#c62828");
+          }
+        };
+
         if (saveProjectBtn) {
           saveProjectBtn.addEventListener("click", window.saveProject);
         }
@@ -4104,6 +4134,9 @@ function closeAnnotationModal() {
         }
         if (deleteProjectBtn) {
           deleteProjectBtn.addEventListener("click", window.deleteProject);
+        }
+        if (resetSessionBtn) {
+          resetSessionBtn.addEventListener("click", window.resetSession);
         }
         if (downloadProjectBtn) {
           downloadProjectBtn.addEventListener("click", window.downloadProject);

@@ -631,6 +631,36 @@ def register_archive_routes(app, ctx):
         logger.info("SYSTEM project delete issue=%s removed=%s", issue_name, len(removed))
         return jsonify({"success": True, "issue": issue_name, "removed": removed})
 
+    @app.route("/session-reset", methods=["POST"])
+    def session_reset():
+        session_id = get_session_id()
+        session_input_dir = get_session_input_dir(_input_files_dir)
+        progress_state = _get_progress_state(session_id)
+        progress_lock = _get_progress_lock(session_id)
+
+        removed = []
+        if session_input_dir.exists() and session_input_dir.is_dir():
+            for child in session_input_dir.iterdir():
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink()
+                    removed.append(child.name)
+                except Exception as exc:
+                    logger.warning("SYSTEM session reset failed remove=%s err=%s", child, exc)
+
+        set_current_archive(None)
+        with progress_lock:
+            progress_state["status"] = "idle"
+            progress_state["processed"] = 0
+            progress_state["total"] = 0
+            progress_state["message"] = ""
+            progress_state["archive"] = None
+
+        logger.info("SYSTEM session reset session=%s removed=%s", session_id, len(removed))
+        return jsonify({"success": True, "removed": removed})
+
     @app.route("/project-download", methods=["GET"])
     def project_download():
         session_input_dir = get_session_input_dir(_input_files_dir)

@@ -219,6 +219,12 @@ def json_structure_to_form_data(json_data: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Словарь с данными для формы
     """
+    if not isinstance(json_data, dict):
+        if isinstance(json_data, list):
+            json_data = {"references": {"RUS": json_data, "ENG": []}}
+        else:
+            json_data = {}
+
     form_data = {}
     
     # Названия

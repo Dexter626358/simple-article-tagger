@@ -22,6 +22,7 @@ from app.app_dependencies import (
 )
 from app.app_helpers import convert_file_to_html, merge_doi_url_in_html, save_issue_state, is_json_processed
 from app.web_templates import VIEWER_TEMPLATE, MARKUP_TEMPLATE
+from app.session_utils import get_session_input_dir
 
 def register_markup_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
@@ -34,9 +35,6 @@ def register_markup_routes(app, ctx):
     use_word_reader = ctx.get("use_word_reader")
     archive_root_dir = ctx.get("archive_root_dir")
     archive_retention_days = ctx.get("archive_retention_days")
-    progress_state = ctx.get("progress_state")
-    progress_lock = ctx.get("progress_lock")
-    last_archive = ctx.get("last_archive")
     validate_zip_members = ctx.get("validate_zip_members")
     find_files_for_json = ctx.get("find_files_for_json")
     SUPPORTED_EXTENSIONS = ctx.get("SUPPORTED_EXTENSIONS")
@@ -49,7 +47,8 @@ def register_markup_routes(app, ctx):
         if ".." in filename or filename.startswith("/") or filename.startswith("\\"):
             abort(404)
         
-        base_dirs = [_input_files_dir, words_input_dir]
+        session_input_dir = get_session_input_dir(_input_files_dir)
+        base_dirs = [session_input_dir, words_input_dir]
         file_path = None
         base_dir = None
         for candidate_base in base_dirs:
@@ -84,14 +83,14 @@ def register_markup_routes(app, ctx):
                 pdf_candidate = None
                 try:
                     rel_path = file_path.relative_to(words_input_dir)
-                    candidate = (_input_files_dir / rel_path).with_suffix(".pdf")
+                    candidate = (session_input_dir / rel_path).with_suffix(".pdf")
                     if candidate.exists():
                         pdf_candidate = candidate
                 except Exception:
                     pass
         if pdf_candidate and pdf_candidate.exists():
             try:
-                rel_pdf = pdf_candidate.relative_to(_input_files_dir)
+                rel_pdf = pdf_candidate.relative_to(session_input_dir)
                 rel_pdf_url = str(rel_pdf).replace("\\", "/")
                 pdf_url = f"/pdf/{rel_pdf_url}"
             except Exception:
@@ -130,8 +129,9 @@ def register_markup_routes(app, ctx):
         # Безопасность: проверяем, что путь не содержит опасные символы
         if ".." in json_filename or json_filename.startswith("/") or json_filename.startswith("\\"):
             abort(404)
-        
-        json_path = json_input_dir / json_filename
+        session_input_dir = get_session_input_dir(_input_files_dir)
+        session_json_input_dir = session_input_dir
+        json_path = session_json_input_dir / json_filename
         
         if not json_path.exists() or not json_path.is_file():
             abort(404)
@@ -142,7 +142,7 @@ def register_markup_routes(app, ctx):
         
         # Проверяем, что файл находится внутри json_input_dir
         try:
-            json_path.resolve().relative_to(json_input_dir.resolve())
+            json_path.resolve().relative_to(session_json_input_dir.resolve())
         except ValueError:
             abort(404)
         
@@ -155,12 +155,12 @@ def register_markup_routes(app, ctx):
             
             # Находим соответствующие файлы в input_files
             # Логика: PDF для GPT, Word для HTML (если есть), иначе PDF для HTML
-            pdf_for_gpt, file_for_html = find_files_for_json(json_path, _input_files_dir, json_input_dir)
+            pdf_for_gpt, file_for_html = find_files_for_json(json_path, session_input_dir, session_json_input_dir)
             
             if not file_for_html:
                 # Определяем подпапку для более информативного сообщения
                 try:
-                    relative_path = json_path.relative_to(json_input_dir)
+                    relative_path = json_path.relative_to(session_json_input_dir)
                     if len(relative_path.parts) > 1:
                         subdir_name = relative_path.parts[0]
                         error_msg = (
@@ -224,7 +224,7 @@ def register_markup_routes(app, ctx):
             pdf_path = None
             if pdf_for_gpt:
                 try:
-                    pdf_path = pdf_for_gpt.resolve().relative_to(_input_files_dir.resolve())
+                    pdf_path = pdf_for_gpt.resolve().relative_to(session_input_dir.resolve())
                 except ValueError:
                     pdf_path = pdf_for_gpt
             
@@ -394,13 +394,13 @@ def register_markup_routes(app, ctx):
             pdf_path_for_viewer = None
             if pdf_for_gpt:
                 try:
-                    pdf_relative = pdf_for_gpt.relative_to(_input_files_dir)
+                    pdf_relative = pdf_for_gpt.relative_to(session_input_dir)
                     pdf_path_for_viewer = str(pdf_relative.as_posix())
                 except ValueError:
                     pdf_path_for_viewer = pdf_for_gpt.name
             elif pdf_path_for_html:
                 try:
-                    pdf_relative = pdf_path_for_html.relative_to(_input_files_dir)
+                    pdf_relative = pdf_path_for_html.relative_to(session_input_dir)
                     pdf_path_for_viewer = str(pdf_relative.as_posix())
                 except ValueError:
                     pdf_path_for_viewer = pdf_path_for_html.name
@@ -418,7 +418,7 @@ def register_markup_routes(app, ctx):
             journal_issn = ""
             journal_name = ""
             try:
-                relative_path = json_path.relative_to(json_input_dir)
+                relative_path = json_path.relative_to(session_json_input_dir)
                 if len(relative_path.parts) > 1:
                     folder_name = relative_path.parts[0]
                     # Пробуем извлечь ISSN из имени папки
@@ -469,7 +469,9 @@ def register_markup_routes(app, ctx):
         if ".." in json_filename or json_filename.startswith("/") or json_filename.startswith("\\"):
             abort(404)
         
-        json_path = json_input_dir / json_filename
+        session_input_dir = get_session_input_dir(_input_files_dir)
+        session_json_input_dir = session_input_dir
+        json_path = session_json_input_dir / json_filename
         
         if not json_path.exists() or not json_path.is_file():
             abort(404)
@@ -480,7 +482,7 @@ def register_markup_routes(app, ctx):
         
         # Проверяем, что файл находится внутри json_input_dir
         try:
-            json_path.resolve().relative_to(json_input_dir.resolve())
+            json_path.resolve().relative_to(session_json_input_dir.resolve())
         except ValueError:
             abort(404)
         
@@ -492,7 +494,7 @@ def register_markup_routes(app, ctx):
             form_data = json_structure_to_form_data(json_data)
             
             # Находим соответствующий DOCX файл
-            pdf_for_gpt, file_for_html = find_files_for_json(json_path, _input_files_dir, json_input_dir)
+            pdf_for_gpt, file_for_html = find_files_for_json(json_path, session_input_dir, session_json_input_dir)
 
             if not file_for_html:
                 return jsonify(error="Ошибка: файл не найден в input_files"), 404
@@ -719,9 +721,8 @@ def register_markup_routes(app, ctx):
             if not raw_text or not raw_text.strip():
                 return jsonify(success=False, error="Текст для обработки пуст"), 400
             
-            # Определяем язык и выбираем промпт
+            # Определяем язык
             language = "RUS" if field_id == "references_ru" else "ENG"
-            prompt_type = "references_formatting_rus" if language == "RUS" else "references_formatting_eng"
             
             # Загружаем конфигурацию
             config = None
@@ -796,31 +797,9 @@ def register_markup_routes(app, ctx):
             # Получаем промпт из prompts.py
             try:
                 from prompts import Prompts
-                base_prompt = Prompts.get_prompt(prompt_type)
+                base_prompt = Prompts.get_references_prompt(language)
             except Exception as e:
-                # Если не удалось загрузить промпт, используем базовый
-                lang_name = "Русский" if language == "RUS" else "English"
-                base_prompt = f"""Ты помощник для нормализации библиографических списков научных статей.
-
-Задача: Разбери предоставленный текст списка литературы и верни нормализованный список, где каждая библиографическая запись находится на отдельной строке.
-
-Правила:
-1. Убери лишние пробелы внутри слов, фамилий, инициалов
-2. Объедини разорванные записи (если автор, название, год, страницы разбиты на несколько строк)
-3. Исправь переносы внутри слов
-4. Сохрани все важные элементы: авторы, название, год, издательство, страницы, DOI, URL
-5. Не объединяй разные источники в одну запись
-6. Верни результат в формате JSON: {{"references": ["запись 1", "запись 2", ...]}}
-
-Язык: {lang_name}
-
-Текст для обработки:
-{raw_text}
-
-Верни только валидный JSON без дополнительных комментариев.
-
-Текст для обработки:
-{{references_text}}"""
+                return jsonify(success=False, error="Prompts module unavailable."), 500
 
             # Используем GPT для обработки
             from services.gpt_extraction import extract_metadata_with_gpt
@@ -1000,6 +979,54 @@ def register_markup_routes(app, ctx):
                 pass
             current_app.logger.exception("SYSTEM references ai error: %s", e)
             return jsonify(success=False, error=str(e), details=error_details), 500
+
+    @app.route("/crossref-update", methods=["POST"])
+    def crossref_update():
+        data = request.get_json(silent=True) or {}
+        doi = (data.get("doi") or "").strip()
+        if not doi:
+            return jsonify(success=False, error="DOI не указан."), 400
+        try:
+            from crossref_updater import update_article_by_doi
+        except Exception as e:
+            current_app.logger.exception("SYSTEM crossref import error: %s", e)
+            return jsonify(success=False, error="Crossref модуль недоступен."), 500
+        try:
+            payload = update_article_by_doi(doi)
+            raw_payload = payload.get("raw")
+            if isinstance(raw_payload, dict):
+                session_input_dir = get_session_input_dir(_input_files_dir)
+                state_dir = session_input_dir / "state" / "crossref"
+                state_dir.mkdir(parents=True, exist_ok=True)
+                safe_doi = re.sub(r"[^A-Za-z0-9._-]+", "_", doi)
+                timestamp = int(time.time())
+                raw_path = state_dir / f"crossref_{safe_doi}_{timestamp}.json"
+                with raw_path.open("w", encoding="utf-8") as handle:
+                    json.dump(raw_payload, handle, ensure_ascii=False, indent=2)
+            references = []
+            for ref in payload.get("references") or []:
+                if not isinstance(ref, dict):
+                    continue
+                unstructured = ref.get("unstructured")
+                if unstructured:
+                    references.append(str(unstructured))
+                    continue
+                parts = []
+                for key in ("author", "title", "journal", "volume", "issue", "first_page", "year", "doi"):
+                    val = ref.get(key)
+                    if val:
+                        parts.append(str(val))
+                if parts:
+                    references.append(". ".join(parts))
+            return jsonify(
+                success=True,
+                doi=payload.get("doi"),
+                abstract=payload.get("abstract"),
+                references=references,
+            )
+        except Exception as e:
+            current_app.logger.exception("SYSTEM crossref update error: %s", e)
+            return jsonify(success=False, error=str(e)), 500
     
 
     @app.route("/markup/<path:json_filename>/save", methods=["POST"])
@@ -1012,14 +1039,16 @@ def register_markup_routes(app, ctx):
         if ".." in json_filename or json_filename.startswith("/") or json_filename.startswith("\\"):
             abort(404)
         
-        json_path = json_input_dir / json_filename
+        session_input_dir = get_session_input_dir(_input_files_dir)
+        session_json_input_dir = session_input_dir
+        json_path = session_json_input_dir / json_filename
         
         if not json_path.exists() or not json_path.is_file():
             abort(404)
         
         # Проверяем, что файл находится внутри json_input_dir
         try:
-            json_path.resolve().relative_to(json_input_dir.resolve())
+            json_path.resolve().relative_to(session_json_input_dir.resolve())
         except ValueError:
             abort(404)
         
@@ -1041,12 +1070,12 @@ def register_markup_routes(app, ctx):
             save_json_metadata(updated_json, json_path)
 
             try:
-                relative = json_path.relative_to(json_input_dir)
+                relative = json_path.relative_to(session_json_input_dir)
                 issue_name = relative.parts[0] if relative.parts else ""
             except Exception:
                 issue_name = ""
             if issue_name:
-                json_dir = json_input_dir / issue_name / "json"
+                json_dir = session_json_input_dir / issue_name / "json"
                 total = len(list(json_dir.glob("*.json"))) if json_dir.exists() else 0
                 processed = 0
                 if json_dir.exists():
@@ -1054,7 +1083,7 @@ def register_markup_routes(app, ctx):
                         if is_json_processed(path):
                             processed += 1
                 save_issue_state(
-                    _input_files_dir,
+                    session_input_dir,
                     issue_name,
                     {
                         "status": "markup",

@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 from flask import jsonify, send_file, abort
 
 from app.app_helpers import save_issue_state
+from app.session_utils import (
+    get_current_archive,
+    get_session_id,
+    get_session_input_dir,
+    set_current_archive,
+)
 
 def register_xml_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
@@ -17,13 +24,38 @@ def register_xml_routes(app, ctx):
     use_word_reader = ctx.get("use_word_reader")
     archive_root_dir = ctx.get("archive_root_dir")
     archive_retention_days = ctx.get("archive_retention_days")
-    progress_state = ctx.get("progress_state")
-    progress_lock = ctx.get("progress_lock")
-    last_archive = ctx.get("last_archive")
+    progress_states = ctx.get("progress_states")
+    progress_locks = ctx.get("progress_locks")
+    progress_global_lock = ctx.get("progress_global_lock")
     validate_zip_members = ctx.get("validate_zip_members")
     find_files_for_json = ctx.get("find_files_for_json")
     SUPPORTED_EXTENSIONS = ctx.get("SUPPORTED_EXTENSIONS")
     SUPPORTED_JSON_EXTENSIONS = ctx.get("SUPPORTED_JSON_EXTENSIONS")
+
+    def _default_progress_state() -> dict:
+        return {
+            "status": "idle",
+            "processed": 0,
+            "total": 0,
+            "message": "",
+            "archive": None,
+        }
+
+    def _get_progress_state(session_id: str) -> dict:
+        with progress_global_lock:
+            state = progress_states.get(session_id)
+            if not state:
+                state = _default_progress_state()
+                progress_states[session_id] = state
+            return state
+
+    def _get_progress_lock(session_id: str):
+        with progress_global_lock:
+            lock = progress_locks.get(session_id)
+            if not lock:
+                lock = threading.Lock()
+                progress_locks[session_id] = lock
+            return lock
 
     @app.route("/generate-xml", methods=["POST"])
     def generate_xml():
@@ -37,14 +69,18 @@ def register_xml_routes(app, ctx):
                     "error": f"Файл data/list_of_journals.json не найден: {list_of_journals_path}"
                 }), 400
 
-            archive_name = last_archive.get("name")
+            session_id = get_session_id()
+            session_input_dir = get_session_input_dir(_input_files_dir)
+            progress_state = _get_progress_state(session_id)
+            progress_lock = _get_progress_lock(session_id)
+            archive_name = get_current_archive()
             if not archive_name:
                 return jsonify({
                     "success": False,
                     "error": "Не выбран текущий выпуск."
                 }), 400
 
-            archive_dir = (_input_files_dir / archive_name).resolve()
+            archive_dir = (session_input_dir / archive_name).resolve()
             xml_path = generate_xml_for_archive_dir(
                 archive_dir=archive_dir,
                 list_of_journals_path=list_of_journals_path,
@@ -59,7 +95,7 @@ def register_xml_routes(app, ctx):
             files_info = []
             if xml_path.exists() and xml_path.is_file():
                 try:
-                    relative_path = xml_path.relative_to(_input_files_dir)
+                    relative_path = xml_path.relative_to(session_input_dir)
                     url_path = str(relative_path).replace("\\", "/")
                     files_info.append({
                         "name": xml_path.name,
@@ -72,35 +108,33 @@ def register_xml_routes(app, ctx):
                     })
 
             save_issue_state(
-                _input_files_dir,
+                session_input_dir,
                 archive_name,
                 {"status": "xml", "message": "XML сформирован"},
             )
             # Reset current archive state so UI can start a new issue
-            last_archive["name"] = None
+            set_current_archive(None)
             try:
                 with progress_lock:
-                    if isinstance(progress_state, dict):
-                        progress_state.update({
-                            "status": "idle",
-                            "processed": 0,
-                            "total": 0,
-                            "message": "",
-                            "archive": None,
-                        })
+                    progress_state.update({
+                        "status": "idle",
+                        "processed": 0,
+                        "total": 0,
+                        "message": "",
+                        "archive": None,
+                    })
             except Exception:
                 pass
 
             # Сбрасываем прогресс после генерации XML
             try:
                 with progress_lock:
-                    if isinstance(progress_state, dict):
-                        progress_state.update({
-                            "status": "idle",
-                            "processed": 0,
-                            "total": 0,
-                            "message": "",
-                        })
+                    progress_state.update({
+                        "status": "idle",
+                        "processed": 0,
+                        "total": 0,
+                        "message": "",
+                    })
             except Exception:
                 pass
 
@@ -130,13 +164,14 @@ def register_xml_routes(app, ctx):
             if ".." in xml_filename or xml_filename.startswith("/") or xml_filename.startswith("\\"):
                 abort(404)
 
-            xml_path = (_input_files_dir / xml_filename).resolve()
+            session_input_dir = get_session_input_dir(_input_files_dir)
+            xml_path = (session_input_dir / xml_filename).resolve()
 
             if not xml_path.exists() or not xml_path.is_file():
                 abort(404)
 
             try:
-                xml_path.resolve().relative_to(_input_files_dir.resolve())
+                xml_path.resolve().relative_to(session_input_dir.resolve())
             except ValueError:
                 abort(404)
 

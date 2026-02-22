@@ -579,6 +579,58 @@ def _remove_headers_footers(lines_by_page: List[List[str]]) -> List[str]:
 # Извлечение текста из PDF
 # ----------------------------
 
+def _detect_columns_pdfplumber_page(
+    page,
+    min_words_per_column: int = 10,
+    gutter_ratio: float = 0.1,
+) -> int:
+    """Detect whether the page uses one or two text columns."""
+    try:
+        words = page.extract_words() or []
+    except Exception:
+        words = []
+
+    if not words:
+        return 1
+
+    width = float(getattr(page, "width", 0) or 0)
+    if width <= 0:
+        return 1
+
+    center = width / 2.0
+    gutter = max(0.0, min(0.4, float(gutter_ratio)))
+    left_border = center * (1.0 - gutter)
+    right_border = center * (1.0 + gutter)
+
+    left_words = [w for w in words if float(w.get("x1", 0)) <= left_border]
+    right_words = [w for w in words if float(w.get("x0", width)) >= right_border]
+    if len(left_words) >= int(min_words_per_column) and len(right_words) >= int(min_words_per_column):
+        return 2
+    return 1
+
+
+def _extract_page_lines_pdfplumber_smart(page) -> List[str]:
+    """Extract page lines preserving reading order for two-column layouts."""
+    columns = _detect_columns_pdfplumber_page(page)
+    if columns != 2:
+        text = page.extract_text() or ""
+        return [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+    width = float(getattr(page, "width", 0) or 0)
+    height = float(getattr(page, "height", 0) or 0)
+    if width <= 0 or height <= 0:
+        text = page.extract_text() or ""
+        return [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+    center = width / 2.0
+    left_col = page.crop((0, 0, center, height))
+    right_col = page.crop((center, 0, width, height))
+    left_text = left_col.extract_text() or ""
+    right_text = right_col.extract_text() or ""
+    merged = f"{left_text}\n{right_text}"
+    return [ln.strip() for ln in merged.split("\n") if ln.strip()]
+
+
 def _extract_lines_pdfplumber(pdf_path: Path) -> List[str]:
     """Извлекает строки из PDF с помощью pdfplumber, возвращает плоский список."""
     if not PDFPLUMBER_AVAILABLE:
@@ -587,11 +639,7 @@ def _extract_lines_pdfplumber(pdf_path: Path) -> List[str]:
     lines_by_page: List[List[str]] = []
     with pdfplumber.open(pdf_path) as pdf:
         for page in pdf.pages:
-            text = page.extract_text()
-            if not text:
-                lines_by_page.append([])
-                continue
-            page_lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
+            page_lines = _extract_page_lines_pdfplumber_smart(page)
             lines_by_page.append(page_lines)
     
     # Удаляем колонтитулы перед объединением
@@ -907,16 +955,12 @@ def convert_pdf_to_html_with_mistral(
     print(f"DEBUG Mistral: Начинаем обработку через Mistral AI. Размер текста: {text_length} символов")
     
     # Создаем упрощённый промпт для более быстрой обработки
-    prompt = f"""Преобразуй текст научной статьи в HTML. Правила:
-1. Сохрани всё содержимое без изменений
-2. Исправь форматирование: убери лишние пробелы в словах, объедини разорванные строки
-3. Каждый абзац в теге <p>
-4. Верни только HTML код без комментариев
-
-Текст:
-{text_content}
-
-HTML:"""
+    try:
+        from prompts import Prompts
+        prompt = Prompts.get_pdf_to_html_prompt(text_content)
+        system_message = Prompts.SYSTEM_PDF_TO_HTML
+    except Exception as e:
+        raise RuntimeError(f"Prompts module unavailable for PDF->HTML: {e}")
     
     try:
         # Создаем клиент Mistral AI (использует OpenAI-совместимый API)
@@ -935,7 +979,7 @@ HTML:"""
             messages=[
                 {
                     "role": "system",
-                    "content": "Ты помощник для конвертации текста научных статей в HTML. Всегда возвращай валидный HTML код."
+                    "content": system_message
                 },
                 {
                     "role": "user",

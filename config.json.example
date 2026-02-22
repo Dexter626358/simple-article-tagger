@@ -63,7 +63,10 @@
     "first_pages": 3,
     "last_pages": 3,
     "extract_all_pages": false,
-    "clean_text": true
+    "clean_text": true,
+    "smart_columns": true,
+    "two_column_min_words": 10,
+    "two_column_gutter_ratio": 0.1
   },
   "gpt_extraction": {
     "enabled": true,
@@ -72,7 +75,12 @@
     "api_key": "YOUR_OPENAI_API_KEY_HERE",
     "cache_dir": "gpt_cache",
     "use_prompts_module": true,
-    "use_cache": true
+    "use_cache": true,
+    "extract_abstracts": false,
+    "extract_references": false
+  },
+  "flask": {
+    "secret_key": "CHANGE_ME_TO_A_RANDOM_SECRET"
   },
   "logging": {
     "level": "INFO",
@@ -101,4 +109,3 @@
     "llm": "Общие настройки для LLM провайдеров (Mistral, OpenAI и т.д.)"
   }
 }
-

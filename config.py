@@ -137,6 +137,9 @@ class Config:
                 "last_pages": 3,   # Количество последних страниц для обработки
                 "extract_all_pages": False,  # Если True, обрабатывать все страницы
                 "clean_text": True,  # Очищать текст от лишних пробелов
+                "smart_columns": True,  # Автоопределение 1/2 колонок при извлечении
+                "two_column_min_words": 10,  # Мин. слов в каждой половине для 2-колоночной страницы
+                "two_column_gutter_ratio": 0.1,  # Центральный зазор (доля ширины) для детекта колонок
             },
             
             # ----------------------------
@@ -150,6 +153,8 @@ class Config:
                 "cache_dir": "gpt_cache",  # Директория для кэширования результатов (относительно project_root)
                 "use_prompts_module": True,  # Использовать ли промпт из prompts.py
                 "use_cache": True,  # Использовать ли кэширование результатов
+                "extract_abstracts": False,  # Извлекать аннотации
+                "extract_references": False,  # Извлекать списки литературы
             },
         }
     
@@ -389,4 +394,3 @@ if __name__ == "__main__":
     config.save_to_file(output_file)
     print(f"✅ Конфигурационный файл создан: {output_file}")
     print("   Отредактируйте его для настройки параметров работы модулей.")
-

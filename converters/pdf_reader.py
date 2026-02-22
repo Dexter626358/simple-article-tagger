@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 import re
 
 # Попытка импорта библиотек для работы с PDF
@@ -64,6 +64,9 @@ class PDFReaderConfig:
     last_pages: int = 3
     extract_all_pages: bool = False
     clean_text: bool = True
+    smart_columns: bool = True
+    two_column_min_words: int = 10
+    two_column_gutter_ratio: float = 0.1
 
 
 # =========================
@@ -115,6 +118,56 @@ def _normalize_block_text(text: str, clean: bool = True) -> str:
         text = _clean_text(text)
     
     return text
+
+
+def _detect_columns_pdfplumber(page: Any, config: PDFReaderConfig) -> int:
+    """Detect whether a page is single-column or two-column."""
+    try:
+        words = page.extract_words() or []
+    except Exception:
+        words = []
+
+    if not words:
+        return 1
+
+    width = float(getattr(page, "width", 0) or 0)
+    if width <= 0:
+        return 1
+
+    center = width / 2.0
+    gutter = max(0.0, min(0.4, float(config.two_column_gutter_ratio)))
+    left_border = center * (1.0 - gutter)
+    right_border = center * (1.0 + gutter)
+
+    left_words = [w for w in words if float(w.get("x1", 0)) <= left_border]
+    right_words = [w for w in words if float(w.get("x0", width)) >= right_border]
+
+    if len(left_words) >= int(config.two_column_min_words) and len(right_words) >= int(config.two_column_min_words):
+        return 2
+    return 1
+
+
+def _extract_page_text_pdfplumber(page: Any, config: PDFReaderConfig) -> str:
+    """Extract text while preserving reading order for two-column pages."""
+    if not config.smart_columns:
+        return page.extract_text() or ""
+
+    columns = _detect_columns_pdfplumber(page, config)
+    if columns != 2:
+        return page.extract_text() or ""
+
+    width = float(getattr(page, "width", 0) or 0)
+    height = float(getattr(page, "height", 0) or 0)
+    if width <= 0 or height <= 0:
+        return page.extract_text() or ""
+
+    center = width / 2.0
+    left_col = page.crop((0, 0, center, height))
+    right_col = page.crop((center, 0, width, height))
+
+    left_text = left_col.extract_text() or ""
+    right_text = right_col.extract_text() or ""
+    return f"{left_text}\n{right_text}".strip()
 
 
 # =========================
@@ -254,7 +307,7 @@ def read_pdf_with_pdfplumber(
             for page_num in pages_to_process:
                 try:
                     page = pdf.pages[page_num]
-                    text = page.extract_text()
+                    text = _extract_page_text_pdfplumber(page, config)
                     
                     if text:
                         text = _normalize_block_text(text, clean=config.clean_text)
@@ -308,6 +361,9 @@ def read_pdf_blocks(
                 last_pages=cfg.get("pdf_reader.last_pages", 3),
                 extract_all_pages=cfg.get("pdf_reader.extract_all_pages", False),
                 clean_text=cfg.get("pdf_reader.clean_text", True),
+                smart_columns=cfg.get("pdf_reader.smart_columns", True),
+                two_column_min_words=cfg.get("pdf_reader.two_column_min_words", 10),
+                two_column_gutter_ratio=cfg.get("pdf_reader.two_column_gutter_ratio", 0.1),
             )
         except ImportError:
             # Если config.py недоступен, используем значения по умолчанию

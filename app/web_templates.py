@@ -1,4 +1,4 @@
-# Auto-generated from app.py templates
+﻿# Auto-generated from app.py templates
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -350,15 +350,17 @@ HTML_TEMPLATE = """
     .field-group textarea{min-height:80px;resize:vertical;}
     .selected-lines{margin-top:5px;font-size:12px;color:#666;}
     .keywords-count{margin-top:5px;font-size:12px;color:#666;font-style:italic;}
+    .keywords-textarea{min-height:72px;resize:none;overflow:hidden;line-height:1.4;}
     .field-group.active{background:#e3f2fd;border:2px solid #2196f3;border-radius:4px;padding:10px;}
     .buttons{display:flex;gap:10px;margin-top:20px;}
     .btn-secondary{background:#e0e0e0;color:#333;}
     .btn-secondary:hover{background:#d0d0d0;}
     .btn-success{background:#4caf50;color:#fff;}
     .btn-success:hover{background:#45a049;}
-    .selection-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #667eea;border-radius:8px;padding:15px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.2);z-index:1000;display:none;min-width:400px;}
+    .selection-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #667eea;border-radius:8px;padding:15px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.2);z-index:1000;display:none;min-width:400px;max-width:calc(100vw - 24px);cursor:grab;}
     .selection-panel.active{display:block;}
     .selection-panel h4{margin:0 0 10px 0;color:#667eea;font-size:14px;}
+    .selection-panel.dragging{cursor:grabbing;user-select:none;}
     .field-buttons{display:flex;flex-wrap:wrap;gap:8px;}
     .field-btn{padding:8px 12px;border:1px solid #667eea;background:#fff;color:#667eea;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;}
     .field-btn:hover{background:#667eea;color:#fff;}
@@ -394,7 +396,7 @@ HTML_TEMPLATE = """
     .toggle-text{font-size:14px;color:#333;}
     .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:transparent;overflow:auto;pointer-events:none;}
     .modal.active{display:flex;align-items:center;justify-content:center;}
-    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;}
+    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;position:relative;}
     .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
     .modal-content.resizable{resize:both;overflow:auto;min-width:360px;min-height:240px;width:90vw;height:70vh;max-width:95vw;max-height:90vh;}
     .refs-modal-content{overflow-y:auto;}
@@ -406,6 +408,15 @@ HTML_TEMPLATE = """
     .modal-header h2{margin:0;color:#333;font-size:20px;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
+    .modal-resize-handle{position:absolute;z-index:15;user-select:none;touch-action:none;}
+    .modal-resize-handle.n{top:-5px;left:10px;right:10px;height:10px;cursor:ns-resize;}
+    .modal-resize-handle.s{bottom:-5px;left:10px;right:10px;height:10px;cursor:ns-resize;}
+    .modal-resize-handle.e{top:10px;right:-5px;bottom:10px;width:10px;cursor:ew-resize;}
+    .modal-resize-handle.w{top:10px;left:-5px;bottom:10px;width:10px;cursor:ew-resize;}
+    .modal-resize-handle.ne{top:-6px;right:-6px;width:12px;height:12px;cursor:nesw-resize;}
+    .modal-resize-handle.nw{top:-6px;left:-6px;width:12px;height:12px;cursor:nwse-resize;}
+    .modal-resize-handle.se{bottom:-6px;right:-6px;width:12px;height:12px;cursor:nwse-resize;}
+    .modal-resize-handle.sw{bottom:-6px;left:-6px;width:12px;height:12px;cursor:nesw-resize;}
     .refs-list{margin:0;padding:0;}
     .ref-item{background:#f8f9fa;border-left:4px solid #2196f3;padding:15px;margin-bottom:10px;border-radius:4px;line-height:1.6;position:relative;}
     .ref-number{display:inline-block;width:30px;font-weight:600;color:#2196f3;vertical-align:top;}
@@ -823,9 +834,9 @@ HTML_TEMPLATE = """
       <div class="upload-panel card">
         <div class="upload-title">📦 Загрузите архив выпуска</div>
         <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
-        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post" onsubmit="event.preventDefault(); if (window.handleArchiveUpload) { window.handleArchiveUpload(event); } return false;">
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
           <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
-          <button type="button" id="uploadArchiveBtn" class="btn btn-primary" onclick="if (window.handleArchiveUpload) { window.handleArchiveUpload(event); } else { alert('Ошибка: обработчик загрузки не инициализирован'); }">Загрузить архив</button>
+          <button type="button" id="uploadArchiveBtn" class="btn btn-primary">Загрузить архив</button>
           <span id="inputArchiveStatus" class="upload-status"></span>
         </form>
         <details class="details-card">
@@ -864,10 +875,13 @@ HTML_TEMPLATE = """
             </div>
           </div>
         </div>
-<div class="actions-row" style="margin-top: 10px;">
+        <div class="actions-row" style="margin-top: 10px;">
           <button type="button" id="saveProjectBtn" class="btn btn-primary" onclick="window.saveProject && window.saveProject()">💾 Сохранить проект</button>
           <button type="button" id="openProjectBtn" class="btn btn-secondary" onclick="window.openProject && window.openProject()">📂 Открыть проект</button>
           <button type="button" id="deleteProjectBtn" class="btn btn-danger" onclick="window.deleteProject && window.deleteProject()">🗑 Удалить выпуск</button>
+          <button type="button" id="downloadProjectBtn" class="btn btn-secondary">⬇ Скачать проект</button>
+          <button type="button" id="restoreProjectBtn" class="btn btn-secondary">📤 Восстановить проект</button>
+          <input type="file" id="restoreProjectArchiveInput" accept=".zip,application/zip" style="display:none;">
           <span id="projectStatus" class="upload-status muted-text"></span>
         </div>
         
@@ -3613,6 +3627,9 @@ function closeAnnotationModal() {
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
         const deleteProjectBtn = document.getElementById("deleteProjectBtn");
+        const downloadProjectBtn = document.getElementById("downloadProjectBtn");
+        const restoreProjectBtn = document.getElementById("restoreProjectBtn");
+        const restoreProjectArchiveInput = document.getElementById("restoreProjectArchiveInput");
         const openJsonFolderBtn = document.getElementById("openJsonFolderBtn");
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", () => {
@@ -4017,6 +4034,67 @@ function closeAnnotationModal() {
           }
         };
 
+        window.downloadProject = async () => {
+          const issue = (window.currentArchive || sessionStorage.getItem("lastArchiveName") || "").trim();
+          if (!issue) {
+            setProjectStatus("Нет текущего загруженного выпуска.", "#c62828");
+            return;
+          }
+          setProjectStatus("Подготовка архива проекта...", "#555");
+          try {
+            const url = `/project-download?issue=${encodeURIComponent(issue)}`;
+            const link = document.createElement("a");
+            link.href = url;
+            link.download = `${issue}_project.zip`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setProjectStatus(`Архив проекта скачивается: ${issue}`, "#2e7d32");
+          } catch (_) {
+            setProjectStatus("Ошибка скачивания проекта.", "#c62828");
+          }
+        };
+
+        window.restoreProjectFromArchive = async (file) => {
+          if (!file) return;
+          setProjectStatus("Загрузка архива проекта...", "#555");
+          const tryRestore = async (overwrite) => {
+            const formData = new FormData();
+            formData.append("archive", file);
+            if (overwrite) {
+              formData.append("overwrite", "true");
+            }
+            const resp = await fetch("/project-upload-archive", {
+              method: "POST",
+              body: formData,
+            });
+            const data = await resp.json().catch(() => ({}));
+            return { resp, data };
+          };
+          try {
+            let { resp, data } = await tryRestore(false);
+            if ((!resp.ok || !data.success) && data.code === "dest_exists") {
+              const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
+              if (!confirmOverwrite) {
+                setProjectStatus("Восстановление отменено.", "#555");
+                return;
+              }
+              ({ resp, data } = await tryRestore(true));
+            }
+            if (!resp.ok || !data.success) {
+              setProjectStatus(data.error || "Ошибка восстановления проекта.", "#c62828");
+              return;
+            }
+            const issueName = data.issue || data.archive || "проект";
+            setProjectStatus(`Проект восстановлен: ${issueName}`, "#2e7d32");
+            window.currentArchive = issueName;
+            sessionStorage.setItem("lastArchiveName", issueName);
+            setTimeout(() => window.location.reload(), 1200);
+          } catch (_) {
+            setProjectStatus("Ошибка восстановления проекта.", "#c62828");
+          }
+        };
+
         if (saveProjectBtn) {
           saveProjectBtn.addEventListener("click", window.saveProject);
         }
@@ -4026,6 +4104,20 @@ function closeAnnotationModal() {
         }
         if (deleteProjectBtn) {
           deleteProjectBtn.addEventListener("click", window.deleteProject);
+        }
+        if (downloadProjectBtn) {
+          downloadProjectBtn.addEventListener("click", window.downloadProject);
+        }
+        if (restoreProjectBtn && restoreProjectArchiveInput) {
+          restoreProjectBtn.addEventListener("click", () => {
+            restoreProjectArchiveInput.value = "";
+            restoreProjectArchiveInput.click();
+          });
+          restoreProjectArchiveInput.addEventListener("change", async (e) => {
+            const file = e.target && e.target.files ? e.target.files[0] : null;
+            if (!file) return;
+            await window.restoreProjectFromArchive(file);
+          });
         }
 
         window.handleArchiveUpload = async (event) => {
@@ -4062,7 +4154,12 @@ function closeAnnotationModal() {
               status.textContent = data.message || "Архив загружен.";
               status.style.color = "#2e7d32";
             }
+            const existingNotice = document.getElementById("archiveUploadNotice");
+            if (existingNotice) {
+              existingNotice.remove();
+            }
             const notice = document.createElement("div");
+            notice.id = "archiveUploadNotice";
             notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
             notice.textContent = "Архив успешно загружен.";
             inputArchiveForm.appendChild(notice);
@@ -5324,9 +5421,10 @@ MARKUP_TEMPLATE = r"""
     .btn-success{background:#4caf50;color:#fff;}
     .btn-success:hover{background:#45a049;}
 
-    .selection-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #667eea;border-radius:8px;padding:15px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.2);z-index:1000;display:none;min-width:400px;}
+    .selection-panel{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#fff;border:2px solid #667eea;border-radius:8px;padding:15px 20px;box-shadow:0 4px 20px rgba(0,0,0,0.2);z-index:1000;display:none;min-width:400px;max-width:calc(100vw - 24px);cursor:grab;}
     .selection-panel.active{display:block;}
     .selection-panel h4{margin:0 0 10px 0;color:#667eea;font-size:14px;}
+    .selection-panel.dragging{cursor:grabbing;user-select:none;}
     .field-buttons{display:flex;flex-wrap:wrap;gap:8px;}
     .field-btn{padding:8px 12px;border:1px solid #667eea;background:#fff;color:#667eea;border-radius:4px;cursor:pointer;font-size:12px;transition:all .2s;}
     .field-btn:hover{background:#667eea;color:#fff;}
@@ -5336,7 +5434,7 @@ MARKUP_TEMPLATE = r"""
     
     .modal{display:none;position:fixed;z-index:2000;left:0;top:0;width:100%;height:100%;background:transparent;overflow:auto;pointer-events:none;}
     .modal.active{display:flex;align-items:center;justify-content:center;}
-    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;}
+    .modal-content{background:#fff;padding:30px;border-radius:8px;max-width:800px;width:90%;max-height:80vh;overflow:hidden;box-shadow:0 4px 20px rgba(0,0,0,0.3);pointer-events:auto;display:flex;flex-direction:column;position:relative;}
     .refs-modal-content{overflow-y:auto;}
     .refs-modal-content,
     .refs-modal-content .ref-text,
@@ -5346,6 +5444,15 @@ MARKUP_TEMPLATE = r"""
     .modal-header h2{margin:0;color:#333;font-size:20px;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
+    .modal-resize-handle{position:absolute;z-index:15;user-select:none;touch-action:none;}
+    .modal-resize-handle.n{top:-5px;left:10px;right:10px;height:10px;cursor:ns-resize;}
+    .modal-resize-handle.s{bottom:-5px;left:10px;right:10px;height:10px;cursor:ns-resize;}
+    .modal-resize-handle.e{top:10px;right:-5px;bottom:10px;width:10px;cursor:ew-resize;}
+    .modal-resize-handle.w{top:10px;left:-5px;bottom:10px;width:10px;cursor:ew-resize;}
+    .modal-resize-handle.ne{top:-6px;right:-6px;width:12px;height:12px;cursor:nesw-resize;}
+    .modal-resize-handle.nw{top:-6px;left:-6px;width:12px;height:12px;cursor:nwse-resize;}
+    .modal-resize-handle.se{bottom:-6px;right:-6px;width:12px;height:12px;cursor:nwse-resize;}
+    .modal-resize-handle.sw{bottom:-6px;left:-6px;width:12px;height:12px;cursor:nesw-resize;}
     .refs-list{margin:0;padding:0;}
     .ref-item{background:#f8f9fa;border-left:4px solid #2196f3;padding:15px;margin-bottom:10px;border-radius:4px;line-height:1.6;position:relative;}
     .ref-number{display:inline-block;width:30px;font-weight:600;color:#2196f3;vertical-align:top;}
@@ -5391,6 +5498,38 @@ MARKUP_TEMPLATE = r"""
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
     .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
+    .author-org-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
+    .author-org-list{display:flex;flex-direction:column;gap:10px;}
+    .author-org-card{border:1px solid #d9dfec;border-radius:8px;background:#f8faff;padding:12px;}
+    .author-org-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
+    .author-org-card-title{font-size:14px;font-weight:700;color:#2f3a5a;}
+    .author-org-card-actions{display:flex;gap:8px;}
+    .author-org-action-btn{
+      border:1px solid #c8d2e8;
+      background:#fff;
+      color:#334;
+      min-width:34px;
+      height:30px;
+      border-radius:8px;
+      cursor:pointer;
+      font-size:15px;
+      font-weight:500;
+      line-height:1;
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      padding:0;
+      font-family:"Segoe UI Symbol","Segoe UI",sans-serif;
+    }
+    .author-org-action-btn:hover{background:#eef3ff;}
+    .author-org-line{display:flex;align-items:flex-start;gap:8px;margin-bottom:8px;}
+    .author-org-line:last-child{margin-bottom:0;}
+    .author-org-label{min-width:34px;padding-top:7px;font-size:12px;font-weight:700;color:#2f3a5a;}
+    .author-org-value{flex:1;min-height:40px;resize:none;background:#fff;line-height:1.35;}
+    .author-org-addresses{margin-top:8px;border-top:1px dashed #cfd8ea;padding-top:8px;}
+    .author-org-addresses summary{cursor:pointer;font-size:12px;color:#4b5878;font-weight:600;user-select:none;}
+    .author-org-addresses summary:hover{color:#2f3a5a;}
+    .author-org-address-wrap{margin-top:8px;}
     .correspondence-toggle{margin-top:5px;}
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -5478,6 +5617,8 @@ MARKUP_TEMPLATE = r"""
           <label>DOI</label>
           <input type="text" id="doi" name="doi" value="{% if form_data %}{{ form_data.get('doi', '')|e }}{% endif %}">
           <div class="selected-lines" id="doi-lines"></div>
+          <button type="button" class="view-refs-btn" id="crossrefDoiBtn" style="margin-top: 5px;">↻ Подтянуть данные по Crossref DOI</button>
+          <div class="selected-lines" id="crossrefStatus"></div>
         </div>
 
         <div class="field-group">
@@ -5594,24 +5735,24 @@ MARKUP_TEMPLATE = r"""
                       <input type="text" class="author-input" data-field="initials" data-lang="ENG" data-index="{{ loop.index0 }}" value="{{ eng_info.get('initials', '')|e }}">
                     </div>
                     <div class="author-field">
-                      <label>Организация (русский):</label>
-                      <textarea class="author-input author-textarea" data-field="orgName" data-lang="RUS" data-index="{{ loop.index0 }}" rows="2">{{ rus_info.get('orgName', '')|e }}</textarea>
-                      <div class="selected-lines" style="display:none;"></div>
+                      <label>Организации и адреса:</label>
+                      <div class="author-org-editor"
+                           data-index="{{ loop.index0 }}"
+                           data-initial-org-rus="{{ rus_info.get('orgName', '')|e }}"
+                           data-initial-org-eng="{{ eng_info.get('orgName', '')|e }}"
+                           data-initial-address-rus="{{ rus_info.get('address', '')|e }}"
+                           data-initial-address-eng="{{ eng_info.get('address', '')|e }}">
+                        <div class="author-org-toolbar">
+                          <button type="button" class="add-author-btn" onclick="addOrganizationCard({{ loop.index0 }})">+ Добавить организацию</button>
+                        </div>
+                        <div class="author-org-list" id="author-org-list-{{ loop.index0 }}"></div>
+                      </div>
                       <div class="keywords-count" id="org-count-rus-{{ loop.index0 }}">Количество организаций: 0</div>
-                    </div>
-                    <div class="author-field">
-                      <label>Organization (English):</label>
-                      <textarea class="author-input author-textarea" data-field="orgName" data-lang="ENG" data-index="{{ loop.index0 }}" rows="2">{{ eng_info.get('orgName', '')|e }}</textarea>
-                      <div class="selected-lines" style="display:none;"></div>
                       <div class="keywords-count" id="org-count-eng-{{ loop.index0 }}">Количество организаций: 0</div>
-                    </div>
-                    <div class="author-field">
-                      <label>Адрес (русский):</label>
-                      <input type="text" class="author-input" data-field="address" data-lang="RUS" data-index="{{ loop.index0 }}" value="{{ rus_info.get('address', '')|e }}">
-                    </div>
-                    <div class="author-field">
-                      <label>Address (English):</label>
-                      <input type="text" class="author-input" data-field="address" data-lang="ENG" data-index="{{ loop.index0 }}" value="{{ eng_info.get('address', '')|e }}">
+                      <textarea class="author-input author-textarea org-hidden" data-field="orgName" data-lang="RUS" data-index="{{ loop.index0 }}" rows="2" style="display:none;">{{ rus_info.get('orgName', '')|e }}</textarea>
+                      <textarea class="author-input author-textarea org-hidden" data-field="orgName" data-lang="ENG" data-index="{{ loop.index0 }}" rows="2" style="display:none;">{{ eng_info.get('orgName', '')|e }}</textarea>
+                      <input type="text" class="author-input org-hidden" data-field="address" data-lang="RUS" data-index="{{ loop.index0 }}" value="{{ rus_info.get('address', '')|e }}" style="display:none;">
+                      <input type="text" class="author-input org-hidden" data-field="address" data-lang="ENG" data-index="{{ loop.index0 }}" value="{{ eng_info.get('address', '')|e }}" style="display:none;">
                     </div>
                     <div class="author-field">
                       <label>Email:</label>
@@ -5672,7 +5813,7 @@ MARKUP_TEMPLATE = r"""
 
         <div class="field-group">
           <label>Ключевые слова (русский)</label>
-          <input type="text" id="keywords" name="keywords" value="{% if form_data %}{{ form_data.get('keywords', '')|e }}{% endif %}">
+          <textarea id="keywords" name="keywords" class="keywords-textarea" rows="3">{% if form_data %}{{ form_data.get('keywords', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="keywords-lines"></div>
           <button type="button" class="view-refs-btn" onclick="viewAnnotation('keywords', 'Ключевые слова (русский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="keywords-count" id="keywords-count">Количество: 0</div>
@@ -5680,7 +5821,7 @@ MARKUP_TEMPLATE = r"""
 
         <div class="field-group">
           <label>Ключевые слова (английский)</label>
-          <input type="text" id="keywords_en" name="keywords_en" value="{% if form_data %}{{ form_data.get('keywords_en', '')|e }}{% endif %}">
+          <textarea id="keywords_en" name="keywords_en" class="keywords-textarea" rows="3">{% if form_data %}{{ form_data.get('keywords_en', '')|e }}{% endif %}</textarea>
           <div class="selected-lines" id="keywords_en-lines"></div>
           <button type="button" class="view-refs-btn" onclick="viewAnnotation('keywords_en', 'Ключевые слова (английский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
           <div class="keywords-count" id="keywords_en-count">Количество: 0</div>
@@ -7414,40 +7555,144 @@ function toggleAnnotationModalSize() {
 function enableModalDragging(modalId, contentId) {
   const modal = document.getElementById(modalId);
   const content = document.getElementById(contentId);
-  if (!modal || !content) return;
-  const header = content.querySelector(".modal-header");
-  if (!header) return;
-  let isDragging = false;
-  let offsetX = 0;
-  let offsetY = 0;
+  if (!modal || !content || content.dataset.modalInteractionReady === "1") return;
+  content.dataset.modalInteractionReady = "1";
 
-  const onMouseDown = (event) => {
-    if (event.button !== 0) return;
-    isDragging = true;
+  // Используем собственные ручки ресайза вместо системного resize: both
+  content.style.resize = "none";
+
+  const handleDirs = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+  handleDirs.forEach((dir) => {
+    const handle = document.createElement("div");
+    handle.className = `modal-resize-handle ${dir}`;
+    handle.dataset.resizeDir = dir;
+    content.appendChild(handle);
+  });
+
+  let mode = null; // "drag" | "resize"
+  let resizeDir = "";
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  let startWidth = 0;
+  let startHeight = 0;
+  let dragOffsetX = 0;
+  let dragOffsetY = 0;
+
+  const getMinSize = () => {
+    const styles = window.getComputedStyle(content);
+    const minW = parseInt(styles.minWidth || "360", 10) || 360;
+    const minH = parseInt(styles.minHeight || "240", 10) || 240;
+    return { minW, minH };
+  };
+
+  const setFixedRect = () => {
     const rect = content.getBoundingClientRect();
-    offsetX = event.clientX - rect.left;
-    offsetY = event.clientY - rect.top;
     content.style.position = "fixed";
     content.style.margin = "0";
     content.style.left = `${rect.left}px`;
     content.style.top = `${rect.top}px`;
+    content.style.width = `${rect.width}px`;
+    content.style.height = `${rect.height}px`;
+  };
+
+  const isInteractiveTarget = (target) => {
+    if (!target) return false;
+    return !!target.closest(
+      "input, textarea, select, button, a, [contenteditable='true'], .ref-actions, .annotation-editor-toolbar, .modal-btn, .modal-close"
+    );
+  };
+
+  const onMouseDown = (event) => {
+    if (event.button !== 0) return;
+    if (!content.contains(event.target)) return;
+
+    const handle = event.target.closest(".modal-resize-handle");
+    setFixedRect();
+    const rect = content.getBoundingClientRect();
+    startX = event.clientX;
+    startY = event.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+    startWidth = rect.width;
+    startHeight = rect.height;
+
+    if (handle) {
+      mode = "resize";
+      resizeDir = handle.dataset.resizeDir || "";
+      event.preventDefault();
+      return;
+    }
+
+    if (isInteractiveTarget(event.target)) return;
+    mode = "drag";
+    dragOffsetX = event.clientX - rect.left;
+    dragOffsetY = event.clientY - rect.top;
+    event.preventDefault();
   };
 
   const onMouseMove = (event) => {
-    if (!isDragging) return;
-    const maxX = window.innerWidth - content.offsetWidth;
-    const maxY = window.innerHeight - content.offsetHeight;
-    const nextX = Math.min(Math.max(0, event.clientX - offsetX), Math.max(0, maxX));
-    const nextY = Math.min(Math.max(0, event.clientY - offsetY), Math.max(0, maxY));
-    content.style.left = `${nextX}px`;
-    content.style.top = `${nextY}px`;
+    if (!mode) return;
+    const { minW, minH } = getMinSize();
+
+    if (mode === "drag") {
+      const maxX = window.innerWidth - content.offsetWidth;
+      const maxY = window.innerHeight - content.offsetHeight;
+      const nextX = Math.min(Math.max(0, event.clientX - dragOffsetX), Math.max(0, maxX));
+      const nextY = Math.min(Math.max(0, event.clientY - dragOffsetY), Math.max(0, maxY));
+      content.style.left = `${nextX}px`;
+      content.style.top = `${nextY}px`;
+      return;
+    }
+
+    if (mode === "resize") {
+      const dx = event.clientX - startX;
+      const dy = event.clientY - startY;
+      let nextLeft = startLeft;
+      let nextTop = startTop;
+      let nextWidth = startWidth;
+      let nextHeight = startHeight;
+
+      if (resizeDir.includes("e")) {
+        nextWidth = Math.max(minW, startWidth + dx);
+      }
+      if (resizeDir.includes("s")) {
+        nextHeight = Math.max(minH, startHeight + dy);
+      }
+      if (resizeDir.includes("w")) {
+        nextWidth = Math.max(minW, startWidth - dx);
+        nextLeft = startLeft + (startWidth - nextWidth);
+      }
+      if (resizeDir.includes("n")) {
+        nextHeight = Math.max(minH, startHeight - dy);
+        nextTop = startTop + (startHeight - nextHeight);
+      }
+
+      if (nextLeft < 0) {
+        nextWidth += nextLeft;
+        nextLeft = 0;
+      }
+      if (nextTop < 0) {
+        nextHeight += nextTop;
+        nextTop = 0;
+      }
+      nextWidth = Math.max(minW, Math.min(nextWidth, window.innerWidth - nextLeft));
+      nextHeight = Math.max(minH, Math.min(nextHeight, window.innerHeight - nextTop));
+
+      content.style.left = `${nextLeft}px`;
+      content.style.top = `${nextTop}px`;
+      content.style.width = `${nextWidth}px`;
+      content.style.height = `${nextHeight}px`;
+    }
   };
 
   const onMouseUp = () => {
-    isDragging = false;
+    mode = null;
+    resizeDir = "";
   };
 
-  header.addEventListener("mousedown", onMouseDown);
+  content.addEventListener("mousedown", onMouseDown);
   document.addEventListener("mousemove", onMouseMove);
   document.addEventListener("mouseup", onMouseUp);
 }
@@ -7594,6 +7839,7 @@ function addNewAuthor() {
   
   // Добавляем обработчики для обновления имени
   attachAuthorNameListeners(newIndex);
+  initOrganizationCards(newIndex);
 }
 
 function createAuthorHTML(index) {
@@ -7633,24 +7879,19 @@ function createAuthorHTML(index) {
           <input type="text" class="author-input" data-field="initials" data-lang="ENG" data-index="${index}" value="">
         </div>
         <div class="author-field">
-          <label>Организация (русский):</label>
-          <textarea class="author-input author-textarea" data-field="orgName" data-lang="RUS" data-index="${index}" rows="2"></textarea>
-          <div class="selected-lines" style="display:none;"></div>
+          <label>Организации и адреса:</label>
+          <div class="author-org-editor" data-index="${index}">
+            <div class="author-org-toolbar">
+              <button type="button" class="add-author-btn" onclick="addOrganizationCard(${index})">+ Добавить организацию</button>
+            </div>
+            <div class="author-org-list" id="author-org-list-${index}"></div>
+          </div>
           <div class="keywords-count" id="org-count-rus-${index}">Количество организаций: 0</div>
-        </div>
-        <div class="author-field">
-          <label>Organization (English):</label>
-          <textarea class="author-input author-textarea" data-field="orgName" data-lang="ENG" data-index="${index}" rows="2"></textarea>
-          <div class="selected-lines" style="display:none;"></div>
           <div class="keywords-count" id="org-count-eng-${index}">Количество организаций: 0</div>
-        </div>
-        <div class="author-field">
-          <label>Адрес (русский):</label>
-          <input type="text" class="author-input" data-field="address" data-lang="RUS" data-index="${index}" value="">
-        </div>
-        <div class="author-field">
-          <label>Address (English):</label>
-          <input type="text" class="author-input" data-field="address" data-lang="ENG" data-index="${index}" value="">
+          <textarea class="author-input author-textarea org-hidden" data-field="orgName" data-lang="RUS" data-index="${index}" rows="2" style="display:none;"></textarea>
+          <textarea class="author-input author-textarea org-hidden" data-field="orgName" data-lang="ENG" data-index="${index}" rows="2" style="display:none;"></textarea>
+          <input type="text" class="author-input org-hidden" data-field="address" data-lang="RUS" data-index="${index}" value="" style="display:none;">
+          <input type="text" class="author-input org-hidden" data-field="address" data-lang="ENG" data-index="${index}" value="" style="display:none;">
         </div>
         <div class="author-field">
           <label>Email:</label>
@@ -7720,6 +7961,185 @@ function updateAuthorName(index) {
   }
 }
 
+function splitMultiValue(raw) {
+  if (!raw) return [];
+  return String(raw).split(/[;\n]+/).map((s) => s.trim()).filter(Boolean);
+}
+
+function joinMultiValue(items) {
+  return (items || []).map((s) => String(s || "").trim()).filter(Boolean).join("; ");
+}
+
+function collectOrganizationRows(index) {
+  const list = document.getElementById(`author-org-list-${index}`);
+  if (!list) return [];
+  const cards = Array.from(list.querySelectorAll(".author-org-card"));
+  return cards.map((card) => ({
+    orgRus: card.querySelector(".org-row-org-rus")?.value || "",
+    orgEng: card.querySelector(".org-row-org-eng")?.value || "",
+    addressRus: card.querySelector(".org-row-address-rus")?.value || "",
+    addressEng: card.querySelector(".org-row-address-eng")?.value || "",
+  }));
+}
+
+function updateOrganizationCardTitles(index) {
+  const list = document.getElementById(`author-org-list-${index}`);
+  if (!list) return;
+  const cards = Array.from(list.querySelectorAll(".author-org-card"));
+  cards.forEach((card, rowIndex) => {
+    const title = card.querySelector(".author-org-card-title");
+    if (title) title.textContent = `#${rowIndex + 1}`;
+  });
+}
+
+function autoResizeOrganizationTextarea(el) {
+  if (!el) return;
+  el.style.height = "auto";
+  el.style.height = `${Math.max(el.scrollHeight, 40)}px`;
+}
+
+function autoResizeOrganizationTextareas(index) {
+  const list = document.getElementById(`author-org-list-${index}`);
+  if (!list) return;
+  list.querySelectorAll("textarea").forEach(autoResizeOrganizationTextarea);
+}
+
+function handleOrganizationCardInput(index, textarea) {
+  autoResizeOrganizationTextarea(textarea);
+  syncOrganizationCards(index);
+}
+
+function syncOrganizationCards(index) {
+  const authorItem = document.querySelector(`.author-item[data-author-index="${index}"]`);
+  if (!authorItem) return;
+  const rows = collectOrganizationRows(index);
+  const orgRusInput = authorItem.querySelector(`.author-input[data-field="orgName"][data-lang="RUS"][data-index="${index}"]`);
+  const orgEngInput = authorItem.querySelector(`.author-input[data-field="orgName"][data-lang="ENG"][data-index="${index}"]`);
+  const addrRusInput = authorItem.querySelector(`.author-input[data-field="address"][data-lang="RUS"][data-index="${index}"]`);
+  const addrEngInput = authorItem.querySelector(`.author-input[data-field="address"][data-lang="ENG"][data-index="${index}"]`);
+  if (!orgRusInput || !orgEngInput || !addrRusInput || !addrEngInput) return;
+
+  orgRusInput.value = joinMultiValue(rows.map((r) => r.orgRus));
+  orgEngInput.value = joinMultiValue(rows.map((r) => r.orgEng));
+  addrRusInput.value = joinMultiValue(rows.map((r) => r.addressRus));
+  addrEngInput.value = joinMultiValue(rows.map((r) => r.addressEng));
+
+  if (window.updateOrgCount) {
+    window.updateOrgCount(index, "RUS");
+    window.updateOrgCount(index, "ENG");
+  }
+}
+
+function orgEscapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function renderOrganizationRows(index, rows) {
+  const list = document.getElementById(`author-org-list-${index}`);
+  if (!list) return;
+  const safeRows = (rows && rows.length) ? rows : [{ orgRus: "", orgEng: "", addressRus: "", addressEng: "" }];
+  list.innerHTML = safeRows.map((row, rowIndex) => `
+    <div class="author-org-card" data-org-row="${rowIndex}">
+      <div class="author-org-card-header">
+        <span class="author-org-card-title">#${rowIndex + 1}</span>
+        <div class="author-org-card-actions">
+          <button type="button" class="author-org-action-btn" title="Вверх" onclick="moveOrganizationCard(${index}, ${rowIndex}, -1)">↑</button>
+          <button type="button" class="author-org-action-btn" title="Вниз" onclick="moveOrganizationCard(${index}, ${rowIndex}, 1)">↓</button>
+          <button type="button" class="author-org-action-btn" title="Удалить" onclick="deleteOrganizationCard(${index}, ${rowIndex})">✕</button>
+        </div>
+      </div>
+      <div class="author-org-line">
+        <div class="author-org-label">RU:</div>
+        <textarea class="author-org-value org-row-org-rus" oninput="handleOrganizationCardInput(${index}, this)">${orgEscapeHtml(row.orgRus)}</textarea>
+      </div>
+      <div class="author-org-line">
+        <div class="author-org-label">EN:</div>
+        <textarea class="author-org-value org-row-org-eng" oninput="handleOrganizationCardInput(${index}, this)">${orgEscapeHtml(row.orgEng)}</textarea>
+      </div>
+      <details class="author-org-addresses">
+        <summary>Адреса</summary>
+        <div class="author-org-address-wrap">
+          <div class="author-org-line">
+            <div class="author-org-label">RU:</div>
+            <textarea class="author-org-value org-row-address-rus" oninput="handleOrganizationCardInput(${index}, this)">${orgEscapeHtml(row.addressRus)}</textarea>
+          </div>
+        </div>
+        <div class="author-org-address-wrap">
+          <div class="author-org-line">
+            <div class="author-org-label">EN:</div>
+            <textarea class="author-org-value org-row-address-eng" oninput="handleOrganizationCardInput(${index}, this)">${orgEscapeHtml(row.addressEng)}</textarea>
+          </div>
+        </div>
+      </details>
+    </div>
+  `).join("");
+
+  updateOrganizationCardTitles(index);
+  autoResizeOrganizationTextareas(index);
+  syncOrganizationCards(index);
+}
+
+function initOrganizationCards(index) {
+  const authorItem = document.querySelector(`.author-item[data-author-index="${index}"]`);
+  if (!authorItem) return;
+  const editor = authorItem.querySelector(".author-org-editor");
+  if (!editor) return;
+
+  const orgRusInput = authorItem.querySelector(`.author-input[data-field="orgName"][data-lang="RUS"][data-index="${index}"]`);
+  const orgEngInput = authorItem.querySelector(`.author-input[data-field="orgName"][data-lang="ENG"][data-index="${index}"]`);
+  const addrRusInput = authorItem.querySelector(`.author-input[data-field="address"][data-lang="RUS"][data-index="${index}"]`);
+  const addrEngInput = authorItem.querySelector(`.author-input[data-field="address"][data-lang="ENG"][data-index="${index}"]`);
+  if (!orgRusInput || !orgEngInput || !addrRusInput || !addrEngInput) return;
+
+  const sourceOrgRus = orgRusInput.value || editor.getAttribute("data-initial-org-rus") || "";
+  const sourceOrgEng = orgEngInput.value || editor.getAttribute("data-initial-org-eng") || "";
+  const sourceAddrRus = addrRusInput.value || editor.getAttribute("data-initial-address-rus") || "";
+  const sourceAddrEng = addrEngInput.value || editor.getAttribute("data-initial-address-eng") || "";
+
+  const orgRus = splitMultiValue(sourceOrgRus);
+  const orgEng = splitMultiValue(sourceOrgEng);
+  const addrRus = splitMultiValue(sourceAddrRus);
+  const addrEng = splitMultiValue(sourceAddrEng);
+  const maxRows = Math.max(orgRus.length, orgEng.length, addrRus.length, addrEng.length, 1);
+  const rows = [];
+  for (let i = 0; i < maxRows; i += 1) {
+    rows.push({
+      orgRus: orgRus[i] || "",
+      orgEng: orgEng[i] || "",
+      addressRus: addrRus[i] || "",
+      addressEng: addrEng[i] || "",
+    });
+  }
+  renderOrganizationRows(index, rows);
+}
+
+function addOrganizationCard(index) {
+  const rows = collectOrganizationRows(index);
+  rows.push({ orgRus: "", orgEng: "", addressRus: "", addressEng: "" });
+  renderOrganizationRows(index, rows);
+}
+
+function deleteOrganizationCard(index, rowIndex) {
+  const rows = collectOrganizationRows(index);
+  rows.splice(rowIndex, 1);
+  renderOrganizationRows(index, rows);
+}
+
+function moveOrganizationCard(index, rowIndex, direction) {
+  const rows = collectOrganizationRows(index);
+  const to = rowIndex + direction;
+  if (to < 0 || to >= rows.length) return;
+  const moved = rows[rowIndex];
+  rows[rowIndex] = rows[to];
+  rows[to] = moved;
+  renderOrganizationRows(index, rows);
+}
+
 function attachAuthorNameListeners(index) {
   const authorItem = document.querySelector(`.author-item[data-author-index="${index}"]`);
   if (!authorItem) return;
@@ -7773,7 +8193,9 @@ function collectAuthorsData() {
   const authorItems = document.querySelectorAll(".author-item");
   
   authorItems.forEach((item, index) => {
-    const authorIndex = item.dataset.authorIndex || index;
+    const parsedIndex = parseInt(item.dataset.authorIndex, 10);
+    const authorIndex = Number.isNaN(parsedIndex) ? index : parsedIndex;
+    syncOrganizationCards(authorIndex);
     const inputs = item.querySelectorAll(".author-input");
     
     // Получаем значение чекбокса "ответственный за переписку"
@@ -7863,6 +8285,76 @@ function collectAuthorsData() {
     selected.clear();
     $$(".line.selected").forEach(el => el.classList.remove("selected"));
     updatePanel();
+  }
+
+  function enableSelectionPanelDragging() {
+    const panel = $("#selectionPanel");
+    if (!panel || panel.dataset.dragReady === "1") return;
+    panel.dataset.dragReady = "1";
+
+    let dragging = false;
+    let offsetX = 0;
+    let offsetY = 0;
+
+    const isInteractiveTarget = (target) => {
+      if (!target) return false;
+      return !!target.closest("button, input, textarea, select, a, label, [contenteditable='true']");
+    };
+
+    const clampIntoViewport = () => {
+      const maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
+      const maxY = Math.max(0, window.innerHeight - panel.offsetHeight);
+      const currentLeft = parseFloat(panel.style.left || "0") || 0;
+      const currentTop = parseFloat(panel.style.top || "0") || 0;
+      panel.style.left = `${Math.min(Math.max(0, currentLeft), maxX)}px`;
+      panel.style.top = `${Math.min(Math.max(0, currentTop), maxY)}px`;
+    };
+
+    const makeFloating = () => {
+      const rect = panel.getBoundingClientRect();
+      panel.style.left = `${rect.left}px`;
+      panel.style.top = `${rect.top}px`;
+      panel.style.bottom = "auto";
+      panel.style.right = "auto";
+      panel.style.transform = "none";
+      panel.style.margin = "0";
+      clampIntoViewport();
+    };
+
+    panel.addEventListener("mousedown", (event) => {
+      if (event.button !== 0) return;
+      if (!panel.classList.contains("active")) return;
+      if (isInteractiveTarget(event.target)) return;
+      makeFloating();
+      const rect = panel.getBoundingClientRect();
+      dragging = true;
+      offsetX = event.clientX - rect.left;
+      offsetY = event.clientY - rect.top;
+      panel.classList.add("dragging");
+      event.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (event) => {
+      if (!dragging) return;
+      const maxX = Math.max(0, window.innerWidth - panel.offsetWidth);
+      const maxY = Math.max(0, window.innerHeight - panel.offsetHeight);
+      const nextLeft = Math.min(Math.max(0, event.clientX - offsetX), maxX);
+      const nextTop = Math.min(Math.max(0, event.clientY - offsetY), maxY);
+      panel.style.left = `${nextLeft}px`;
+      panel.style.top = `${nextTop}px`;
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (!dragging) return;
+      dragging = false;
+      panel.classList.remove("dragging");
+    });
+
+    window.addEventListener("resize", () => {
+      if (panel.style.left || panel.style.top) {
+        clampIntoViewport();
+      }
+    });
   }
 
   function getSelectedTexts() {
@@ -8253,6 +8745,13 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
     
     const count = countKeywords(field.value);
     countEl.textContent = `Количество: ${count}`;
+  }
+
+  function autoResizeKeywordsField(fieldId) {
+    const field = document.getElementById(fieldId);
+    if (!field || field.tagName !== "TEXTAREA") return;
+    field.style.height = "auto";
+    field.style.height = `${Math.max(field.scrollHeight, 72)}px`;
   }
 
   window.countOrganizations = function(text, lang) {
@@ -8687,6 +9186,9 @@ function applySelectionToField(fieldId) {
       }
       
       targetField.value = value;
+      if (fieldName === "org" || fieldName === "address") {
+        initOrganizationCards(authorIndex);
+      }
       // Триггерим событие input для обновления всех обработчиков
       targetField.dispatchEvent(new Event('input', { bubbles: true }));
       targetField.focus();
@@ -8728,7 +9230,10 @@ function applySelectionToField(fieldId) {
       const kw = processKeywords(fullText);
       value = kw;
       // Обновляем счетчик после установки значения
-      setTimeout(() => updateKeywordsCount(fieldId), 100);
+      setTimeout(() => {
+        updateKeywordsCount(fieldId);
+        autoResizeKeywordsField(fieldId);
+      }, 100);
     } else if (fieldId === "references_ru" || fieldId === "references_en") {
       const refs = processReferences(texts);
       value = refs.join("\n");
@@ -8974,6 +9479,7 @@ function applySelectionToField(fieldId) {
     if (clearBtn) clearBtn.addEventListener("click", clearSelection);
 
     const panel = $("#selectionPanel");
+    enableSelectionPanelDragging();
     if (panel) {
       panel.addEventListener("click", (e) => {
         const btn = e.target.closest("button");
@@ -9017,11 +9523,89 @@ function applySelectionToField(fieldId) {
     const keywordsEnField = $("#keywords_en");
     if (keywordsField) {
       updateKeywordsCount("keywords");
-      keywordsField.addEventListener("input", () => updateKeywordsCount("keywords"));
+      autoResizeKeywordsField("keywords");
+      keywordsField.addEventListener("input", () => {
+        updateKeywordsCount("keywords");
+        autoResizeKeywordsField("keywords");
+      });
     }
     if (keywordsEnField) {
       updateKeywordsCount("keywords_en");
-      keywordsEnField.addEventListener("input", () => updateKeywordsCount("keywords_en"));
+      autoResizeKeywordsField("keywords_en");
+      keywordsEnField.addEventListener("input", () => {
+        updateKeywordsCount("keywords_en");
+        autoResizeKeywordsField("keywords_en");
+      });
+    }
+
+    const crossrefBtn = $("#crossrefDoiBtn");
+    const crossrefStatus = $("#crossrefStatus");
+    const doiField = $("#doi");
+    const crossrefAnnotationEnField = $("#annotation_en");
+    const crossrefReferencesEnField = $("#references_en");
+    const setCrossrefStatus = (text, color) => {
+      if (!crossrefStatus) return;
+      crossrefStatus.textContent = text || "";
+      crossrefStatus.style.color = color || "#666";
+    };
+    if (crossrefBtn) {
+      crossrefBtn.addEventListener("click", async () => {
+        const doi = (doiField?.value || "").trim();
+        if (!doi) {
+          setCrossrefStatus("Укажите DOI перед обновлением.", "#c62828");
+          return;
+        }
+        crossrefBtn.disabled = true;
+        setCrossrefStatus("Запрос к Crossref...", "#555");
+        try {
+          const resp = await fetch("/crossref-update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ doi }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.success) {
+            setCrossrefStatus(data.error || "Не удалось получить данные из Crossref.", "#c62828");
+            return;
+          }
+
+          if (doiField && data.doi) {
+            doiField.value = String(data.doi);
+          }
+
+          const abstractText = (data.abstract || "").trim();
+          if (crossrefAnnotationEnField && abstractText) {
+            if (!crossrefAnnotationEnField.value.trim() || confirm("Заменить текущую Annotation (English) данными из Crossref?")) {
+              crossrefAnnotationEnField.value = abstractText;
+              crossrefAnnotationEnField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+
+          const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
+          if (crossrefReferencesEnField && refs.length) {
+            const nextRefs = refs.join("\n");
+            if (!crossrefReferencesEnField.value.trim() || confirm("Заменить текущий список литературы (английский) данными из Crossref?")) {
+              crossrefReferencesEnField.value = nextRefs;
+              crossrefReferencesEnField.dispatchEvent(new Event("input", { bubbles: true }));
+              if (window.updateReferencesCount) {
+                window.updateReferencesCount("references_en");
+              }
+            }
+          }
+
+          const parts = [];
+          if (abstractText) parts.push("аннотация");
+          if (refs.length) parts.push(`ссылки: ${refs.length}`);
+          setCrossrefStatus(
+            parts.length ? `Данные обновлены (${parts.join(", ")}).` : "Данные получены, но обновлять было нечего.",
+            "#2e7d32"
+          );
+        } catch (err) {
+          setCrossrefStatus(`Ошибка Crossref: ${err.message || err}`, "#c62828");
+        } finally {
+          crossrefBtn.disabled = false;
+        }
+      });
     }
     
     // Инициализация счетчиков литературы при загрузке
@@ -9052,13 +9636,7 @@ function applySelectionToField(fieldId) {
       const index = parseInt(item.dataset.authorIndex, 10);
       if (!isNaN(index)) {
         attachAuthorNameListeners(index);
-        // Дополнительная инициализация счетчиков организаций
-        setTimeout(() => {
-          if (window.updateOrgCount) {
-            window.updateOrgCount(index, "RUS");
-            window.updateOrgCount(index, "ENG");
-          }
-        }, 200);
+        initOrganizationCards(index);
       }
     });
 

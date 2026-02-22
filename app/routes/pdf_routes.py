@@ -12,6 +12,7 @@ from flask import render_template_string, jsonify, request, send_file, abort
 
 from app.app_dependencies import PDF_TO_HTML_AVAILABLE, extract_text_from_pdf
 from app.app_helpers import get_source_files
+from app.session_utils import get_session_input_dir
 
 
 def _split_merged_words(text: str) -> str:
@@ -1020,13 +1021,13 @@ def register_pdf_routes(app, ctx):
     use_word_reader = ctx.get("use_word_reader")
     archive_root_dir = ctx.get("archive_root_dir")
     archive_retention_days = ctx.get("archive_retention_days")
-    progress_state = ctx.get("progress_state")
-    progress_lock = ctx.get("progress_lock")
-    last_archive = ctx.get("last_archive")
     validate_zip_members = ctx.get("validate_zip_members")
     find_files_for_json = ctx.get("find_files_for_json")
     SUPPORTED_EXTENSIONS = ctx.get("SUPPORTED_EXTENSIONS")
     SUPPORTED_JSON_EXTENSIONS = ctx.get("SUPPORTED_JSON_EXTENSIONS")
+
+    def _session_input_dir() -> Path:
+        return get_session_input_dir(_input_files_dir)
 
     @app.route("/api/pdf-files")
     def api_pdf_files():
@@ -1036,7 +1037,7 @@ def register_pdf_routes(app, ctx):
             
             # Проверяем input_files_dir (используем сохраненную переменную из замыкания)
             try:
-                input_dir = _input_files_dir
+                input_dir = _session_input_dir()
                 print(f"DEBUG: Проверяем input_files_dir: {input_dir}")
                 print(f"DEBUG: input_files_dir type: {type(input_dir)}")
                 print(f"DEBUG: input_files_dir exists: {input_dir.exists() if input_dir else 'None'}")
@@ -1121,8 +1122,9 @@ def register_pdf_routes(app, ctx):
                 return jsonify({"error": "Недопустимый путь к файлу"}), 400
             
             # Файл из input_files
-            pdf_path = _input_files_dir / pdf_filename
-            base_dir = _input_files_dir
+            session_input_dir = _session_input_dir()
+            pdf_path = session_input_dir / pdf_filename
+            base_dir = session_input_dir
             
             if not pdf_path.exists() or not pdf_path.is_file():
                 return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
@@ -1190,8 +1192,9 @@ def register_pdf_routes(app, ctx):
                 return jsonify({"error": "Недопустимый путь к файлу"}), 400
             
             # Файл из input_files
-            pdf_path = _input_files_dir / pdf_filename
-            base_dir = _input_files_dir
+            session_input_dir = _session_input_dir()
+            pdf_path = session_input_dir / pdf_filename
+            base_dir = session_input_dir
             
             if not pdf_path.exists() or not pdf_path.is_file():
                 return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
@@ -1247,8 +1250,9 @@ def register_pdf_routes(app, ctx):
                 abort(404)
             
             # Файл из input_files
-            pdf_path = _input_files_dir / pdf_filename
-            base_dir = _input_files_dir
+            session_input_dir = _session_input_dir()
+            pdf_path = session_input_dir / pdf_filename
+            base_dir = session_input_dir
             
             if not pdf_path.exists() or not pdf_path.is_file():
                 print(f"ERROR: Файл не найден: {pdf_path}")
@@ -1359,14 +1363,15 @@ def register_pdf_routes(app, ctx):
             if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
                 return jsonify({"error": "Недопустимый путь к файлу"}), 400
 
-            pdf_path = _input_files_dir / pdf_filename
+            session_input_dir = _session_input_dir()
+            pdf_path = session_input_dir / pdf_filename
 
             if not pdf_path.exists() or not pdf_path.is_file():
                 print(f"ERROR: Файл не найден: {pdf_path}")
                 return jsonify({"error": f"Файл не найден: {pdf_filename}"}), 404
 
             try:
-                pdf_path.resolve().relative_to(_input_files_dir.resolve())
+                pdf_path.resolve().relative_to(session_input_dir.resolve())
             except ValueError:
                 return jsonify({"error": "Недопустимый путь к файлу"}), 400
 
@@ -1495,7 +1500,8 @@ def register_pdf_routes(app, ctx):
         if ".." in pdf_filename or pdf_filename.startswith("/") or pdf_filename.startswith("\\"):
             abort(404)
         
-        pdf_path = input_files_dir / pdf_filename
+        session_input_dir = _session_input_dir()
+        pdf_path = session_input_dir / pdf_filename
         
         if not pdf_path.exists() or not pdf_path.is_file():
             abort(404)
@@ -1506,7 +1512,7 @@ def register_pdf_routes(app, ctx):
         
         # Проверяем, что файл находится внутри input_files_dir
         try:
-            pdf_path.resolve().relative_to(_input_files_dir.resolve())
+            pdf_path.resolve().relative_to(session_input_dir.resolve())
         except ValueError:
             abort(404)
         
@@ -1691,7 +1697,8 @@ def register_pdf_routes(app, ctx):
         if ".." in pdf_file or pdf_file.startswith("/") or pdf_file.startswith("\\"):
             return jsonify({"error": "Недопустимый путь к файлу"}), 400
         
-        pdf_path = _input_files_dir / pdf_file
+        session_input_dir = _session_input_dir()
+        pdf_path = session_input_dir / pdf_file
         if not pdf_path.exists():
             return jsonify({"error": f"Файл не найден: {pdf_file}"}), 404
         

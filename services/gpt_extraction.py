@@ -40,7 +40,7 @@ def hash_prompt(prompt: str) -> str:
     return hashlib.sha256(prompt.encode('utf-8')).hexdigest()
 
 
-def create_extraction_prompt(text: str, use_prompts_module: bool = True) -> str:
+def create_extraction_prompt(text: str, use_prompts_module: bool = True, config: Optional[Any] = None) -> str:
     """
     Создает промпт для извлечения метаданных из текста статьи.
     
@@ -55,48 +55,36 @@ def create_extraction_prompt(text: str, use_prompts_module: bool = True) -> str:
     if use_prompts_module:
         try:
             from prompts import Prompts
-            base_prompt = Prompts.SCIENTIFIC_DETAILED
-            # Добавляем текст статьи к промпту
-            prompt = f"{base_prompt}\n\nТекст статьи для анализа:\n\n{text}"
+            extract_abstracts = False
+            extract_references = False
+            if config is not None:
+                extract_abstracts = bool(config.get("gpt_extraction.extract_abstracts", False))
+                extract_references = bool(config.get("gpt_extraction.extract_references", False))
+            prompt = Prompts.get_scientific_prompt(
+                article_text=text,
+                extract_abstracts=extract_abstracts,
+                extract_references=extract_references,
+            )
             return prompt
         except (ImportError, AttributeError):
             pass
     
     # Если промпт из prompts.py недоступен, используем базовый промпт
-    prompt = f"""Извлеки метаданные из следующего текста научной статьи и верни результат в формате JSON.
-
-Текст статьи:
-{text}
-
-Извлеки следующие поля:
-- title (название статьи на русском языке)
-- title_en (название статьи на английском языке, если есть)
-- IMPORTANT: Extract full information for all authors listed in the article. Do not omit any author under any circumstances.
-- authors (список авторов, каждый автор как объект с полями: surname, initials, organization, address, email, otherInfo - для русского и английского языков)
-- doi (DOI статьи, если есть)
-- udc (УДК, если есть)
-- bbk (ББК, если есть)
-- edn (EDN, если есть)
-- annotation (аннотация на русском языке)
-- annotation_en (аннотация на английском языке, если есть)
-- keywords (ключевые слова на русском языке, список)
-- keywords_en (ключевые слова на английском языке, список, если есть)
-- pages (страницы статьи в формате "начало-конец", например "9-18")
-- artType (тип статьи: "Научная статья", "Обзорная статья" и т.д.)
-- PublLang (язык публикации: "RUS", "ENG" или "BOTH")
-- datePublication (дата публикации в формате YYYY-MM-DD)
-- received_date (дата поступления в редакцию в формате YYYY-MM-DD, если есть)
-- reviewed_date (дата рецензирования в формате YYYY-MM-DD, если есть)
-- accepted_date (дата принятия к публикации в формате YYYY-MM-DD, если есть)
-- funding (финансирование на русском языке, если есть)
-- funding_en (финансирование на английском языке, если есть)
-- references_ru (список литературы на русском языке)
-- references_en (список литературы на английском языке, если есть)
-
-Верни только валидный JSON объект без дополнительных комментариев и форматирования.
-Если какое-то поле отсутствует в тексте, верни null для этого поля.
-"""
-    return prompt
+    extract_abstracts = False
+    extract_references = False
+    if config is not None:
+        extract_abstracts = bool(config.get("gpt_extraction.extract_abstracts", False))
+        extract_references = bool(config.get("gpt_extraction.extract_references", False))
+    try:
+        from prompts import Prompts
+        prompt = Prompts.get_scientific_fallback_prompt(
+            article_text=text,
+            extract_abstracts=extract_abstracts,
+            extract_references=extract_references,
+        )
+        return prompt
+    except Exception:
+        raise GPTExtractionError("Prompts module unavailable for fallback prompt generation.")
 
 
 def extract_metadata_with_gpt(
@@ -189,7 +177,7 @@ def extract_metadata_with_gpt(
     if raw_prompt:
         prompt = text
     else:
-        prompt = create_extraction_prompt(text, use_prompts_module=use_prompts_module)
+        prompt = create_extraction_prompt(text, use_prompts_module=use_prompts_module, config=config)
     
     # Хэшируем промпт для кэширования
     prompt_hash = hash_prompt(prompt)
@@ -213,22 +201,29 @@ def extract_metadata_with_gpt(
         print(f"📤 Отправка запроса к GPT (модель: {model}, хэш промпта: {prompt_hash[:16]}...)")
         
         # Используем современный API или старый в зависимости от версии библиотеки
+        system_message = ""
+        try:
+            from prompts import Prompts
+            system_message = Prompts.SYSTEM_METADATA_EXTRACTION
+        except Exception:
+            system_message = ""
+
         if OPENAI_AVAILABLE and not getattr(globals(), 'OPENAI_LEGACY', False):
             # Современный API (openai >= 1.0.0)
             try:
                 import httpx
                 http_client = httpx.Client(
-                    timeout=httpx.Timeout(60.0, connect=10.0),
+                    timeout=httpx.Timeout(180.0, connect=10.0),
                 )
                 client = OpenAI(api_key=api_key, http_client=http_client, max_retries=2)
             except Exception:
-                client = OpenAI(api_key=api_key, timeout=60)
+                client = OpenAI(api_key=api_key, timeout=180)
             response = client.chat.completions.create(
                 model=model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "Ты помощник для извлечения метаданных из научных статей. Всегда возвращай валидный JSON."
+                        "content": system_message
                     },
                     {
                         "role": "user",
@@ -249,7 +244,7 @@ def extract_metadata_with_gpt(
                 messages=[
                     {
                         "role": "system",
-                        "content": "Ты помощник для извлечения метаданных из научных статей. Всегда возвращай валидный JSON."
+                        "content": system_message
                     },
                     {
                         "role": "user",
@@ -384,6 +379,9 @@ def extract_metadata_from_pdf(
                 last_pages=config.get("pdf_reader.last_pages", 3),
                 extract_all_pages=config.get("pdf_reader.extract_all_pages", False),
                 clean_text=config.get("pdf_reader.clean_text", True),
+                smart_columns=config.get("pdf_reader.smart_columns", True),
+                two_column_min_words=config.get("pdf_reader.two_column_min_words", 10),
+                two_column_gutter_ratio=config.get("pdf_reader.two_column_gutter_ratio", 0.1),
             )
         else:
             pdf_config = PDFReaderConfig()
@@ -726,4 +724,3 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-

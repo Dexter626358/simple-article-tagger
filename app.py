@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import secrets
 import sys
 import threading
 import time
@@ -98,6 +100,7 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
     
     archive_root_dir = script_dir / ARCHIVE_ROOT_DIRNAME
     archive_retention_days = ARCHIVE_RETENTION_DAYS
+    config = {}
     try:
         config_path = script_dir / "config.json"
         if config_path.exists():
@@ -108,20 +111,22 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
                 archive_retention_days = retention_cfg
     except Exception as exc:
         print(f"WARNING: failed to read archive retention from config.json: {exc}")
+
+    secret_key = os.getenv("FLASK_SECRET_KEY")
+    if not secret_key and isinstance(config, dict):
+        secret_key = (config.get("flask") or {}).get("secret_key")
+    if not secret_key:
+        secret_key = secrets.token_hex(32)
+        print("WARNING: FLASK_SECRET_KEY is not set; generated a temporary key.")
+    app.secret_key = secret_key
     
     # Сохраняем путь для использования в endpoint (замыкание)
     _input_files_dir = input_files_dir
     _words_input_dir = words_input_dir
 
-    progress_state = {
-        "status": "idle",
-        "processed": 0,
-        "total": 0,
-        "message": "",
-        "archive": None
-    }
-    last_archive = {"name": None}
-    progress_lock = threading.Lock()
+    progress_states: dict[str, dict] = {}
+    progress_locks: dict[str, threading.Lock] = {}
+    progress_global_lock = threading.Lock()
     
     print(f"DEBUG create_app: input_files_dir = {_input_files_dir}")
     print(f"DEBUG create_app: input_files_dir.exists() = {_input_files_dir.exists()}")
@@ -223,9 +228,9 @@ def create_app(json_input_dir: Path, words_input_dir: Path, use_word_reader: boo
         "use_word_reader": use_word_reader,
         "archive_root_dir": archive_root_dir,
         "archive_retention_days": archive_retention_days,
-        "progress_state": progress_state,
-        "progress_lock": progress_lock,
-        "last_archive": last_archive,
+        "progress_states": progress_states,
+        "progress_locks": progress_locks,
+        "progress_global_lock": progress_global_lock,
         "validate_zip_members": validate_zip_members,
         "find_files_for_json": find_files_for_json,
         "SUPPORTED_EXTENSIONS": SUPPORTED_EXTENSIONS,

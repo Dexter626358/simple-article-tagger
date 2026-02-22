@@ -24,6 +24,10 @@ Pillow>=10.0.0
 # Для работы с GPT API
 openai>=1.0.0
 
+# Для работы с Crossref
+requests>=2.32.0
+beautifulsoup4>=4.12.0
+
 # Тесты
 pytest>=8.2.0
 

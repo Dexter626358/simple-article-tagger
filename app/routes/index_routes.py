@@ -37,6 +37,10 @@ def register_index_routes(app, ctx):
             files = [f for f in files if f.get("issue_name") == issue_name]
         else:
             files = []
-        return render_template_string(HTML_TEMPLATE, files=files)
+        return render_template_string(
+            HTML_TEMPLATE,
+            files=files,
+            issue_name=issue_name,
+        )
     
 

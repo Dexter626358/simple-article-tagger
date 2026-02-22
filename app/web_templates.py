@@ -7,71 +7,113 @@ HTML_TEMPLATE = """
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Работа с метаданными статей</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #181c27;
+      --surface2: #1e2336;
+      --border: #2a3050;
+      --border-light: #353d5e;
+      --accent: #6366f1;
+      --accent-dim: #4f46e5;
+      --accent-glow: rgba(99, 102, 241, 0.15);
+      --success: #10b981;
+      --success-dim: rgba(16, 185, 129, 0.12);
+      --danger: #ef4444;
+      --danger-dim: rgba(239, 68, 68, 0.12);
+      --warning: #f59e0b;
+      --text: #e2e8f0;
+      --text-muted: #64748b;
+      --text-dim: #94a3b8;
+      --mono: 'JetBrains Mono', monospace;
+      --sans: 'Manrope', sans-serif;
+    }
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html, body {
       height: auto;
       min-height: 100vh;
     }
     body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      background: #1e2029;
-      padding: 24px;
+      font-family: var(--sans);
+      background: var(--bg);
+      padding: 0;
       margin: 0;
-      color: #e6e8ee;
+      color: var(--text);
+      background-image:
+        radial-gradient(1200px 520px at 12% -20%, rgba(99, 102, 241, 0.2), transparent 65%),
+        radial-gradient(900px 420px at 92% -10%, rgba(16, 185, 129, 0.1), transparent 60%);
     }
     .container {
-      max-width: 1200px;
+      max-width: 1120px;
       margin: 0 auto;
       background: transparent;
-      border-radius: 16px;
-      box-shadow: none;
       min-height: auto;
       height: auto;
-      padding-bottom: 20px;
+      padding: 0 20px 20px;
     }
-    .header {
-      background: #2a2d3a;
-      color: #e6e8ee;
-      padding: 24px;
-      text-align: center;
-      border-radius: 16px;
-      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35);
-      border: 1px solid #3a3f52;
-    }
-    .header h1 {
-      font-size: 26px;
-      margin-bottom: 6px;
-    }
-    .header p {
-      opacity: 0.85;
-      font-size: 14px;
-      color: #a7aec2;
-    }
-    .header-actions {
-      margin-top: 16px;
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 100;
       display: flex;
-      gap: 12px;
-      justify-content: center;
-      flex-wrap: wrap;
       align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 32px;
+      border-bottom: 1px solid var(--border);
+      background: var(--surface);
+      backdrop-filter: blur(12px);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
     }
-    .checkbox-inline {
+    .topbar-title {
+      font-size: 15px;
+      font-weight: 800;
+      letter-spacing: -0.2px;
+      color: var(--text);
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .topbar-actions {
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      font-size: 13px;
-      color: #d4d8e6;
-      background: #323545;
-      border-radius: 999px;
-      padding: 8px 12px;
-      border: 1px solid #3a3f52;
     }
-    .checkbox-inline small {
-      color: #9aa2b6;
+    .divider-v {
+      width: 1px;
+      height: 24px;
+      background: var(--border);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+    .badge-warning {
+      color: var(--warning);
+      background: rgba(245, 158, 11, 0.12);
+      border-color: rgba(245, 158, 11, 0.28);
+    }
+    .badge-success {
+      color: var(--success);
+      background: var(--success-dim);
+      border-color: rgba(16, 185, 129, 0.28);
+    }
+    .stepper-wrap {
+      padding: 18px 0 12px;
+      background: linear-gradient(180deg, rgba(24, 28, 39, 0.9), rgba(24, 28, 39, 0.55));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22), inset 0 1px 0 rgba(255, 255, 255, 0.02);
     }
     .step-bar {
-      margin-top: 16px;
+      margin-top: 0;
       display: flex;
       gap: 10px;
       justify-content: center;
@@ -84,22 +126,30 @@ HTML_TEMPLATE = """
       align-items: center;
       justify-content: center;
       padding: 10px 14px;
-      border-radius: 999px;
-      font-size: 13px;
-      font-weight: 600;
-      color: #b7bfd1;
-      border: 1px solid #3a3f52;
-      background: #2f3342;
+      border-radius: 10px;
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 6px 14px rgba(0, 0, 0, 0.18);
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+    }
+    .step:hover {
+      transform: translateY(-1px);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 10px 18px rgba(0, 0, 0, 0.22);
     }
     .step.active {
-      background: #6c63ff;
-      border-color: #6c63ff;
-      color: #fff;
+      background: linear-gradient(180deg, rgba(99, 102, 241, 0.3), rgba(99, 102, 241, 0.15));
+      border-color: var(--accent);
+      color: var(--text);
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.24), 0 10px 24px rgba(99, 102, 241, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.08);
     }
     .step.done {
-      background: #243832;
-      border-color: #2f5a46;
-      color: #6dd08a;
+      background: linear-gradient(180deg, rgba(16, 185, 129, 0.2), rgba(16, 185, 129, 0.1));
+      border-color: rgba(16, 185, 129, 0.28);
+      color: var(--success);
+      box-shadow: 0 10px 20px rgba(16, 185, 129, 0.14), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     }
     .upload-help ul {
       margin: 0;
@@ -121,7 +171,7 @@ HTML_TEMPLATE = """
       border: 1px solid #3a3f52;
     }
     .content {
-      padding: 20px 0 0 0;
+      padding: 10px 0 0 0;
       min-height: auto;
       height: auto;
       display: flex;
@@ -129,24 +179,24 @@ HTML_TEMPLATE = """
       gap: 16px;
     }
     .card {
-      background: #2a2d3a;
-      border: 1px solid #3a3f52;
-      border-radius: 16px;
+      background: linear-gradient(180deg, rgba(24, 28, 39, 0.98), rgba(22, 26, 36, 0.98));
+      border: 1px solid var(--border);
+      border-radius: 14px;
       padding: 18px;
-      box-shadow: 0 10px 26px rgba(0, 0, 0, 0.28);
+      box-shadow: 0 18px 36px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255, 255, 255, 0.03);
     }
     .upload-panel {
       margin: 0;
     }
     .upload-title {
       font-weight: 700;
-      font-size: 16px;
-      color: #e6e8ee;
+      font-size: 15px;
+      color: var(--text);
       margin-bottom: 4px;
     }
     .upload-subtitle {
-      font-size: 13px;
-      color: #a7aec2;
+      font-size: 12px;
+      color: var(--text-muted);
       margin-bottom: 12px;
     }
     .upload-form {
@@ -155,47 +205,101 @@ HTML_TEMPLATE = """
       flex-wrap: wrap;
       align-items: center;
     }
+    .dropzone {
+      width: 100%;
+      border: 1px dashed var(--border-light);
+      border-radius: 14px;
+      padding: 34px 18px;
+      text-align: center;
+      cursor: pointer;
+      background: rgba(99, 102, 241, 0.05);
+      transition: all 0.2s ease;
+    }
+    .dropzone:hover {
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, 0.09);
+    }
+    .dropzone.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.3), 0 14px 24px rgba(99, 102, 241, 0.16);
+      background: rgba(99, 102, 241, 0.12);
+    }
+    .dropzone-icon {
+      font-size: 32px;
+      margin-bottom: 10px;
+      display: inline-block;
+    }
+    .dropzone-text {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--text);
+      margin-bottom: 4px;
+      line-height: 1.3;
+    }
+    .dropzone-sub {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+    }
+    .dropzone-formats {
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .format-tag {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: rgba(99, 102, 241, 0.08);
+      color: var(--text-dim);
+    }
     .upload-form input[type="file"] {
       flex: 1 1 260px;
-      padding: 6px;
+      padding: 10px 12px;
       font-size: 12px;
-      border: 1px solid #3a3f52;
-      border-radius: 4px;
-      background: #232633;
-      color: #e6e8ee;
+      border: 1px dashed var(--border-light);
+      border-radius: 10px;
+      background: rgba(99, 102, 241, 0.06);
+      color: var(--text-dim);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 16px rgba(0, 0, 0, 0.14);
     }
     .upload-status {
       font-size: 12px;
-      color: #a7aec2;
+      color: var(--text-muted);
       min-height: 18px;
     }
     .progress-bar {
       position: relative;
       width: 260px;
       height: 10px;
-      background: #2b2f3d;
+      background: var(--surface2);
       border-radius: 6px;
       overflow: hidden;
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.35);
     }
     .progress-bar-fill {
       height: 100%;
       width: 0%;
-      background: linear-gradient(90deg, #6c63ff, #7f75ff);
+      background: linear-gradient(90deg, var(--accent), #818cf8);
       transition: width 0.3s ease;
     }
     .details-card {
       margin-top: 10px;
-      background: #2f3342;
-      border: 1px solid #3a3f52;
+      background: var(--surface2);
+      border: 1px solid var(--border);
       border-radius: 10px;
       padding: 10px 12px;
       font-size: 12px;
-      color: #c6cbe0;
+      color: var(--text-dim);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 16px rgba(0, 0, 0, 0.14);
     }
     .details-card summary {
       cursor: pointer;
       font-weight: 600;
-      color: #cfd4e6;
+      color: var(--text);
     }
     .details-card ul {
       margin: 8px 0 0 18px;
@@ -207,37 +311,37 @@ HTML_TEMPLATE = """
       margin-top: 0;
     }
     .file-item {
-      background: #f8f9fa;
-      border: 1px solid #e0e0e0;
+      background: var(--surface2);
+      border: 1px solid var(--border);
       border-radius: 4px;
       padding: 8px;
       cursor: pointer;
       transition: all 0.2s;
       text-decoration: none;
-      color: #333;
+      color: var(--text);
       display: block;
     }
     .file-item.active {
-      border-color: #2196f3;
-      background: #e3f2fd;
-      box-shadow: 0 2px 8px rgba(33, 150, 243, 0.3);
+      border-color: var(--accent);
+      background: rgba(99, 102, 241, 0.16);
+      box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.22), 0 10px 22px rgba(99, 102, 241, 0.2);
     }
     .file-item:hover {
-      background: #e3f2fd;
-      border-color: #2196f3;
+      background: rgba(99, 102, 241, 0.12);
+      border-color: var(--accent);
       transform: translateY(-2px);
-      box-shadow: 0 4px 12px rgba(33, 150, 243, 0.2);
+      box-shadow: 0 8px 14px rgba(0, 0, 0, 0.2);
     }
     .file-item:active {
       transform: translateY(0);
     }
     .file-item.processed {
-      border-color: #4caf50;
-      background: #f1f8f4;
+      border-color: rgba(16, 185, 129, 0.35);
+      background: var(--success-dim);
     }
     .file-item.processed:hover {
-      border-color: #45a049;
-      background: #e8f5e9;
+      border-color: rgba(16, 185, 129, 0.6);
+      background: rgba(16, 185, 129, 0.18);
     }
     .file-name {
       font-weight: 600;
@@ -262,7 +366,7 @@ HTML_TEMPLATE = """
     }
     .file-info {
       font-size: 9px;
-      color: #666;
+      color: var(--text-muted);
       line-height: 1.3;
     }
     .form-field-group {
@@ -671,25 +775,29 @@ HTML_TEMPLATE = """
     .btn-primary,
     .btn-secondary,
     .btn-danger {
-      padding: 10px 18px;
-      border: none;
-      border-radius: 10px;
+      padding: 9px 14px;
+      border: 1px solid transparent;
+      border-radius: 8px;
       font-size: 13px;
       font-weight: 600;
       cursor: pointer;
-      transition: all 0.2s ease;
+      transition: all 0.15s ease;
       display: inline-flex;
       align-items: center;
       gap: 6px;
       justify-content: center;
+      text-decoration: none;
+      white-space: nowrap;
     }
     .btn-primary {
-      background: #6c63ff;
+      background: linear-gradient(180deg, #7477ff, var(--accent));
       color: #fff;
-      box-shadow: 0 8px 18px rgba(108, 99, 255, 0.25);
+      box-shadow: 0 8px 20px rgba(99, 102, 241, 0.36), inset 0 1px 0 rgba(255, 255, 255, 0.22);
     }
     .btn-primary:hover {
-      background: #5a52ea;
+      background: linear-gradient(180deg, #7e81ff, var(--accent-dim));
+      box-shadow: 0 12px 24px rgba(99, 102, 241, 0.42), 0 0 20px var(--accent-glow);
+      transform: translateY(-1px);
     }
     .btn.is-disabled {
       opacity: 0.6;
@@ -697,20 +805,24 @@ HTML_TEMPLATE = """
       pointer-events: auto;
     }
     .btn-secondary {
-      background: #2f3342;
-      color: #e6e8ee;
-      border: 1px solid #3a3f52;
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 6px 14px rgba(0, 0, 0, 0.18);
     }
     .btn-secondary:hover {
-      background: #3a3f52;
+      background: var(--surface2);
+      border-color: var(--border-light);
+      color: var(--text);
     }
     .btn-danger {
-      background: #3b2527;
-      color: #ff9aa5;
-      border: 1px solid #5a3438;
+      background: var(--danger-dim);
+      color: var(--danger);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02), 0 6px 14px rgba(0, 0, 0, 0.18);
     }
     .btn-danger:hover {
-      background: #4a2b2f;
+      background: rgba(239, 68, 68, 0.2);
     }
     .btn-hero {
       padding: 12px 26px;
@@ -722,45 +834,105 @@ HTML_TEMPLATE = """
       align-items: center;
       gap: 8px;
       padding: 8px 12px;
-      background: #2f3342;
-      border: 1px solid #3a3f52;
+      background: var(--surface2);
+      border: 1px solid var(--border);
       border-radius: 10px;
       font-size: 12px;
-      color: #c6cbe0;
+      color: var(--text-dim);
     }
     .actions-row {
       display: flex;
       gap: 10px;
       flex-wrap: wrap;
       align-items: center;
+      border-top: 1px solid var(--border);
+      padding-top: 14px;
     }
     .muted-text {
-      color: #a7aec2;
+      color: var(--text-muted);
+    }
+    .checkbox-inline {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-dim);
+      background: transparent;
+      border-radius: 999px;
+      padding: 0;
+      border: none;
+      cursor: pointer;
+    }
+    .checkbox-inline small {
+      color: var(--warning);
+    }
+    @media (max-width: 900px) {
+      .topbar {
+        padding: 12px 16px;
+      }
+      .topbar-title {
+        font-size: 13px;
+      }
+      .container {
+        padding: 0 12px 16px;
+      }
+      .step {
+        flex: 1 1 120px;
+      }
+    }
+    @media (max-width: 640px) {
+      .topbar {
+        flex-wrap: wrap;
+        justify-content: center;
+      }
+      .topbar-actions {
+        width: 100%;
+        justify-content: center;
+      }
+      .upload-form {
+        flex-direction: column;
+        align-items: stretch;
+      }
+      .upload-form input[type="file"] {
+        width: 100%;
+      }
+      .actions-row {
+        align-items: stretch;
+      }
+      .actions-row .btn {
+        width: 100%;
+      }
     }
   </style>
 </head>
 <body>
+  <div class="topbar">
+    <div class="topbar-title">
+      <span>📄</span>
+      <span>Работа с метаданными статей</span>
+    </div>
+    <div class="topbar-actions">
+      {% if issue_name %}
+      <span class="badge badge-success">Проект: {{ issue_name }}</span>
+      {% else %}
+      <span class="badge badge-warning">Нет проекта</span>
+      {% endif %}
+      <span class="divider-v" aria-hidden="true"></span>
+      <button type="button" id="resetSessionBtn" class="btn btn-danger">↺ Сбросить</button>
+    </div>
+  </div>
   <div class="container">
-    <div class="header">
-      <h1>Работа с метаданными статей</h1>
-      <p>Загрузите выпуск и сгенерируйте XML</p>
-      <div class="header-actions">
-        {% set total_files = files|length %}
-        {% set processed_files = files|selectattr('is_processed')|list|length %}
-        {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
-        <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn btn-primary btn-hero" style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
-          🚀 Сгенерировать XML
-        </button>
-        <label class="checkbox-inline">
-          <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px);">
-          Генерировать XML даже при ошибках
-          <small>(не все статьи могут быть обработаны)</small>
-        </label>
+    <div class="stepper-wrap">
+      <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
+        <div class="step" data-step="1" data-label="1 Загрузка">1 Загрузка</div>
+        <div class="step" data-step="2" data-label="2 Разметка">2 Разметка</div>
+        <div class="step" data-step="3" data-label="3 Экспорт XML">3 Экспорт XML</div>
       </div>
-      <script>
+    </div>
+    <script>
         window.handleArchiveUpload = window.handleArchiveUpload || function(event) {
           if (event && event.preventDefault) event.preventDefault();
-          const fileInput = document.getElementById("inputArchiveFile");
+          const fileInput = document.getElementById("fileInput") || document.getElementById("inputArchiveFile");
           const status = document.getElementById("inputArchiveStatus");
           if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
             if (status) {
@@ -823,22 +995,10 @@ HTML_TEMPLATE = """
             });
           return false;
         };
-      </script>
-      <div class="step-bar" id="stepBar" data-total="{{ files|length if files else 0 }}" data-processed="{{ files|selectattr('is_processed')|list|length if files else 0 }}">
-        <div class="step" data-step="1" data-label="1 Загрузка">1 Загрузка</div>
-        <div class="step" data-step="2" data-label="2 Разметка">2 Разметка</div>
-        <div class="step" data-step="3" data-label="3 Экспорт XML">3 Экспорт XML</div>
-      </div>
-    </div>
+    </script>
     <div class="content">
       <div class="upload-panel card">
         <div class="upload-title">📦 Загрузите архив выпуска</div>
-        <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
-        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
-          <input type="file" id="inputArchiveFile" name="archive" accept=".zip,application/zip" required>
-          <button type="button" id="uploadArchiveBtn" class="btn btn-primary">Загрузить архив</button>
-          <span id="inputArchiveStatus" class="upload-status"></span>
-        </form>
         <details class="details-card">
           <summary>Показать требования к архиву</summary>
           <ul>
@@ -849,12 +1009,30 @@ HTML_TEMPLATE = """
             <li>📦 Общий файл: <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.tex</code>)</li>
           </ul>
         </details>
+        <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
+        <form id="inputArchiveForm" class="upload-form" enctype="multipart/form-data" action="/upload-input-archive" method="post">
+          <div class="dropzone" id="dropzone">
+            <span class="dropzone-icon">☁️</span>
+            <div class="dropzone-text">Перетащите ZIP-архив сюда</div>
+            <div class="dropzone-sub">или кликните для выбора файла</div>
+            <div class="dropzone-formats">
+              <span class="format-tag">.zip</span>
+            </div>
+          </div>
+          <input type="file" id="fileInput" name="archive" accept=".zip,application/zip" style="display:none" required>
+          <button type="button" id="uploadArchiveBtn" class="btn btn-primary">Загрузить архив</button>
+          <span id="inputArchiveStatus" class="upload-status"></span>
+        </form>
+        
         <div style="margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center;">
           <button type="button" id="processArchiveBtn" class="btn btn-primary">Обработать выпуск с помощью ИИ</button>
           <div id="archiveProgressBar" class="progress-bar" aria-hidden="true">
             <div id="archiveProgressFill" class="progress-bar-fill"></div>
           </div>
           <span id="archiveProgress" class="status-card"></span>
+        </div>
+        <div class="upload-status" style="margin-top:6px;">
+          ИИ автоматически заполнит поля формы статьи метаданными из PDF.
         </div>
         <div style="margin-top: 6px; display:flex; gap: 10px; flex-wrap: wrap; align-items:center;">
           <span id="archiveDetails" class="upload-status"></span>
@@ -876,10 +1054,19 @@ HTML_TEMPLATE = """
           </div>
         </div>
         <div class="actions-row" style="margin-top: 10px;">
-          <button type="button" id="saveProjectBtn" class="btn btn-primary">💾 Сохранить проект</button>
-          <button type="button" id="openProjectBtn" class="btn btn-secondary">📂 Открыть проект</button>
-          <button type="button" id="deleteProjectBtn" class="btn btn-danger">🗑 Удалить выпуск</button>
-          <button type="button" id="resetSessionBtn" class="btn btn-danger">Сбросить сессию</button>
+          {% set total_files = files|length %}
+          {% set processed_files = files|selectattr('is_processed')|list|length %}
+          {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
+          <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-start;">
+            <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn btn-primary" style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
+              🚀 Сгенерировать XML
+            </button>
+            <label class="checkbox-inline" style="margin:0;">
+              <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px);">
+              Генерировать XML даже при ошибках
+              <small>(не все статьи могут быть обработаны)</small>
+            </label>
+          </div>
           <button type="button" id="downloadProjectBtn" class="btn btn-secondary">⬇ Скачать проект</button>
           <button type="button" id="restoreProjectBtn" class="btn btn-secondary">📤 Восстановить проект</button>
           <input type="file" id="restoreProjectArchiveInput" accept=".zip,application/zip" style="display:none;">
@@ -1101,9 +1288,6 @@ HTML_TEMPLATE = """
             <div class="status-chip" style="background: {{ progress_color }}; color: #fff;">
               {{ progress_pct }}% готово
             </div>
-            <a href="/markup/{{ files[0].name }}" class="btn-secondary" style="text-decoration:none; padding:6px 10px;">
-              Перейти к разметке
-            </a>
           </div>
         </div>
         <div class="file-list">
@@ -3611,16 +3795,15 @@ function closeAnnotationModal() {
         };
         </script>
       {% else %}
+        {% if issue_name %}
         <div class="empty-state card">
           <h3>JSON-файлы не найдены</h3>
-          <p>Загрузите или поместите JSON-файлы в папку:</p>
-          <p style="margin-top: 12px; font-size: 14px;">
-            <code>input_files/имя_архива/json</code>
-          </p>
+          <p>Для текущего выпуска пока нет файлов для разметки.</p>
           <div style="margin-top: 14px;">
             <button type="button" id="openJsonFolderBtn" class="btn btn-secondary">📂 Открыть папку выпуска</button>
           </div>
         </div>
+        {% endif %}
       {% endif %}
       <script>
         const inputArchiveForm = document.getElementById("inputArchiveForm");
@@ -4155,7 +4338,7 @@ function closeAnnotationModal() {
 
         window.handleArchiveUpload = async (event) => {
           if (event && event.preventDefault) event.preventDefault();
-          const fileInput = document.getElementById("inputArchiveFile");
+          const fileInput = document.getElementById("fileInput") || document.getElementById("inputArchiveFile");
           const status = document.getElementById("inputArchiveStatus");
           if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
             if (status) {
@@ -4214,6 +4397,51 @@ function closeAnnotationModal() {
         const uploadArchiveBtn = document.getElementById("uploadArchiveBtn");
         if (uploadArchiveBtn) {
           uploadArchiveBtn.addEventListener("click", window.handleArchiveUpload);
+        }
+        const dropzone = document.getElementById("dropzone");
+        const archiveFileInput = document.getElementById("fileInput") || document.getElementById("inputArchiveFile");
+        const archiveStatus = document.getElementById("inputArchiveStatus");
+        if (dropzone && archiveFileInput) {
+          dropzone.addEventListener("click", () => archiveFileInput.click());
+          dropzone.addEventListener("dragover", (e) => {
+            e.preventDefault();
+            dropzone.classList.add("active");
+          });
+          dropzone.addEventListener("dragleave", () => {
+            dropzone.classList.remove("active");
+          });
+          dropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            dropzone.classList.remove("active");
+            const file = e.dataTransfer && e.dataTransfer.files ? e.dataTransfer.files[0] : null;
+            if (!file) return;
+            if (!String(file.name || "").toLowerCase().endsWith(".zip")) {
+              if (archiveStatus) {
+                archiveStatus.textContent = "Поддерживается только ZIP архив.";
+                archiveStatus.style.color = "#c62828";
+              }
+              return;
+            }
+            try {
+              const dt = new DataTransfer();
+              dt.items.add(file);
+              archiveFileInput.files = dt.files;
+            } catch (_) {}
+            if (archiveStatus) {
+              archiveStatus.textContent = `Файл выбран: ${file.name}`;
+              archiveStatus.style.color = "#9aa2b6";
+            }
+          });
+          archiveFileInput.addEventListener("change", () => {
+            const file = archiveFileInput.files && archiveFileInput.files.length ? archiveFileInput.files[0] : null;
+            if (!archiveStatus) return;
+            if (!file) {
+              archiveStatus.textContent = "";
+              return;
+            }
+            archiveStatus.textContent = `Файл выбран: ${file.name}`;
+            archiveStatus.style.color = "#9aa2b6";
+          });
         }
       </script>
     </div>

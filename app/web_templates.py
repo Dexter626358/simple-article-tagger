@@ -866,6 +866,88 @@ HTML_TEMPLATE = """
     .checkbox-inline small {
       color: var(--warning);
     }
+    /* AI settings modal in the same visual language as the main page */
+    #aiSettingsModal {
+      background: rgba(8, 11, 20, 0.62);
+      backdrop-filter: blur(4px);
+      pointer-events: auto;
+    }
+    #aiSettingsModal .modal-content {
+      background: linear-gradient(180deg, rgba(24, 28, 39, 0.98), rgba(19, 23, 34, 0.98));
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      color: var(--text);
+      box-shadow: 0 22px 44px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+    }
+    #aiSettingsModal .modal-header {
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 12px;
+      margin-bottom: 14px;
+    }
+    #aiSettingsModal .modal-header h2 {
+      color: var(--text);
+      font-size: 18px;
+    }
+    #aiSettingsModal .modal-close {
+      color: var(--text-dim);
+      border-radius: 8px;
+      width: 34px;
+      height: 34px;
+      line-height: 34px;
+    }
+    #aiSettingsModal .modal-close:hover {
+      color: var(--text);
+      background: var(--surface2);
+    }
+    .ai-settings-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .ai-settings-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .ai-settings-checkbox {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-dim);
+    }
+    .ai-settings-form input[type="text"],
+    .ai-settings-form input[type="number"],
+    .ai-settings-form select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      font-family: var(--sans);
+      outline: none;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+    .ai-settings-form input[type="text"]:focus,
+    .ai-settings-form input[type="number"]:focus,
+    .ai-settings-form select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+    }
+    .ai-settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    @media (max-width: 640px) {
+      .ai-settings-grid {
+        grid-template-columns: 1fr;
+      }
+    }
     @media (max-width: 900px) {
       .topbar {
         padding: 12px 16px;
@@ -918,7 +1000,54 @@ HTML_TEMPLATE = """
       <span class="badge badge-warning">Нет проекта</span>
       {% endif %}
       <span class="divider-v" aria-hidden="true"></span>
+      <button type="button" id="aiSettingsBtn" class="btn btn-secondary">⚙ Настройки ИИ</button>
       <button type="button" id="resetSessionBtn" class="btn btn-danger">↺ Сбросить</button>
+    </div>
+  </div>
+  <div id="aiSettingsModal" class="modal">
+    <div class="modal-content" style="max-width:560px;">
+      <div class="modal-header" style="cursor:default;">
+        <h2>Настройки обработки ИИ</h2>
+        <button type="button" class="modal-close" data-action="close-ai-settings">×</button>
+      </div>
+      <div class="ai-settings-form">
+        <label class="ai-settings-field">
+          Модель:
+          <select id="aiModelInput">
+            <option value="gpt-4.1-mini">gpt-4.1-mini</option>
+            <option value="gpt-4.1">gpt-4.1</option>
+            <option value="gpt-4o-mini">gpt-4o-mini</option>
+            <option value="gpt-4o">gpt-4o</option>
+            <option value="gpt-4-turbo">gpt-4-turbo</option>
+          </select>
+        </label>
+        <label class="ai-settings-checkbox">
+          <input type="checkbox" id="extractAbstractsInput">
+          Извлекать аннотацию
+        </label>
+        <label class="ai-settings-checkbox">
+          <input type="checkbox" id="extractReferencesInput">
+          Извлекать список литературы
+        </label>
+        <div class="ai-settings-grid">
+          <label class="ai-settings-field">
+            Первые страницы:
+            <input type="number" id="firstPagesInput" min="0" step="1">
+          </label>
+          <label class="ai-settings-field">
+            Последние страницы:
+            <input type="number" id="lastPagesInput" min="0" step="1">
+          </label>
+        </div>
+        <label class="ai-settings-checkbox">
+          <input type="checkbox" id="extractAllPagesInput">
+          Извлекать весь PDF целиком
+        </label>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="modal-btn modal-btn-cancel" data-action="close-ai-settings">Отмена</button>
+        <button type="button" class="modal-btn modal-btn-save" id="saveAiSettingsBtn">Сохранить</button>
+      </div>
     </div>
   </div>
   <div class="container">
@@ -3811,11 +3940,20 @@ function closeAnnotationModal() {
         const saveProjectBtn = document.getElementById("saveProjectBtn");
         const openProjectBtn = document.getElementById("openProjectBtn");
         const deleteProjectBtn = document.getElementById("deleteProjectBtn");
+        const aiSettingsBtn = document.getElementById("aiSettingsBtn");
         const resetSessionBtn = document.getElementById("resetSessionBtn");
         const downloadProjectBtn = document.getElementById("downloadProjectBtn");
         const restoreProjectBtn = document.getElementById("restoreProjectBtn");
         const restoreProjectArchiveInput = document.getElementById("restoreProjectArchiveInput");
         const openJsonFolderBtn = document.getElementById("openJsonFolderBtn");
+        const aiSettingsModal = document.getElementById("aiSettingsModal");
+        const saveAiSettingsBtn = document.getElementById("saveAiSettingsBtn");
+        const aiModelInput = document.getElementById("aiModelInput");
+        const extractAbstractsInput = document.getElementById("extractAbstractsInput");
+        const extractReferencesInput = document.getElementById("extractReferencesInput");
+        const firstPagesInput = document.getElementById("firstPagesInput");
+        const lastPagesInput = document.getElementById("lastPagesInput");
+        const extractAllPagesInput = document.getElementById("extractAllPagesInput");
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", () => {
             if (window.openProject) window.openProject();
@@ -3831,6 +3969,89 @@ function closeAnnotationModal() {
               }
             } catch (_) {
               window.alert("Не удалось открыть папку.");
+            }
+          });
+        }
+        const closeAiSettingsModal = () => {
+          if (aiSettingsModal) aiSettingsModal.classList.remove("active");
+        };
+        if (aiSettingsModal) {
+          aiSettingsModal.addEventListener("click", (e) => {
+            const target = e.target;
+            if (!target) return;
+            if (target === aiSettingsModal) {
+              closeAiSettingsModal();
+              return;
+            }
+            const btn = target.closest("button");
+            if (!btn) return;
+            if (btn.dataset.action === "close-ai-settings") {
+              closeAiSettingsModal();
+            }
+          });
+        }
+        if (aiSettingsBtn) {
+          aiSettingsBtn.addEventListener("click", async () => {
+            try {
+              const resp = await fetch("/settings-get");
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                window.alert(data.error || "Не удалось загрузить настройки.");
+                return;
+              }
+              if (aiModelInput) {
+                const currentModel = String(data.gpt_extraction?.model || "gpt-4.1-mini").trim();
+                const hasModel = Array.from(aiModelInput.options || []).some((opt) => opt.value === currentModel);
+                if (!hasModel && currentModel) {
+                  const customOption = document.createElement("option");
+                  customOption.value = currentModel;
+                  customOption.textContent = `${currentModel} (custom)`;
+                  aiModelInput.appendChild(customOption);
+                }
+                aiModelInput.value = currentModel || "gpt-4.1-mini";
+              }
+              if (extractAbstractsInput) extractAbstractsInput.checked = !!data.gpt_extraction?.extract_abstracts;
+              if (extractReferencesInput) extractReferencesInput.checked = !!data.gpt_extraction?.extract_references;
+              if (firstPagesInput) firstPagesInput.value = String(data.pdf_reader?.first_pages ?? 3);
+              if (lastPagesInput) lastPagesInput.value = String(data.pdf_reader?.last_pages ?? 3);
+              if (extractAllPagesInput) extractAllPagesInput.checked = !!data.pdf_reader?.extract_all_pages;
+              if (aiSettingsModal) aiSettingsModal.classList.add("active");
+            } catch (_) {
+              window.alert("Не удалось загрузить настройки.");
+            }
+          });
+        }
+        if (saveAiSettingsBtn) {
+          saveAiSettingsBtn.addEventListener("click", async () => {
+            const payload = {
+              gpt_extraction: {
+                model: (aiModelInput?.value || "").trim() || "gpt-4.1-mini",
+                extract_abstracts: !!extractAbstractsInput?.checked,
+                extract_references: !!extractReferencesInput?.checked,
+              },
+              pdf_reader: {
+                first_pages: parseInt(firstPagesInput?.value || "3", 10),
+                last_pages: parseInt(lastPagesInput?.value || "3", 10),
+                extract_all_pages: !!extractAllPagesInput?.checked,
+              },
+            };
+            try {
+              const resp = await fetch("/settings-save", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                window.alert(data.error || "Не удалось сохранить настройки.");
+                return;
+              }
+              closeAiSettingsModal();
+              if (window.toast) {
+                window.toast("Настройки ИИ сохранены");
+              }
+            } catch (_) {
+              window.alert("Не удалось сохранить настройки.");
             }
           });
         }

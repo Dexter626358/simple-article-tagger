@@ -980,6 +980,106 @@ def register_markup_routes(app, ctx):
             current_app.logger.exception("SYSTEM references ai error: %s", e)
             return jsonify(success=False, error=str(e), details=error_details), 500
 
+    @app.route("/process-annotation-ai", methods=["POST"])
+    def process_annotation_ai():
+        """Очищает аннотацию от технических артефактов с помощью ИИ без изменения смысла."""
+        try:
+            data = request.get_json(silent=True) or {}
+            field_id = str(data.get("field_id") or "").strip()
+            raw_text = str(data.get("text") or "")
+
+            if field_id not in {"annotation", "annotation_en"}:
+                return jsonify(success=False, error="Некорректный field_id."), 400
+            if not raw_text.strip():
+                return jsonify(success=False, error="Текст для обработки пуст."), 400
+
+            config = None
+            try:
+                config_path = Path("config.json")
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+            except Exception:
+                config = None
+
+            model = (config or {}).get("gpt_extraction", {}).get("model", "gpt-4o-mini")
+            api_key = (config or {}).get("gpt_extraction", {}).get("api_key")
+
+            prompt = (
+                "Ты инструмент очистки текста. Твоя единственная задача — убрать технические "
+                "артефакты и привести специальные символы к читаемому формату.\n\n"
+                "СТРОГО ЗАПРЕЩЕНО:\n"
+                "- менять слова, термины, аббревиатуры\n"
+                "- переформулировать предложения\n"
+                "- исправлять грамматику или стиль\n"
+                "- добавлять или убирать смысловые части\n"
+                "- менять порядок предложений\n"
+                "- переводить текст\n\n"
+                "РАЗРЕШЕНО только:\n\n"
+                "1. Артефакты копирования из PDF:\n"
+                "- склеить слово, разорванное переносом: \"ис-\\nследование\" → \"исследование\"\n"
+                "- убрать мягкие переносы (­)\n"
+                "- убрать лишние переводы строк внутри одного абзаца\n"
+                "- схлопнуть множественные пробелы в один\n"
+                "- убрать табуляции\n"
+                "- убрать префикс в самом начале: \"Аннотация.\", \"Abstract:\", \"Резюме.\" — только если это первое слово\n"
+                "- сохранить абзацы (двойной перенос = граница абзаца)\n\n"
+                "2. Индексы и степени:\n"
+                "- нижний индекс оборачивать в <sub>...</sub>: \"H2O\" → \"H<sub>2</sub>O\"\n"
+                "- верхний индекс оборачивать в <sup>...</sup>: \"м2\" → \"м<sup>2</sup>\"\n"
+                "- диапазоны индексов: \"CO2, NO2\" — каждый индекс отдельно\n"
+                "- если индекс неоднозначен — оставить как есть, не угадывать\n\n"
+                "3. Формулы:\n"
+                "- простые inline-формулы приводить к читаемому Unicode-тексту:\n"
+                "  \"a^2 + b^2 = c^2\" → \"a² + b² = c²\"\n"
+                "  \"x_1 + x_2\" → \"x₁ + x₂\"\n"
+                "- дроби в тексте: \"1/2\" оставить как есть, не трогать\n"
+                "- сложные многострочные формулы (интегралы, матрицы) — оставить как есть,\n"
+                "  не пытаться интерпретировать\n"
+                "- греческие буквы прописью → символ: \"alpha\" → \"α\", \"beta\" → \"β\",\n"
+                "  \"mu\" → \"μ\", \"delta\" → \"Δ\" и т.д. — только если контекст научный\n"
+                "  и написание прописью явно означает символ\n\n"
+                "4. Спецсимволы:\n"
+                "- градус: \"36.6 C\" → \"36.6°C\"\n"
+                "- плюс-минус: \"+/-\" → \"±\"\n"
+                "- умножение: \"5 x 10^3\" → \"5×10³\"\n"
+                "- стрелки: \"->\" → \"→\", \"<-\" → \"←\"\n\n"
+                "Верни ТОЛЬКО очищенный текст. Без объяснений, без комментариев,\n"
+                "без кавычек вокруг текста.\n\n"
+                "Текст для очистки:\n"
+                f"{raw_text}"
+            )
+
+            from services.gpt_extraction import extract_metadata_with_gpt
+
+            result = extract_metadata_with_gpt(
+                prompt,
+                model=model,
+                temperature=0.0,
+                api_key=api_key,
+                raw_prompt=True,
+                config=config,
+            )
+
+            cleaned = ""
+            if isinstance(result, dict):
+                cleaned = str(result.get("text") or result.get("cleaned_text") or "").strip()
+                if not cleaned:
+                    for value in result.values():
+                        if isinstance(value, str) and value.strip():
+                            cleaned = value.strip()
+                            break
+            else:
+                cleaned = str(result or "").strip()
+
+            if not cleaned:
+                return jsonify(success=False, error="ИИ не вернул очищенный текст."), 500
+
+            return jsonify(success=True, text=cleaned)
+        except Exception as e:
+            current_app.logger.exception("SYSTEM annotation ai error: %s", e)
+            return jsonify(success=False, error=str(e)), 500
+
     @app.route("/crossref-update", methods=["POST"])
     def crossref_update():
         data = request.get_json(silent=True) or {}

@@ -8,14 +8,78 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from html import escape, unescape
+from html.parser import HTMLParser
 
 try:
     from text_utils import merge_doi_url_with_references
 except ImportError:
     def merge_doi_url_with_references(references: List[str]) -> List[str]:
         return references
+
+
+ALLOWED_ANNOTATION_TAGS = {"b", "i", "em", "strong", "sup", "sub", "br"}
+
+
+class _AnnotationHtmlSanitizer(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._parts: List[str] = []
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        tag_l = (tag or "").lower()
+        if tag_l not in ALLOWED_ANNOTATION_TAGS:
+            return
+        if tag_l == "br":
+            self._parts.append("<br>")
+            return
+        self._parts.append(f"<{tag_l}>")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_l = (tag or "").lower()
+        if tag_l in ALLOWED_ANNOTATION_TAGS and tag_l != "br":
+            self._parts.append(f"</{tag_l}>")
+
+    def handle_data(self, data: str) -> None:
+        if not data:
+            return
+        normalized = data.replace("\r\n", "\n").replace("\r", "\n")
+        parts = normalized.split("\n")
+        for idx, part in enumerate(parts):
+            if part:
+                self._parts.append(escape(part))
+            if idx < len(parts) - 1:
+                self._parts.append("<br>")
+
+    def get_html(self) -> str:
+        html = "".join(self._parts)
+        html = re.sub(r"(?:<br>\s*){3,}", "<br><br>", html, flags=re.IGNORECASE).strip()
+        html = re.sub(r"^(?:<br>\s*)+|(?:<br>\s*)+$", "", html, flags=re.IGNORECASE)
+        return html.strip()
+
+
+def sanitize_annotation_html(html_text: Any) -> str:
+    if not html_text:
+        return ""
+    parser = _AnnotationHtmlSanitizer()
+    parser.feed(str(html_text))
+    parser.close()
+    return parser.get_html()
+
+
+def annotation_html_to_plain_text(html_text: Any) -> str:
+    if not html_text:
+        return ""
+    text = str(html_text)
+    text = re.sub(r"(?i)<br\s*/?>", "\n", text)
+    text = re.sub(r"(?i)</(div|p|li)>", "\n", text)
+    text = re.sub(r"<[^>]+>", "", text)
+    text = unescape(text)
+    text = re.sub(r"\n{3,}", "\n\n", text).strip()
+    return text
 
 
 def load_json_metadata(json_path: Path) -> Dict[str, Any]:
@@ -102,6 +166,18 @@ def form_data_to_json_structure(form_data: Dict[str, Any], existing_json: Option
         result["abstracts"]["RUS"] = str(form_data["annotation"]).strip()
     if "annotation_en" in form_data and form_data["annotation_en"]:
         result["abstracts"]["ENG"] = str(form_data["annotation_en"]).strip()
+    # Если пришел HTML из редактора, сохраняем его в существующие поля abstracts.
+    if "annotation_html" in form_data:
+        sanitized = sanitize_annotation_html(form_data.get("annotation_html"))
+        if sanitized:
+            result["abstracts"]["RUS"] = sanitized
+    if "annotation_en_html" in form_data:
+        sanitized = sanitize_annotation_html(form_data.get("annotation_en_html"))
+        if sanitized:
+            result["abstracts"]["ENG"] = sanitized
+    # Удаляем legacy-ключ, если был создан ранее.
+    if "abstractsHtml" in result:
+        result.pop("abstractsHtml", None)
     
     # Ключевые слова
     if "keywords" in form_data:
@@ -232,8 +308,13 @@ def json_structure_to_form_data(json_data: Dict[str, Any]) -> Dict[str, Any]:
     form_data["title_en"] = json_data.get("artTitles", {}).get("ENG", "")
     
     # Аннотации
-    form_data["annotation"] = json_data.get("abstracts", {}).get("RUS", "")
-    form_data["annotation_en"] = json_data.get("abstracts", {}).get("ENG", "")
+    abstracts_ru = str(json_data.get("abstracts", {}).get("RUS", "") or "")
+    abstracts_en = str(json_data.get("abstracts", {}).get("ENG", "") or "")
+    # Для textarea показываем читаемый текст, для редактора - sanitized HTML из тех же полей.
+    form_data["annotation"] = annotation_html_to_plain_text(abstracts_ru) if "<" in abstracts_ru else abstracts_ru
+    form_data["annotation_en"] = annotation_html_to_plain_text(abstracts_en) if "<" in abstracts_en else abstracts_en
+    form_data["annotation_html"] = sanitize_annotation_html(abstracts_ru)
+    form_data["annotation_en_html"] = sanitize_annotation_html(abstracts_en)
     
     # Ключевые слова
     keywords_ru = json_data.get("keywords", {}).get("RUS", [])
@@ -395,4 +476,3 @@ def find_docx_for_json(json_path: Path, words_input_dir: Path, json_input_dir: O
         return all_files[0]
     
     return None
-

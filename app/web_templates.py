@@ -1,5 +1,512 @@
 ﻿# Auto-generated from app.py templates
 
+ANNOTATION_EDITOR_SHARED_JS = r"""
+function annotationTextToHtml(text) {
+  if (!text) return "";
+  const escaped = escapeHtml(text);
+  return escaped
+    .replace(/&lt;(sup|sub)&gt;/gi, "<$1>")
+    .replace(/&lt;\/(sup|sub)&gt;/gi, "</$1>")
+    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
+    .replace(/\n/g, "<br>");
+}
+
+var ANNOTATION_ALLOWED_TAGS = new Set(["B", "I", "EM", "STRONG", "SUP", "SUB", "BR"]);
+
+function sanitizeAnnotationHtml(rawHtml) {
+  const container = document.createElement("div");
+  container.innerHTML = rawHtml || "";
+
+  const serialize = (node) => {
+    if (!node) return "";
+    if (node.nodeType === Node.TEXT_NODE) {
+      const raw = node.nodeValue || "";
+      if (!raw.trim() && /[\r\n]/.test(raw)) {
+        return "";
+      }
+      return escapeHtml(raw).replace(/\r\n|\r|\n/g, "<br>");
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+    const tag = (node.tagName || "").toUpperCase();
+    const children = Array.from(node.childNodes || []).map(serialize).join("");
+    if (tag === "BR") {
+      return "<br>";
+    }
+    if (ANNOTATION_ALLOWED_TAGS.has(tag)) {
+      return `<${tag.toLowerCase()}>${children}</${tag.toLowerCase()}>`;
+    }
+    if (tag === "DIV" || tag === "P" || tag === "LI") {
+      return children + "<br>";
+    }
+    return children;
+  };
+
+  let html = Array.from(container.childNodes || []).map(serialize).join("");
+  html = html.replace(/(?:<br>\s*){3,}/gi, "<br><br>");
+  html = html.replace(/^(?:<br>\s*)+|(?:<br>\s*)+$/gi, "").trim();
+  return html;
+}
+
+function getAnnotationHtmlFieldId(fieldId) {
+  if (fieldId === "annotation") return "annotation_html";
+  if (fieldId === "annotation_en") return "annotation_en_html";
+  return null;
+}
+
+function getAnnotationHtmlField(fieldId) {
+  const htmlFieldId = getAnnotationHtmlFieldId(fieldId);
+  if (!htmlFieldId) return null;
+  return document.getElementById(htmlFieldId);
+}
+
+function annotationHtmlToText(html) {
+  const container = document.createElement("div");
+  container.innerHTML = html || "";
+  let output = "";
+
+  const walk = (node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      output += node.nodeValue;
+      return;
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) {
+      return;
+    }
+
+    const tag = node.tagName;
+    const verticalAlign = node.style && node.style.verticalAlign;
+
+    if (verticalAlign === "super") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (verticalAlign === "sub") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    if (tag === "BR") {
+      output += "\n";
+      return;
+    }
+    if (tag === "DIV" || tag === "P") {
+      if (output && !output.endsWith("\n")) {
+        output += "\n";
+      }
+      node.childNodes.forEach(walk);
+      if (!output.endsWith("\n")) {
+        output += "\n";
+      }
+      return;
+    }
+    if (tag === "SUP") {
+      output += "<sup>";
+      node.childNodes.forEach(walk);
+      output += "</sup>";
+      return;
+    }
+    if (tag === "SUB") {
+      output += "<sub>";
+      node.childNodes.forEach(walk);
+      output += "</sub>";
+      return;
+    }
+
+    node.childNodes.forEach(walk);
+  };
+
+  container.childNodes.forEach(walk);
+  return output.replace(/\n{3,}/g, "\n\n").trim();
+}
+
+function setAnnotationAiBusy(isBusy, label) {
+  const cleanBtn = document.getElementById("annotationAiCleanBtn");
+  const formulaBtn = document.getElementById("annotationAiFormulaBtn");
+  const status = document.getElementById("annotationAiStatus");
+  if (cleanBtn) cleanBtn.disabled = !!isBusy;
+  if (formulaBtn) formulaBtn.disabled = !!isBusy;
+  if (status) status.textContent = label || "";
+}
+
+async function runAnnotationModalAi(mode) {
+  const fieldId = (window.currentAnnotationFieldId || "").trim();
+  if (!fieldId) {
+    if (typeof toast === "function") toast("Сначала откройте аннотацию для редактирования", "error");
+    return;
+  }
+  const field = document.getElementById(fieldId);
+  if (!field) {
+    if (typeof toast === "function") toast("Поле аннотации не найдено", "error");
+    return;
+  }
+  const sourceText = (typeof getCurrentAnnotationPlainText === "function")
+    ? getCurrentAnnotationPlainText()
+    : String(field.value || "");
+  const rawText = String(sourceText || "").trim();
+  if (!rawText) {
+    if (typeof toast === "function") toast("Поле аннотации пусто. Сначала добавьте текст.", "error");
+    return;
+  }
+
+  const isFormulaMode = mode === "formula";
+  setAnnotationAiBusy(true, isFormulaMode ? "ИИ: оформление формул и индексов..." : "ИИ: очистка PDF-артефактов...");
+
+  try {
+    const response = await fetch("/process-annotation-ai", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        field_id: fieldId,
+        mode: isFormulaMode ? "formula" : "clean",
+        text: rawText,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || "Не удалось обработать аннотацию.");
+    }
+
+    const cleaned = String(data.text || "").trim();
+    if (!cleaned) {
+      throw new Error("ИИ вернул пустой результат.");
+    }
+
+    field.value = cleaned;
+    const sanitizedHtml = sanitizeAnnotationHtml(annotationTextToHtml(cleaned));
+    const htmlField = getAnnotationHtmlField(fieldId);
+    if (htmlField) htmlField.value = sanitizedHtml;
+
+    const editor = document.getElementById("annotationModalEditor");
+    const textarea = document.getElementById("annotationModalTextarea");
+    if (editor) editor.innerHTML = sanitizedHtml;
+    if (textarea) textarea.value = sanitizedHtml;
+    if (typeof updateAnnotationStats === "function") updateAnnotationStats();
+
+    if (typeof toast === "function") {
+      toast(isFormulaMode ? "✅ Формулы и индексы обработаны" : "✅ Аннотация очищена", "success");
+    }
+  } catch (error) {
+    if (typeof toast === "function") toast(`❌ Ошибка при обработке: ${error.message}`, "error");
+  } finally {
+    setAnnotationAiBusy(false, "");
+  }
+}
+
+function runAnnotationAiClean() {
+  return runAnnotationModalAi("clean");
+}
+
+function runAnnotationAiFormula() {
+  return runAnnotationModalAi("formula");
+}
+
+const ANNOTATION_LATEX_TEMPLATES = {
+  frac: "\\frac{a}{b}",
+  sqrt: "\\sqrt{x}",
+  int: "\\int_{a}^{b} f(x)\\,dx",
+  sum: "\\sum_{i=1}^{n} x_i",
+  matrix: "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}",
+};
+
+let __annotationKatexLoadPromise = null;
+let __annotationLatexInited = false;
+let __annotationPreviewStylesInjected = false;
+
+function ensureAnnotationPreviewStyles() {
+  if (__annotationPreviewStylesInjected) return;
+  __annotationPreviewStylesInjected = true;
+  const style = document.createElement("style");
+  style.id = "annotation-preview-inline-style";
+  style.textContent = `
+    .annotation-latex-render{display:inline-block;vertical-align:middle;margin:0 .1em;}
+    .annotation-latex-render-block{display:block;margin:.45em 0;}
+    #annotationModal .annotation-editor.preview{line-height:1.9;}
+    #annotationModal .annotation-editor.preview .katex-display{margin:.45em 0;}
+  `;
+  document.head.appendChild(style);
+}
+
+function ensureAnnotationKatexLoaded() {
+  if (window.katex) return Promise.resolve();
+  if (__annotationKatexLoadPromise) return __annotationKatexLoadPromise;
+  __annotationKatexLoadPromise = new Promise((resolve) => {
+    const cssHref = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css";
+    if (!document.querySelector(`link[href="${cssHref}"]`)) {
+      const link = document.createElement("link");
+      link.rel = "stylesheet";
+      link.href = cssHref;
+      document.head.appendChild(link);
+    }
+    const src = "https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js";
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      if (window.katex) resolve();
+      else existing.addEventListener("load", () => resolve(), { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => resolve();
+    document.head.appendChild(script);
+  });
+  return __annotationKatexLoadPromise;
+}
+
+function getAnnotationLatexElements() {
+  return {
+    popup: document.getElementById("annotationLatexPopup"),
+    input: document.getElementById("annotationLatexInput"),
+    preview: document.getElementById("annotationLatexPreview"),
+    error: document.getElementById("annotationLatexError"),
+    modeInline: document.getElementById("annotationLatexModeInline"),
+    modeBlock: document.getElementById("annotationLatexModeBlock"),
+    templates: document.getElementById("annotationLatexTemplates"),
+  };
+}
+
+function renderAnnotationLatexPreview() {
+  const { input, preview, error, modeBlock } = getAnnotationLatexElements();
+  if (!input || !preview || !error) return;
+  const src = (input.value || "").trim();
+  error.textContent = "";
+  if (!src) {
+    preview.innerHTML = '<span style="color:#64748b;font-size:12px;">Введите формулу…</span>';
+    return;
+  }
+  const isBlock = !!modeBlock?.checked;
+  if (!window.katex) {
+    preview.textContent = src;
+    return;
+  }
+  try {
+    preview.innerHTML = window.katex.renderToString(src, { throwOnError: true, displayMode: isBlock });
+  } catch (e) {
+    preview.innerHTML = "";
+    error.textContent = `Ошибка LaTeX: ${String(e.message || e).slice(0, 140)}`;
+  }
+}
+
+function initAnnotationLatexEditor() {
+  if (__annotationLatexInited) return;
+  __annotationLatexInited = true;
+  const { input, modeInline, modeBlock, templates, popup } = getAnnotationLatexElements();
+  if (!input || !templates || !popup) return;
+
+  input.addEventListener("input", renderAnnotationLatexPreview);
+  if (modeInline) modeInline.addEventListener("change", renderAnnotationLatexPreview);
+  if (modeBlock) modeBlock.addEventListener("change", renderAnnotationLatexPreview);
+
+  templates.innerHTML = "";
+  const labels = [
+    ["frac", "½ Дробь"],
+    ["sqrt", "√ Корень"],
+    ["int", "∫ Интеграл"],
+    ["sum", "∑ Сумма"],
+    ["matrix", "⊞ Матрица"],
+  ];
+  labels.forEach(([key, label]) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "annotation-latex-template-btn";
+    btn.textContent = label;
+    btn.title = ANNOTATION_LATEX_TEMPLATES[key] || "";
+    btn.addEventListener("click", () => {
+      input.value = ANNOTATION_LATEX_TEMPLATES[key] || "";
+      renderAnnotationLatexPreview();
+      input.focus();
+    });
+    templates.appendChild(btn);
+  });
+
+  popup.addEventListener("mousedown", (event) => {
+    if (event.target === popup) {
+      closeAnnotationLatexEditor();
+    }
+  });
+}
+
+function openAnnotationLatexEditor(initialValue, blockMode) {
+  const { popup, input, modeInline, modeBlock } = getAnnotationLatexElements();
+  if (!popup || !input) return;
+  if (typeof saveAnnotationSelection === "function") saveAnnotationSelection();
+  initAnnotationLatexEditor();
+  input.value = String(initialValue || "");
+  if (modeBlock) modeBlock.checked = !!blockMode;
+  if (modeInline) modeInline.checked = !blockMode;
+  popup.classList.add("active");
+  popup.style.display = "flex";
+  ensureAnnotationKatexLoaded().then(() => renderAnnotationLatexPreview());
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 20);
+}
+
+function closeAnnotationLatexEditor() {
+  const { popup, error } = getAnnotationLatexElements();
+  if (!popup) return;
+  popup.classList.remove("active");
+  popup.style.display = "none";
+  if (error) error.textContent = "";
+}
+
+function openAnnotationLatexEditorFromTemplate(templateKey) {
+  const value = ANNOTATION_LATEX_TEMPLATES[templateKey] || "";
+  openAnnotationLatexEditor(value, false);
+}
+
+function insertAnnotationLatexFromPopup() {
+  const { input, modeBlock } = getAnnotationLatexElements();
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  if (!input) return;
+  const src = String(input.value || "").trim();
+  if (!src) return;
+  const delim = modeBlock?.checked ? "$$" : "$";
+  const payload = `${delim}${src}${delim}`;
+
+  if (typeof annotationCodeViewEnabled !== "undefined" && annotationCodeViewEnabled && textarea && textarea.style.display !== "none") {
+    const start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+    const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+    const prev = textarea.value || "";
+    textarea.value = prev.slice(0, start) + payload + prev.slice(end);
+    const pos = start + payload.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    textarea.focus();
+  } else if (editor) {
+    if (typeof restoreAnnotationSelection === "function") restoreAnnotationSelection();
+    editor.focus();
+    if (!document.execCommand("insertText", false, payload)) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(payload));
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  }
+
+  closeAnnotationLatexEditor();
+  if (typeof updateAnnotationStats === "function") updateAnnotationStats();
+}
+
+function splitTextByLatexDelimiters(text) {
+  const chunks = [];
+  const source = String(text || "");
+  const regex = /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g;
+  let last = 0;
+  let m;
+  while ((m = regex.exec(source)) !== null) {
+    if (m.index > last) {
+      chunks.push({ type: "text", value: source.slice(last, m.index) });
+    }
+    const latex = m[1] != null ? m[1] : m[2];
+    chunks.push({ type: "latex", value: latex, block: m[1] != null });
+    last = regex.lastIndex;
+  }
+  if (last < source.length) {
+    chunks.push({ type: "text", value: source.slice(last) });
+  }
+  return chunks;
+}
+
+function renderLatexNode(latex, block) {
+  const span = document.createElement("span");
+  span.className = block ? "annotation-latex-render annotation-latex-render-block" : "annotation-latex-render";
+  span.dataset.latex = latex;
+  span.dataset.block = block ? "1" : "0";
+  if (window.katex) {
+    try {
+      span.innerHTML = window.katex.renderToString(latex, { throwOnError: false, displayMode: !!block });
+    } catch (e) {
+      span.textContent = block ? `$$${latex}$$` : `$${latex}$`;
+    }
+  } else {
+    span.textContent = block ? `$$${latex}$$` : `$${latex}$`;
+  }
+  return span;
+}
+
+function renderLatexInAnnotationPreview(editor) {
+  if (!editor) return;
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT, null);
+  const textNodes = [];
+  let node;
+  while ((node = walker.nextNode())) {
+    const parentTag = node.parentElement?.tagName?.toUpperCase() || "";
+    if (["SCRIPT", "STYLE", "TEXTAREA", "CODE", "PRE"].includes(parentTag)) continue;
+    if ((node.nodeValue || "").includes("$")) {
+      textNodes.push(node);
+    }
+  }
+  textNodes.forEach((textNode) => {
+    const parts = splitTextByLatexDelimiters(textNode.nodeValue || "");
+    if (!parts.some((p) => p.type === "latex")) return;
+    const frag = document.createDocumentFragment();
+    parts.forEach((part) => {
+      if (part.type === "text") {
+        frag.appendChild(document.createTextNode(part.value));
+      } else {
+        frag.appendChild(renderLatexNode(part.value, !!part.block));
+      }
+    });
+    textNode.parentNode?.replaceChild(frag, textNode);
+  });
+}
+
+function setAnnotationPreviewState(enabled) {
+  const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
+  const modal = document.getElementById("annotationModal");
+  const toolbar = modal ? modal.querySelector(".annotation-editor-toolbar") : null;
+  const previewExitBtn = document.getElementById("annotationPreviewExitBtn");
+  if (!editor) return;
+
+  const shouldEnable = !!enabled;
+  annotationPreviewEnabled = shouldEnable;
+
+  if (shouldEnable) {
+    ensureAnnotationPreviewStyles();
+    if (typeof annotationCodeViewEnabled !== "undefined" && annotationCodeViewEnabled && textarea) {
+      editor.innerHTML = textarea.value || "";
+      textarea.style.display = "none";
+      editor.style.display = "block";
+      annotationCodeViewEnabled = false;
+    }
+    editor.dataset.previewSourceHtml = editor.innerHTML || "";
+    editor.contentEditable = "false";
+    editor.classList.add("preview");
+    if (toolbar) toolbar.style.display = "none";
+    if (previewExitBtn) previewExitBtn.style.display = "inline-flex";
+    closeAnnotationSymbolsPanel?.();
+    renderLatexInAnnotationPreview(editor);
+    ensureAnnotationKatexLoaded().then(() => renderLatexInAnnotationPreview(editor));
+  } else {
+    const sourceHtml = editor.dataset.previewSourceHtml;
+    if (typeof sourceHtml === "string") {
+      editor.innerHTML = sourceHtml;
+    }
+    editor.removeAttribute("data-preview-source-html");
+    editor.contentEditable = "true";
+    editor.classList.remove("preview");
+    if (toolbar) toolbar.style.display = "";
+    if (previewExitBtn) previewExitBtn.style.display = "none";
+  }
+}
+"""
+
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="ru">
@@ -1633,6 +2140,252 @@ HTML_TEMPLATE = """
           </div>
         </div>
         
+        <style>
+          .annotation-modal-content{
+            background:#181c27;
+            border:1px solid #2a3050;
+            border-radius:14px;
+            box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+          }
+          .annotation-modal-content .modal-header{
+            background:#1e2336;
+            border-bottom:1px solid #2a3050;
+            margin:0;
+            padding:14px 18px;
+          }
+          .annotation-modal-content .modal-header h2{color:#e2e8f0;font-size:18px;}
+          .annotation-modal-content .annotation-modal-body{padding:10px 14px 12px;gap:10px;}
+          .annotation-modal-content .annotation-editor-toolbar{
+            background:#1e2336;
+            border:1px solid #2a3050;
+            border-radius:10px;
+            padding:8px;
+            margin:0;
+          }
+          .annotation-modal-content .annotation-toolbar-row{gap:6px;}
+          .annotation-modal-content .annotation-toolbar-label{color:#94a3b8;font-size:11px;}
+          .annotation-modal-content .annotation-select{
+            background:#252b42;
+            color:#e2e8f0;
+            border:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-divider{background:#353d5e;}
+          .annotation-modal-content .annotation-editor-btn{
+            background:transparent;
+            border:1px solid transparent;
+            color:#94a3b8;
+            border-radius:6px;
+            min-height:28px;
+          }
+          .annotation-modal-content .annotation-editor-btn:hover{
+            background:#252b42;
+            color:#e2e8f0;
+            border-color:#353d5e;
+          }
+          .annotation-modal-content .annotation-editor-btn.annotation-ai-btn{
+            background:rgba(99,102,241,.12);
+            color:#6366f1;
+            border-color:rgba(99,102,241,.25);
+            font-weight:600;
+            padding:0 10px;
+          }
+          .annotation-modal-content .annotation-editor-btn.annotation-ai-btn:hover{
+            background:#6366f1;
+            color:#fff;
+          }
+          .annotation-modal-content .annotation-editor-btn.annotation-ai-btn:disabled{
+            opacity:.55;
+            cursor:wait;
+          }
+          .annotation-modal-content .annotation-ai-status{
+            font-size:11px;
+            color:#94a3b8;
+            min-height:14px;
+            margin-left:auto;
+            padding-left:8px;
+            white-space:nowrap;
+          }
+          .annotation-modal-content #annotationModalEditor{
+            background:#181c27 !important;
+            color:#e2e8f0;
+            border:1px solid #2a3050;
+            border-radius:10px;
+          }
+          .annotation-modal-content .annotation-editor:focus{
+            border-color:#6366f1;
+            box-shadow:0 0 0 3px rgba(99,102,241,.15);
+          }
+          .annotation-modal-content .annotation-code-view{
+            background:#0c0e16;
+            color:#a8b3cf;
+            border:1px solid #2a3050;
+            border-radius:10px;
+          }
+          .annotation-modal-content .annotation-editor-footer{
+            margin-top:0;
+            padding-top:10px;
+            border-top:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-word-count{color:#e2e8f0;}
+          .annotation-modal-content .modal-btn-cancel{
+            background:transparent;
+            color:#94a3b8;
+            border:1px solid #2a3050;
+          }
+          .annotation-modal-content .modal-btn-cancel:hover{background:#252b42;color:#e2e8f0;}
+          .annotation-modal-content .modal-btn-save{
+            background:#6366f1;
+            color:#fff;
+            border:1px solid #6366f1;
+          }
+          .annotation-modal-content .modal-btn-save:hover{opacity:.9;}
+          .annotation-modal-content .annotation-symbols-panel{
+            background:#1e2336;
+            border:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-symbols-search,
+          .annotation-modal-content .annotation-symbols-category{
+            background:#252b42;
+            color:#e2e8f0;
+            border:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-symbol-cell{position:relative;}
+          .annotation-modal-content .annotation-symbol-btn{
+            width:100%;
+            height:44px;
+            padding:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            background:#252b42;
+            border:1px solid #2a3050;
+            border-radius:8px;
+            color:#e2e8f0;
+            font-size:25px;
+            line-height:1;
+            transition:all .14s ease;
+          }
+          .annotation-modal-content .annotation-symbol-btn:hover{
+            border-color:#6366f1;
+            background:#2b3250;
+            box-shadow:0 0 0 2px rgba(99,102,241,.14);
+          }
+          .annotation-modal-content .annotation-symbol-btn:focus{
+            outline:none;
+            border-color:#6366f1;
+            box-shadow:0 0 0 3px rgba(99,102,241,.22);
+          }
+          .annotation-modal-content .annotation-symbol-fav{
+            position:absolute;
+            top:3px;
+            right:3px;
+            width:18px;
+            height:18px;
+            border-radius:999px;
+            border:1px solid #39406a;
+            background:rgba(24,28,39,.95);
+            color:#8f97ba;
+            font-size:10px;
+            line-height:1;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            cursor:pointer;
+            transition:all .14s ease;
+            display:none;
+          }
+          .annotation-modal-content .annotation-symbol-fav:hover{
+            color:#f6c357;
+            border-color:#f6c357;
+            background:rgba(245,158,11,.14);
+          }
+          .annotation-modal-content .annotation-symbol-fav.active{
+            color:#f6c357;
+            border-color:#f6c357;
+            background:rgba(245,158,11,.18);
+          }
+          .annotation-modal-content .annotation-symbols-title{color:#e2e8f0;}
+          .annotation-modal-content .annotation-symbols-info,
+          .annotation-modal-content .annotation-symbols-footer,
+          .annotation-modal-content .annotation-symbols-toggles{color:#94a3b8;}
+          .annotation-modal-content .sym-top{display:flex;gap:8px;align-items:center;padding:4px 0 8px;}
+          .annotation-modal-content .sym-search,.annotation-modal-content .sym-cat{
+            height:32px;
+            border-radius:8px;
+            border:1px solid #31395f;
+            background:#252b42;
+            color:#e2e8f0;
+          }
+          .annotation-modal-content .sym-cat{min-width:140px;}
+          .annotation-modal-content .sym-search::placeholder{color:#7b84a8;}
+          .annotation-modal-content .sym-grid{
+            display:grid;
+            grid-template-columns:repeat(auto-fill,minmax(46px,1fr));
+            gap:8px;
+            max-height:290px;
+            overflow:auto;
+            padding:2px 0 2px;
+          }
+          .annotation-modal-content .annotation-latex-popup{
+            position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:80;
+            background:rgba(8,10,18,.76);backdrop-filter:blur(4px);
+          }
+          .annotation-modal-content .annotation-latex-popup.active{display:flex;}
+          .annotation-modal-content .annotation-latex-box{
+            width:min(640px,94%);background:#181c27;border:1px solid #353d5e;border-radius:12px;
+            box-shadow:0 16px 48px rgba(0,0,0,.55);overflow:hidden;
+          }
+          .annotation-modal-content .annotation-latex-head{
+            display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e2336;border-bottom:1px solid #2a3050;color:#e2e8f0;font-weight:600;
+          }
+          .annotation-modal-content .annotation-latex-head span{flex:1;}
+          .annotation-modal-content .annotation-latex-templates{
+            display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#1e2336;border-bottom:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-latex-template-btn{
+            border:1px solid rgba(245,158,11,.28);background:rgba(245,158,11,.12);color:#f59e0b;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;
+          }
+          .annotation-modal-content .annotation-latex-template-btn:hover{background:#f59e0b;color:#101010;}
+          .annotation-modal-content .annotation-latex-mode{
+            display:flex;align-items:center;gap:12px;padding:8px 12px;background:#1e2336;border-bottom:1px solid #2a3050;color:#94a3b8;font-size:12px;
+          }
+          .annotation-modal-content .annotation-latex-mode label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+          .annotation-modal-content .annotation-latex-mode input{accent-color:#f59e0b;}
+          .annotation-modal-content .annotation-latex-body{display:flex;height:190px;}
+          .annotation-modal-content .annotation-latex-col{flex:1;display:flex;flex-direction:column;}
+          .annotation-modal-content .annotation-latex-col + .annotation-latex-col{border-left:1px solid #2a3050;}
+          .annotation-modal-content .annotation-latex-label{font-size:11px;color:#64748b;padding:6px 12px 0;text-transform:uppercase;letter-spacing:.3px;}
+          .annotation-modal-content .annotation-latex-input{
+            flex:1;border:none;outline:none;resize:none;background:#0c0e16;color:#e2c97e;padding:8px 12px;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.6;
+          }
+          .annotation-modal-content .annotation-latex-preview{
+            flex:1;padding:12px 14px;display:flex;align-items:center;justify-content:center;overflow:auto;color:#e2e8f0;
+          }
+          .annotation-modal-content .annotation-latex-footer{
+            display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e2336;border-top:1px solid #2a3050;
+          }
+          .annotation-modal-content .annotation-latex-error{flex:1;font-size:11px;color:#ef4444;}
+          .annotation-modal-content .annotation-math-btn{
+            background:rgba(245,158,11,.1);color:#f59e0b;border-color:rgba(245,158,11,.25);
+          }
+          .annotation-modal-content .annotation-math-btn:hover{background:#f59e0b;color:#101010;border-color:#f59e0b;}
+          .annotation-modal-content .annotation-preview-exit-btn{
+            display:none;
+            align-self:flex-end;
+            background:#2b3250;
+            color:#cfd6f3;
+            border:1px solid #3b446d;
+            border-radius:8px;
+            padding:6px 10px;
+            font-size:12px;
+            cursor:pointer;
+          }
+          .annotation-modal-content .annotation-preview-exit-btn:hover{
+            background:#344077;
+            border-color:#5a67b8;
+            color:#fff;
+          }
+        </style>
         <div id="annotationModal" class="modal">
           <div class="modal-content resizable annotation-modal-content" id="annotationModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
             <div class="modal-header">
@@ -1643,6 +2396,7 @@ HTML_TEMPLATE = """
               </div>
             </div>
             <div class="annotation-modal-body">
+            <button type="button" id="annotationPreviewExitBtn" class="annotation-preview-exit-btn" onclick="setAnnotationPreviewState(false)">✎ Вернуться к редактированию</button>
             <div class="annotation-editor-toolbar">
               <div class="annotation-toolbar-row">
                 <select id="annotationStyleSelect" class="annotation-select" data-action="format-block" title="Стили абзаца">
@@ -1695,41 +2449,57 @@ HTML_TEMPLATE = """
                 <button type="button" class="annotation-editor-btn" data-action="toggle-preview" tabindex="-1" title="Просмотр">👁</button>
                 <button type="button" class="annotation-editor-btn" data-action="toggle-fullscreen" tabindex="-1" title="Полноэкранный режим">⛶</button>
                 <button type="button" class="annotation-editor-btn" data-action="toggle-code-view" tabindex="-1" title="HTML / Code View">HTML</button>
-                <button type="button" class="annotation-editor-btn" data-action="insert-latex" tabindex="-1" title="LaTeX">LaTeX</button>
-                <button type="button" class="annotation-editor-btn" data-action="insert-formula" tabindex="-1" title="Формула">Σ</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" data-action="insert-latex" tabindex="-1" title="Редактор формул LaTeX">∑ LaTeX</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('frac')" tabindex="-1" title="\\frac{a}{b}">½</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('sqrt')" tabindex="-1" title="\\sqrt{x}">√</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('int')" tabindex="-1" title="\\int_{a}^{b}">∫</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('sum')" tabindex="-1" title="\\sum_{i=1}^{n}">Σ</button>
+                <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('matrix')" tabindex="-1" title="\\begin{pmatrix}...">⊞</button>
+                <button type="button" id="annotationAiCleanBtn" class="annotation-editor-btn annotation-ai-btn" tabindex="-1" title="Убрать PDF-артефакты" onclick="runAnnotationAiClean()">🧹 Очистить</button>
+                <button type="button" id="annotationAiFormulaBtn" class="annotation-editor-btn annotation-ai-btn" tabindex="-1" title="Оформить формулы и индексы" onclick="runAnnotationAiFormula()">ƒ Формулы и индексы</button>
+                <span id="annotationAiStatus" class="annotation-ai-status" aria-live="polite"></span>
               </div>
             </div>
-            <div id="annotationSymbolsPanel" class="annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
-              <div class="annotation-symbols-header">
-                <input id="annotationSymbolsSearch" class="annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, degree, ≤" autocomplete="off">
-                <select id="annotationSymbolsCategory" class="annotation-symbols-category">
+            <section id="annotationSymbolsPanel" class="symbols-panel annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
+              <div class="sym-top">
+                <input id="annotationSymbolsSearch" class="sym-search annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, ≤, degree…" autocomplete="off">
+                <select id="annotationSymbolsCategory" class="sym-cat annotation-symbols-category">
                   <option value="all">Все</option>
                   <option value="greek">Греческий</option>
                   <option value="math">Математика</option>
                   <option value="arrows">Стрелки</option>
                   <option value="indices">Индексы</option>
                   <option value="units">Единицы</option>
-                  <option value="currency">Валюты</option>
-                  <option value="typography">Типографика</option>
-                  <option value="latin">Диакритика</option>
-                  <option value="other">Прочее</option>
                 </select>
               </div>
-              <div class="annotation-symbols-toggles">
-                <label><input id="annotationSymbolsLatex" type="checkbox"> Как LaTeX</label>
-                <label><input id="annotationSymbolsAutoClose" type="checkbox" checked> Автозакрытие</label>
-              </div>
-              <div id="annotationSymbolsGrid" class="annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
-              <div class="annotation-symbols-footer">
-                <div class="annotation-symbols-section">
-                  <span class="annotation-symbols-title">Недавние</span>
-                  <div id="annotationSymbolsRecent" class="annotation-symbols-recent"></div>
+              <div id="annotationSymbolsGrid" class="sym-grid annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+            </section>
+            <div id="annotationLatexPopup" class="annotation-latex-popup" role="dialog" aria-modal="true" aria-label="Редактор формул">
+              <div class="annotation-latex-box">
+                <div class="annotation-latex-head">
+                  <span>∑ Редактор формул (LaTeX / KaTeX)</span>
+                  <button type="button" class="annotation-editor-btn" onclick="closeAnnotationLatexEditor()" title="Закрыть">✕</button>
                 </div>
-                <div class="annotation-symbols-section">
-                  <span class="annotation-symbols-title">Избранное</span>
-                  <div id="annotationSymbolsFavorites" class="annotation-symbols-favorites"></div>
+                <div class="annotation-latex-templates" id="annotationLatexTemplates"></div>
+                <div class="annotation-latex-mode">
+                  <label><input id="annotationLatexModeInline" type="radio" name="annotationLatexMode" checked> Inline `$...$`</label>
+                  <label><input id="annotationLatexModeBlock" type="radio" name="annotationLatexMode"> Display `$$...$$`</label>
                 </div>
-                <div class="annotation-symbols-info">Вставится в позицию курсора.</div>
+                <div class="annotation-latex-body">
+                  <div class="annotation-latex-col">
+                    <div class="annotation-latex-label">LaTeX</div>
+                    <textarea id="annotationLatexInput" class="annotation-latex-input" spellcheck="false" placeholder="\\frac{a}{b} + \\sqrt{x}"></textarea>
+                  </div>
+                  <div class="annotation-latex-col">
+                    <div class="annotation-latex-label">Превью</div>
+                    <div id="annotationLatexPreview" class="annotation-latex-preview"><span style="color:#64748b;font-size:12px;">Введите формулу…</span></div>
+                  </div>
+                </div>
+                <div class="annotation-latex-footer">
+                  <span id="annotationLatexError" class="annotation-latex-error"></span>
+                  <button type="button" class="modal-btn modal-btn-cancel" onclick="closeAnnotationLatexEditor()">Отмена</button>
+                  <button type="button" class="modal-btn modal-btn-save" onclick="insertAnnotationLatexFromPopup()">Вставить</button>
+                </div>
               </div>
             </div>
             <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="true" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false" style="padding:24px;box-sizing:border-box;height:32vh;max-height:32vh;overflow-y:scroll;"></div>
@@ -2054,79 +2824,7 @@ HTML_TEMPLATE = """
         
         let currentAnnotationFieldId = null;
 
-function annotationTextToHtml(text) {
-  if (!text) return "";
-  const escaped = escapeHtml(text);
-  return escaped
-    .replace(/&lt;(sup|sub)&gt;/gi, "<$1>")
-    .replace(/&lt;\/(sup|sub)&gt;/gi, "</$1>")
-    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
-    .replace(/\n/g, "<br>");
-}
-
-function annotationHtmlToText(html) {
-  const container = document.createElement("div");
-  container.innerHTML = html || "";
-  let output = "";
-
-  const walk = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      output += node.nodeValue;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return;
-    }
-
-    const tag = node.tagName;
-    const verticalAlign = node.style && node.style.verticalAlign;
-
-    if (verticalAlign === "super") {
-      output += "<sup>";
-      node.childNodes.forEach(walk);
-      output += "</sup>";
-      return;
-    }
-    if (verticalAlign === "sub") {
-      output += "<sub>";
-      node.childNodes.forEach(walk);
-      output += "</sub>";
-      return;
-    }
-
-    if (tag === "BR") {
-      output += "\\n";
-      return;
-    }
-    if (tag === "DIV" || tag === "P") {
-      if (output && !output.endsWith("\\n")) {
-        output += "\\n";
-      }
-      node.childNodes.forEach(walk);
-      if (!output.endsWith("\\n")) {
-        output += "\\n";
-      }
-      return;
-    }
-    if (tag === "SUP") {
-      output += "<sup>";
-      node.childNodes.forEach(walk);
-      output += "</sup>";
-      return;
-    }
-    if (tag === "SUB") {
-      output += "<sub>";
-      node.childNodes.forEach(walk);
-      output += "</sub>";
-      return;
-    }
-
-    node.childNodes.forEach(walk);
-  };
-
-  container.childNodes.forEach(walk);
-  return output.replace(/\n{3,}/g, "\n\n").trim();
-}
+/*__ANNOTATION_EDITOR_SHARED__*/
 
 function wrapAnnotationRange(range, tag) {
   const editor = document.getElementById("annotationModalEditor");
@@ -2403,9 +3101,7 @@ function setAnnotationCodeView(enabled) {
   const textarea = document.getElementById("annotationModalTextarea");
   if (!editor || !textarea) return;
   annotationCodeViewEnabled = enabled;
-  annotationPreviewEnabled = false;
-  editor.contentEditable = "true";
-  editor.classList.remove("preview");
+  setAnnotationPreviewState(false);
   if (enabled) {
     textarea.value = editor.innerHTML;
     textarea.style.display = "block";
@@ -2417,14 +3113,12 @@ function setAnnotationCodeView(enabled) {
   }
   updateAnnotationStats();
   initAnnotationSymbolsPanel();
+  initAnnotationLatexEditor();
+  closeAnnotationLatexEditor();
 }
 
 function toggleAnnotationPreview() {
-  const editor = document.getElementById("annotationModalEditor");
-  if (!editor) return;
-  annotationPreviewEnabled = !annotationPreviewEnabled;
-  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
-  editor.classList.toggle("preview", annotationPreviewEnabled);
+  setAnnotationPreviewState(!annotationPreviewEnabled);
 }
 
 function getAnnotationPlainText() {
@@ -2576,15 +3270,11 @@ function applyAnnotationCommand(action, value) {
       toggleAnnotationSymbolsPanel();
       break;
     case "insert-latex": {
-      const latex = prompt("LaTeX формула:");
-      if (!latex) break;
-      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      openAnnotationLatexEditor("", false);
       break;
     }
     case "insert-formula": {
-      const formula = prompt("Формула:");
-      if (!formula) break;
-      document.execCommand("insertText", false, `∑ ${formula}`);
+      openAnnotationLatexEditorFromTemplate("sum");
       break;
     }
     case "toggle-preview":
@@ -2610,9 +3300,7 @@ function setAnnotationCodeView(enabled) {
   const textarea = document.getElementById("annotationModalTextarea");
   if (!editor || !textarea) return;
   annotationCodeViewEnabled = enabled;
-  annotationPreviewEnabled = false;
-  editor.contentEditable = "true";
-  editor.classList.remove("preview");
+  setAnnotationPreviewState(false);
   if (enabled) {
     textarea.value = editor.innerHTML;
     textarea.style.display = "block";
@@ -2626,11 +3314,7 @@ function setAnnotationCodeView(enabled) {
 }
 
 function toggleAnnotationPreview() {
-  const editor = document.getElementById("annotationModalEditor");
-  if (!editor) return;
-  annotationPreviewEnabled = !annotationPreviewEnabled;
-  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
-  editor.classList.toggle("preview", annotationPreviewEnabled);
+  setAnnotationPreviewState(!annotationPreviewEnabled);
 }
 
 function getAnnotationPlainText() {
@@ -2782,15 +3466,11 @@ function applyAnnotationCommand(action, value) {
       toggleAnnotationSymbolsPanel();
       break;
     case "insert-latex": {
-      const latex = prompt("LaTeX формула:");
-      if (!latex) break;
-      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      openAnnotationLatexEditor("", false);
       break;
     }
     case "insert-formula": {
-      const formula = prompt("Формула:");
-      if (!formula) break;
-      document.execCommand("insertText", false, `∑ ${formula}`);
+      openAnnotationLatexEditorFromTemplate("sum");
       break;
     }
     case "toggle-preview":
@@ -2813,9 +3493,7 @@ function setAnnotationCodeView(enabled) {
   const textarea = document.getElementById("annotationModalTextarea");
   if (!editor || !textarea) return;
   annotationCodeViewEnabled = enabled;
-  annotationPreviewEnabled = false;
-  editor.contentEditable = "true";
-  editor.classList.remove("preview");
+  setAnnotationPreviewState(false);
   if (enabled) {
     textarea.value = editor.innerHTML;
     textarea.style.display = "block";
@@ -2829,11 +3507,7 @@ function setAnnotationCodeView(enabled) {
 }
 
 function toggleAnnotationPreview() {
-  const editor = document.getElementById("annotationModalEditor");
-  if (!editor) return;
-  annotationPreviewEnabled = !annotationPreviewEnabled;
-  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
-  editor.classList.toggle("preview", annotationPreviewEnabled);
+  setAnnotationPreviewState(!annotationPreviewEnabled);
 }
 
 function getAnnotationPlainText() {
@@ -2985,15 +3659,11 @@ function applyAnnotationCommand(action, value) {
       toggleAnnotationSymbolsPanel();
       break;
     case "insert-latex": {
-      const latex = prompt("LaTeX формула:");
-      if (!latex) break;
-      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      openAnnotationLatexEditor("", false);
       break;
     }
     case "insert-formula": {
-      const formula = prompt("Формула:");
-      if (!formula) break;
-      document.execCommand("insertText", false, `∑ ${formula}`);
+      openAnnotationLatexEditorFromTemplate("sum");
       break;
     }
     case "toggle-preview":
@@ -3253,23 +3923,57 @@ function toggleAnnotationSymbolFavorite(id) {
 
 function insertAnnotationSymbol(item) {
   const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
   const { latexToggle, autoCloseToggle, panel } = getAnnotationSymbolsElements();
-  if (!editor) return;
-  restoreAnnotationSelection();
-  editor.focus();
+  if (!editor && !textarea) return;
+  if (typeof setAnnotationPreviewState === "function" && typeof annotationPreviewEnabled !== "undefined" && annotationPreviewEnabled) {
+    setAnnotationPreviewState(false);
+  }
   const useLatex = latexToggle && latexToggle.checked && item.latex;
   const text = useLatex ? item.latex : item.char;
-  document.execCommand("insertText", false, text);
+
+  // В code-view вставляем прямо в textarea в позицию курсора.
+  if (typeof annotationCodeViewEnabled !== "undefined" && annotationCodeViewEnabled && textarea && textarea.style.display !== "none") {
+    const start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+    const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+    const prev = textarea.value || "";
+    textarea.value = prev.slice(0, start) + text + prev.slice(end);
+    const pos = start + text.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    textarea.focus();
+  } else if (editor) {
+    restoreAnnotationSelection();
+    editor.focus();
+    // Основной путь для contenteditable.
+    if (!document.execCommand("insertText", false, text)) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(text));
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  }
+
   const recent = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
   const filtered = recent.filter((id) => id !== item.id);
   filtered.unshift(item.id);
   setAnnotationSymbolsStorage("annotation_symbols_recent", filtered.slice(0, 20));
   renderAnnotationSymbolsLists();
   updateAnnotationStats();
-  if (autoCloseToggle && autoCloseToggle.checked && panel) {
+  if ((autoCloseToggle ? autoCloseToggle.checked : false) && panel) {
     closeAnnotationSymbolsPanel();
   }
-  editor.focus();
+  if (typeof saveAnnotationSelection === "function") saveAnnotationSelection();
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  } else if (textarea) {
+    textarea.focus();
+  }
 }
 
 function openAnnotationSymbolsPanel() {
@@ -3309,6 +4013,20 @@ function initAnnotationSymbolsPanel() {
   window.__annotationSymbolsHandlersAdded = true;
   const { panel, search, category, grid } = getAnnotationSymbolsElements();
   if (search) search.addEventListener("input", renderAnnotationSymbolsPanel);
+  if (search) {
+    search.addEventListener("keydown", (event) => {
+      const buttons = Array.from((grid || document).querySelectorAll(".annotation-symbol-btn"));
+      if (!buttons.length) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        buttons[0].click();
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        buttons[0].focus();
+      }
+    });
+  }
   if (category) category.addEventListener("change", renderAnnotationSymbolsPanel);
   document.addEventListener("mousedown", (event) => {
     const target = event.target;
@@ -3359,6 +4077,8 @@ function viewAnnotation(fieldId, title) {
   currentAnnotationFieldId = fieldId;
 
   const annotationText = field.value.trim();
+  const htmlField = getAnnotationHtmlField(fieldId);
+  const storedAnnotationHtml = (htmlField?.value || "").trim();
 
   const modal = document.getElementById("annotationModal");
   const modalTitle = document.getElementById("annotationModalTitle");
@@ -3367,7 +4087,9 @@ function viewAnnotation(fieldId, title) {
   if (!modal || !modalTitle || !modalEditor) return;
 
   modalTitle.textContent = title;
-  modalEditor.innerHTML = annotationTextToHtml(annotationText);
+  modalEditor.innerHTML = storedAnnotationHtml
+    ? sanitizeAnnotationHtml(storedAnnotationHtml)
+    : annotationTextToHtml(annotationText);
   modal.dataset.fieldId = fieldId;
   closeAnnotationSymbolsPanel();
   if (fieldId === "annotation" || fieldId === "annotation_en") {
@@ -3380,20 +4102,29 @@ function viewAnnotation(fieldId, title) {
     modalEditor.contentEditable = "true";
     modalEditor.classList.remove("preview");
     modalEditor.lang = lang;
-    const normalize = () => {
-      const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
-      modalEditor.innerHTML = annotationTextToHtml(cleaned);
+    modalEditor.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        insertAnnotationHtml("<br>");
+        updateAnnotationStats();
+      }
     };
     modalEditor.onpaste = () => {
-      setTimeout(normalize, 0);
+      setTimeout(() => {
+        modalEditor.innerHTML = sanitizeAnnotationHtml(modalEditor.innerHTML || "");
+        updateAnnotationStats();
+      }, 0);
     };
-    modalEditor.onblur = normalize;
+    modalEditor.onblur = null;
   } else {
+    modalEditor.onkeydown = null;
     modalEditor.onpaste = null;
     modalEditor.onblur = null;
   }
   updateAnnotationStats();
   initAnnotationSymbolsPanel();
+  initAnnotationLatexEditor();
+  closeAnnotationLatexEditor();
 
   modal.classList.add("active");
   setTimeout(() => {
@@ -3423,13 +4154,12 @@ function saveEditedAnnotation() {
   if (!field || !modalEditor) return;
 
   const html = annotationCodeViewEnabled && modalTextarea ? modalTextarea.value : modalEditor.innerHTML;
-  const rawText = annotationHtmlToText(html);
-  let cleaned = rawText;
-  if (targetFieldId === "annotation" || targetFieldId === "annotation_en") {
-    const lang = targetFieldId === "annotation_en" ? "en" : "ru";
-    cleaned = window.processAnnotation(rawText, lang);
+  const sanitizedHtml = sanitizeAnnotationHtml(html);
+  field.value = annotationHtmlToText(sanitizedHtml);
+  const htmlField = getAnnotationHtmlField(targetFieldId);
+  if (htmlField) {
+    htmlField.value = sanitizedHtml;
   }
-  field.value = cleaned;
   closeAnnotationModal();
 
   const notification = document.createElement("div");
@@ -3442,6 +4172,7 @@ function saveEditedAnnotation() {
 }
 
 function closeAnnotationModal() {
+          setAnnotationPreviewState(false);
           const modal = document.getElementById("annotationModal");
           const modalContent = document.getElementById("annotationModalContent");
           const expandBtn = document.getElementById("annotationModalExpandBtn");
@@ -3455,6 +4186,7 @@ function closeAnnotationModal() {
               expandBtn.classList.remove("expanded");
             }
           }
+          closeAnnotationLatexEditor();
           annotationCodeViewEnabled = false;
           annotationPreviewEnabled = false;
           currentAnnotationFieldId = null;
@@ -3748,9 +4480,67 @@ function closeAnnotationModal() {
           return null;
         };
         
-        window.processAnnotation = function(text) {
-          // Удаляем префиксы "Аннотация", "Annotation", "Abstract"
-          return text.replace(/^(Аннотация|Annotation|Abstract)[\s:]+/i, '').trim();
+        window.removeAnnotationPrefix = function(text, lang) {
+          if (!text) return "";
+          const hasCyr = /[А-Яа-яЁё]/.test(text);
+          const detected = hasCyr ? "ru" : "en";
+          const langToUse = lang || detected;
+          const prefixRe = langToUse === "en"
+            ? /^(Annotation|Abstract|Summary|Resume|Résumé)\s*[.:]?\s*/i
+            : /^(Аннотация|Резюме|Аннот\.|Рез\.|Annotation|Abstract|Summary)\s*[.:]?\s*/i;
+          return String(text).replace(prefixRe, "");
+        };
+
+        window.cleanAnnotationPdfArtifacts = function(text, lang, options) {
+          if (!text) return "";
+          const opts = options || {};
+          const hasCyr = /[А-Яа-яЁё]/.test(text);
+          const detected = hasCyr ? "ru" : "en";
+          const langToUse = lang || detected;
+          let cleaned = String(text);
+          cleaned = cleaned.replace(/\r\n?/g, "\n");
+          cleaned = cleaned.replace(/\u00ad/g, "");
+          cleaned = cleaned.replace(/([A-Za-zА-Яа-яЁё])[-‑–—]\s*\n\s*([A-Za-zА-Яа-яЁё])/g, "$1$2");
+          cleaned = cleaned.replace(/[ \t]*\n[ \t]*/g, " ");
+          cleaned = cleaned.replace(/[ \t]+/g, " ");
+          if (opts.repairWords === true && typeof repairBrokenWords === "function") {
+            cleaned = repairBrokenWords(cleaned, langToUse);
+          }
+          return cleaned.trim();
+        };
+
+        // Legacy wrapper for compatibility with existing calls.
+        window.processAnnotation = function(text, lang, options) {
+          if (!text) return "";
+          const opts = options || {};
+          let cleaned = String(text);
+          if (opts.removePrefix !== false) {
+            cleaned = window.removeAnnotationPrefix(cleaned, lang);
+          }
+          cleaned = window.cleanAnnotationPdfArtifacts(cleaned, lang, { repairWords: opts.repairWords === true });
+          return cleaned.trim();
+        };
+
+        window.cleanAnnotationField = function(fieldId, options) {
+          const field = document.getElementById(fieldId);
+          if (!field) return;
+          const lang = fieldId === "annotation_en" ? "en" : "ru";
+          const opts = options || {};
+          let value = String(field.value || "");
+          if (opts.removePrefix === true) {
+            value = window.removeAnnotationPrefix(value, lang);
+          }
+          value = window.cleanAnnotationPdfArtifacts(value, lang, { repairWords: opts.repairWords === true });
+          field.value = value;
+          field.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+
+        window.stripAnnotationPrefixField = function(fieldId) {
+          const field = document.getElementById(fieldId);
+          if (!field) return;
+          const lang = fieldId === "annotation_en" ? "en" : "ru";
+          field.value = window.removeAnnotationPrefix(field.value || "", lang).trim();
+          field.dispatchEvent(new Event("input", { bubbles: true }));
         };
         
         // Упрощенная версия функции applySelectionToField для работы с выделенными строками
@@ -3780,7 +4570,13 @@ function closeAnnotationModal() {
             }
             value = doi;
           } else if (fieldId === 'annotation' || fieldId === 'annotation_en') {
-            value = window.processAnnotation(fullText);
+            // Для аннотации при вставке из выделения автоматически удаляем только префикс.
+            const lang = fieldId === 'annotation_en' ? 'en' : 'ru';
+            value = window.removeAnnotationPrefix(fullText, lang).trim();
+            const htmlField = getAnnotationHtmlField(fieldId);
+            if (htmlField) {
+              htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(value));
+            }
           } else {
             // Для остальных полей просто вставляем текст
             value = fullText.trim();
@@ -3864,6 +4660,45 @@ function closeAnnotationModal() {
               window.markupCurrentFieldId = el.id;
             }
           });
+
+          const annotationField = document.getElementById("annotation");
+          if (annotationField && annotationField.dataset.prefixStripPasteBound !== "1") {
+            annotationField.dataset.prefixStripPasteBound = "1";
+            annotationField.addEventListener("input", function() {
+              const htmlField = getAnnotationHtmlField("annotation");
+              if (htmlField) {
+                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationField.value || ""));
+              }
+            });
+            annotationField.addEventListener("paste", function() {
+              setTimeout(function() {
+                annotationField.value = window.removeAnnotationPrefix(annotationField.value || "", "ru").trim();
+                const htmlField = getAnnotationHtmlField("annotation");
+                if (htmlField) {
+                  htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationField.value || ""));
+                }
+              }, 0);
+            });
+          }
+          const annotationEnField = document.getElementById("annotation_en");
+          if (annotationEnField && annotationEnField.dataset.prefixStripPasteBound !== "1") {
+            annotationEnField.dataset.prefixStripPasteBound = "1";
+            annotationEnField.addEventListener("input", function() {
+              const htmlField = getAnnotationHtmlField("annotation_en");
+              if (htmlField) {
+                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationEnField.value || ""));
+              }
+            });
+            annotationEnField.addEventListener("paste", function() {
+              setTimeout(function() {
+                annotationEnField.value = window.removeAnnotationPrefix(annotationEnField.value || "", "en").trim();
+                const htmlField = getAnnotationHtmlField("annotation_en");
+                if (htmlField) {
+                  htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationEnField.value || ""));
+                }
+              }, 0);
+            });
+          }
           
           // Устанавливаем обработчик для кнопки очистки выделения
           const clearBtn = document.getElementById("clearBtn");
@@ -6282,15 +7117,25 @@ MARKUP_TEMPLATE = r"""
         <div class="field-group">
           <label>Аннотация (русский)</label>
           <textarea id="annotation" name="annotation">{% if form_data %}{{ form_data.get('annotation', '')|e }}{% endif %}</textarea>
+          <input type="hidden" id="annotation_html" name="annotation_html" value="{% if form_data %}{{ form_data.get('annotation_html', '')|e }}{% endif %}">
           <div class="selected-lines" id="annotation-lines"></div>
           <button type="button" class="view-refs-btn" onclick="viewAnnotation('annotation', 'Аннотация (русский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+            <button type="button" class="btn btn-secondary" onclick="cleanAnnotationField('annotation', { removePrefix: false, repairWords: false })">🧹 Очистить PDF-артефакты</button>
+            <button type="button" class="view-refs-btn" onclick="processAnnotationWithAI('annotation')" id="ai-process-annotation-btn-ru" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">🤖 Обработать с ИИ</button>
+          </div>
         </div>
 
         <div class="field-group">
           <label>Аннотация (английский)</label>
           <textarea id="annotation_en" name="annotation_en">{% if form_data %}{{ form_data.get('annotation_en', '')|e }}{% endif %}</textarea>
+          <input type="hidden" id="annotation_en_html" name="annotation_en_html" value="{% if form_data %}{{ form_data.get('annotation_en_html', '')|e }}{% endif %}">
           <div class="selected-lines" id="annotation_en-lines"></div>
           <button type="button" class="view-refs-btn" onclick="viewAnnotation('annotation_en', 'Аннотация (английский)')" style="margin-top: 5px;">👁 Просмотреть и редактировать</button>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+            <button type="button" class="btn btn-secondary" onclick="cleanAnnotationField('annotation_en', { removePrefix: false, repairWords: false })">🧹 Очистить PDF-артефакты</button>
+            <button type="button" class="view-refs-btn" onclick="processAnnotationWithAI('annotation_en')" id="ai-process-annotation-btn-en" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">🤖 Обработать с ИИ</button>
+          </div>
         </div>
 
         <div class="field-group">
@@ -6422,6 +7267,252 @@ MARKUP_TEMPLATE = r"""
   </div>
 </div>
 
+<style>
+  .annotation-modal-content{
+    background:#181c27;
+    border:1px solid #2a3050;
+    border-radius:14px;
+    box-shadow:0 24px 64px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+  }
+  .annotation-modal-content .modal-header{
+    background:#1e2336;
+    border-bottom:1px solid #2a3050;
+    margin:0;
+    padding:14px 18px;
+  }
+  .annotation-modal-content .modal-header h2{color:#e2e8f0;font-size:18px;}
+  .annotation-modal-content .annotation-modal-body{padding:10px 14px 12px;gap:10px;}
+  .annotation-modal-content .annotation-editor-toolbar{
+    background:#1e2336;
+    border:1px solid #2a3050;
+    border-radius:10px;
+    padding:8px;
+    margin:0;
+  }
+  .annotation-modal-content .annotation-toolbar-row{gap:6px;}
+  .annotation-modal-content .annotation-toolbar-label{color:#94a3b8;font-size:11px;}
+  .annotation-modal-content .annotation-select{
+    background:#252b42;
+    color:#e2e8f0;
+    border:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-divider{background:#353d5e;}
+  .annotation-modal-content .annotation-editor-btn{
+    background:transparent;
+    border:1px solid transparent;
+    color:#94a3b8;
+    border-radius:6px;
+    min-height:28px;
+  }
+  .annotation-modal-content .annotation-editor-btn:hover{
+    background:#252b42;
+    color:#e2e8f0;
+    border-color:#353d5e;
+  }
+  .annotation-modal-content .annotation-editor-btn.annotation-ai-btn{
+    background:rgba(99,102,241,.12);
+    color:#6366f1;
+    border-color:rgba(99,102,241,.25);
+    font-weight:600;
+    padding:0 10px;
+  }
+  .annotation-modal-content .annotation-editor-btn.annotation-ai-btn:hover{
+    background:#6366f1;
+    color:#fff;
+  }
+  .annotation-modal-content .annotation-editor-btn.annotation-ai-btn:disabled{
+    opacity:.55;
+    cursor:wait;
+  }
+  .annotation-modal-content .annotation-ai-status{
+    font-size:11px;
+    color:#94a3b8;
+    min-height:14px;
+    margin-left:auto;
+    padding-left:8px;
+    white-space:nowrap;
+  }
+  .annotation-modal-content #annotationModalEditor{
+    background:#181c27 !important;
+    color:#e2e8f0;
+    border:1px solid #2a3050;
+    border-radius:10px;
+  }
+  .annotation-modal-content .annotation-editor:focus{
+    border-color:#6366f1;
+    box-shadow:0 0 0 3px rgba(99,102,241,.15);
+  }
+  .annotation-modal-content .annotation-code-view{
+    background:#0c0e16;
+    color:#a8b3cf;
+    border:1px solid #2a3050;
+    border-radius:10px;
+  }
+  .annotation-modal-content .annotation-editor-footer{
+    margin-top:0;
+    padding-top:10px;
+    border-top:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-word-count{color:#e2e8f0;}
+  .annotation-modal-content .modal-btn-cancel{
+    background:transparent;
+    color:#94a3b8;
+    border:1px solid #2a3050;
+  }
+  .annotation-modal-content .modal-btn-cancel:hover{background:#252b42;color:#e2e8f0;}
+  .annotation-modal-content .modal-btn-save{
+    background:#6366f1;
+    color:#fff;
+    border:1px solid #6366f1;
+  }
+  .annotation-modal-content .modal-btn-save:hover{opacity:.9;}
+  .annotation-modal-content .annotation-symbols-panel{
+    background:#1e2336;
+    border:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-symbols-search,
+  .annotation-modal-content .annotation-symbols-category{
+    background:#252b42;
+    color:#e2e8f0;
+    border:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-symbol-cell{position:relative;}
+  .annotation-modal-content .annotation-symbol-btn{
+    width:100%;
+    height:44px;
+    padding:0;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:#252b42;
+    border:1px solid #2a3050;
+    border-radius:8px;
+    color:#e2e8f0;
+    font-size:25px;
+    line-height:1;
+    transition:all .14s ease;
+  }
+  .annotation-modal-content .annotation-symbol-btn:hover{
+    border-color:#6366f1;
+    background:#2b3250;
+    box-shadow:0 0 0 2px rgba(99,102,241,.14);
+  }
+  .annotation-modal-content .annotation-symbol-btn:focus{
+    outline:none;
+    border-color:#6366f1;
+    box-shadow:0 0 0 3px rgba(99,102,241,.22);
+  }
+  .annotation-modal-content .annotation-symbol-fav{
+    position:absolute;
+    top:3px;
+    right:3px;
+    width:18px;
+    height:18px;
+    border-radius:999px;
+    border:1px solid #39406a;
+    background:rgba(24,28,39,.95);
+    color:#8f97ba;
+    font-size:10px;
+    line-height:1;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    cursor:pointer;
+    transition:all .14s ease;
+    display:none;
+  }
+  .annotation-modal-content .annotation-symbol-fav:hover{
+    color:#f6c357;
+    border-color:#f6c357;
+    background:rgba(245,158,11,.14);
+  }
+  .annotation-modal-content .annotation-symbol-fav.active{
+    color:#f6c357;
+    border-color:#f6c357;
+    background:rgba(245,158,11,.18);
+  }
+  .annotation-modal-content .annotation-symbols-title{color:#e2e8f0;}
+  .annotation-modal-content .annotation-symbols-info,
+  .annotation-modal-content .annotation-symbols-footer,
+  .annotation-modal-content .annotation-symbols-toggles{color:#94a3b8;}
+  .annotation-modal-content .sym-top{display:flex;gap:8px;align-items:center;padding:4px 0 8px;}
+  .annotation-modal-content .sym-search,.annotation-modal-content .sym-cat{
+    height:32px;
+    border-radius:8px;
+    border:1px solid #31395f;
+    background:#252b42;
+    color:#e2e8f0;
+  }
+  .annotation-modal-content .sym-cat{min-width:140px;}
+  .annotation-modal-content .sym-search::placeholder{color:#7b84a8;}
+  .annotation-modal-content .sym-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill,minmax(46px,1fr));
+    gap:8px;
+    max-height:290px;
+    overflow:auto;
+    padding:2px 0 2px;
+  }
+  .annotation-modal-content .annotation-latex-popup{
+    position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:80;
+    background:rgba(8,10,18,.76);backdrop-filter:blur(4px);
+  }
+  .annotation-modal-content .annotation-latex-popup.active{display:flex;}
+  .annotation-modal-content .annotation-latex-box{
+    width:min(640px,94%);background:#181c27;border:1px solid #353d5e;border-radius:12px;
+    box-shadow:0 16px 48px rgba(0,0,0,.55);overflow:hidden;
+  }
+  .annotation-modal-content .annotation-latex-head{
+    display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e2336;border-bottom:1px solid #2a3050;color:#e2e8f0;font-weight:600;
+  }
+  .annotation-modal-content .annotation-latex-head span{flex:1;}
+  .annotation-modal-content .annotation-latex-templates{
+    display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;background:#1e2336;border-bottom:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-latex-template-btn{
+    border:1px solid rgba(245,158,11,.28);background:rgba(245,158,11,.12);color:#f59e0b;border-radius:6px;padding:4px 9px;font-size:12px;cursor:pointer;
+  }
+  .annotation-modal-content .annotation-latex-template-btn:hover{background:#f59e0b;color:#101010;}
+  .annotation-modal-content .annotation-latex-mode{
+    display:flex;align-items:center;gap:12px;padding:8px 12px;background:#1e2336;border-bottom:1px solid #2a3050;color:#94a3b8;font-size:12px;
+  }
+  .annotation-modal-content .annotation-latex-mode label{display:flex;align-items:center;gap:6px;cursor:pointer;}
+  .annotation-modal-content .annotation-latex-mode input{accent-color:#f59e0b;}
+  .annotation-modal-content .annotation-latex-body{display:flex;height:190px;}
+  .annotation-modal-content .annotation-latex-col{flex:1;display:flex;flex-direction:column;}
+  .annotation-modal-content .annotation-latex-col + .annotation-latex-col{border-left:1px solid #2a3050;}
+  .annotation-modal-content .annotation-latex-label{font-size:11px;color:#64748b;padding:6px 12px 0;text-transform:uppercase;letter-spacing:.3px;}
+  .annotation-modal-content .annotation-latex-input{
+    flex:1;border:none;outline:none;resize:none;background:#0c0e16;color:#e2c97e;padding:8px 12px;font-family:Consolas,Monaco,monospace;font-size:13px;line-height:1.6;
+  }
+  .annotation-modal-content .annotation-latex-preview{
+    flex:1;padding:12px 14px;display:flex;align-items:center;justify-content:center;overflow:auto;color:#e2e8f0;
+  }
+  .annotation-modal-content .annotation-latex-footer{
+    display:flex;align-items:center;gap:8px;padding:10px 12px;background:#1e2336;border-top:1px solid #2a3050;
+  }
+  .annotation-modal-content .annotation-latex-error{flex:1;font-size:11px;color:#ef4444;}
+  .annotation-modal-content .annotation-math-btn{
+    background:rgba(245,158,11,.1);color:#f59e0b;border-color:rgba(245,158,11,.25);
+  }
+  .annotation-modal-content .annotation-math-btn:hover{background:#f59e0b;color:#101010;border-color:#f59e0b;}
+  .annotation-modal-content .annotation-preview-exit-btn{
+    display:none;
+    align-self:flex-end;
+    background:#2b3250;
+    color:#cfd6f3;
+    border:1px solid #3b446d;
+    border-radius:8px;
+    padding:6px 10px;
+    font-size:12px;
+    cursor:pointer;
+  }
+  .annotation-modal-content .annotation-preview-exit-btn:hover{
+    background:#344077;
+    border-color:#5a67b8;
+    color:#fff;
+  }
+</style>
 <div id="annotationModal" class="modal">
   <div class="modal-content resizable annotation-modal-content" id="annotationModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
     <div class="modal-header">
@@ -6432,6 +7523,7 @@ MARKUP_TEMPLATE = r"""
       </div>
     </div>
   <div class="annotation-modal-body">
+  <button type="button" id="annotationPreviewExitBtn" class="annotation-preview-exit-btn" onclick="setAnnotationPreviewState(false)">✎ Вернуться к редактированию</button>
   <div class="annotation-editor-toolbar">
     <div class="annotation-toolbar-row">
       <select id="annotationStyleSelect" class="annotation-select" data-action="format-block" title="Стили абзаца">
@@ -6459,66 +7551,66 @@ MARKUP_TEMPLATE = r"""
       <span class="annotation-divider"></span>
       <button type="button" class="annotation-editor-btn" data-action="bold" tabindex="-1" title="Полужирный"><strong>B</strong></button>
       <button type="button" class="annotation-editor-btn" data-action="italic" tabindex="-1" title="Курсив"><em>I</em></button>
-      <button type="button" class="annotation-editor-btn" data-action="strike" tabindex="-1" title="Зачёркнутый"><span style="text-decoration:line-through;">S</span></button>
       <button type="button" class="annotation-editor-btn" data-action="annotation-sup" tabindex="-1" title="Верхний индекс">x<sup>2</sup></button>
       <button type="button" class="annotation-editor-btn" data-action="annotation-sub" tabindex="-1" title="Нижний индекс">x<sub>2</sub></button>
-      <input type="color" class="annotation-color-input" data-action="text-color" title="Цвет текста" value="#1f1f1f">
-      <input type="color" class="annotation-color-input" data-action="highlight-color" title="Маркер" value="#fff3a3">
-      <span class="annotation-divider"></span>
-      <button type="button" class="annotation-editor-btn" data-action="align-left" tabindex="-1" title="По левому краю">≡</button>
-      <button type="button" class="annotation-editor-btn" data-action="align-center" tabindex="-1" title="По центру">≡</button>
-      <button type="button" class="annotation-editor-btn" data-action="align-right" tabindex="-1" title="По правому краю">≡</button>
-      <button type="button" class="annotation-editor-btn" data-action="align-justify" tabindex="-1" title="По ширине">≡</button>
-      <button type="button" class="annotation-editor-btn" data-action="unordered-list" tabindex="-1" title="Маркированный список">•⋯</button>
-      <button type="button" class="annotation-editor-btn" data-action="ordered-list" tabindex="-1" title="Нумерованный список">1.</button>
-      <button type="button" class="annotation-editor-btn" data-action="link" tabindex="-1" title="Ссылка">🔗</button>
-      <button type="button" class="annotation-editor-btn" data-action="bookmark" tabindex="-1" title="Закладка">🔖</button>
     </div>
     <div class="annotation-toolbar-row">
-      <span class="annotation-toolbar-label">Вставка:</span>
-      <button type="button" class="annotation-editor-btn" data-action="insert-table" tabindex="-1" title="Таблица">▦</button>
-      <button type="button" class="annotation-editor-btn" data-action="insert-image" tabindex="-1" title="Изображение">🖼</button>
-      <button type="button" class="annotation-editor-btn" data-action="insert-video" tabindex="-1" title="Видео">▶</button>
-      <button type="button" class="annotation-editor-btn" data-action="insert-code" tabindex="-1" title="Вставка кода">&lt;/&gt;</button>
+      <span class="annotation-toolbar-label">Инструменты:</span>
       <button type="button" class="annotation-editor-btn" data-action="toggle-symbols-panel" tabindex="-1" title="Специальные символы" onclick="toggleAnnotationSymbolsPanel()">Ω</button>
       <button type="button" class="annotation-editor-btn" data-action="toggle-preview" tabindex="-1" title="Просмотр">👁</button>
       <button type="button" class="annotation-editor-btn" data-action="toggle-fullscreen" tabindex="-1" title="Полноэкранный режим">⛶</button>
       <button type="button" class="annotation-editor-btn" data-action="toggle-code-view" tabindex="-1" title="HTML / Code View">HTML</button>
-      <button type="button" class="annotation-editor-btn" data-action="insert-latex" tabindex="-1" title="LaTeX">LaTeX</button>
-      <button type="button" class="annotation-editor-btn" data-action="insert-formula" tabindex="-1" title="Формула">Σ</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" data-action="insert-latex" tabindex="-1" title="Редактор формул LaTeX">∑ LaTeX</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('frac')" tabindex="-1" title="\\frac{a}{b}">½</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('sqrt')" tabindex="-1" title="\\sqrt{x}">√</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('int')" tabindex="-1" title="\\int_{a}^{b}">∫</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('sum')" tabindex="-1" title="\\sum_{i=1}^{n}">Σ</button>
+      <button type="button" class="annotation-editor-btn annotation-math-btn" onclick="openAnnotationLatexEditorFromTemplate('matrix')" tabindex="-1" title="\\begin{pmatrix}...">⊞</button>
+      <button type="button" id="annotationAiCleanBtn" class="annotation-editor-btn annotation-ai-btn" tabindex="-1" title="Убрать PDF-артефакты" onclick="runAnnotationAiClean()">🧹 Очистить</button>
+      <button type="button" id="annotationAiFormulaBtn" class="annotation-editor-btn annotation-ai-btn" tabindex="-1" title="Оформить формулы и индексы" onclick="runAnnotationAiFormula()">ƒ Формулы и индексы</button>
+      <span id="annotationAiStatus" class="annotation-ai-status" aria-live="polite"></span>
     </div>
   </div>
-  <div id="annotationSymbolsPanel" class="annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
-    <div class="annotation-symbols-header">
-      <input id="annotationSymbolsSearch" class="annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, degree, ≤" autocomplete="off">
-      <select id="annotationSymbolsCategory" class="annotation-symbols-category">
+  <section id="annotationSymbolsPanel" class="symbols-panel annotation-symbols-panel" role="dialog" aria-label="Специальные символы" aria-hidden="true" style="display:none;">
+    <div class="sym-top">
+      <input id="annotationSymbolsSearch" class="sym-search annotation-symbols-search" type="text" placeholder="Поиск: alpha, μ, ≤, degree…" autocomplete="off">
+      <select id="annotationSymbolsCategory" class="sym-cat annotation-symbols-category">
         <option value="all">Все</option>
         <option value="greek">Греческий</option>
         <option value="math">Математика</option>
         <option value="arrows">Стрелки</option>
         <option value="indices">Индексы</option>
         <option value="units">Единицы</option>
-        <option value="currency">Валюты</option>
-        <option value="typography">Типографика</option>
-        <option value="latin">Диакритика</option>
-        <option value="other">Прочее</option>
       </select>
     </div>
-    <div class="annotation-symbols-toggles">
-      <label><input id="annotationSymbolsLatex" type="checkbox"> Как LaTeX</label>
-      <label><input id="annotationSymbolsAutoClose" type="checkbox" checked> Автозакрытие</label>
-    </div>
-    <div id="annotationSymbolsGrid" class="annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
-    <div class="annotation-symbols-footer">
-      <div class="annotation-symbols-section">
-        <span class="annotation-symbols-title">Недавние</span>
-        <div id="annotationSymbolsRecent" class="annotation-symbols-recent"></div>
+    <div id="annotationSymbolsGrid" class="sym-grid annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+  </section>
+  <div id="annotationLatexPopup" class="annotation-latex-popup" role="dialog" aria-modal="true" aria-label="Редактор формул">
+    <div class="annotation-latex-box">
+      <div class="annotation-latex-head">
+        <span>∑ Редактор формул (LaTeX / KaTeX)</span>
+        <button type="button" class="annotation-editor-btn" onclick="closeAnnotationLatexEditor()" title="Закрыть">✕</button>
       </div>
-      <div class="annotation-symbols-section">
-        <span class="annotation-symbols-title">Избранное</span>
-        <div id="annotationSymbolsFavorites" class="annotation-symbols-favorites"></div>
+      <div class="annotation-latex-templates" id="annotationLatexTemplates"></div>
+      <div class="annotation-latex-mode">
+        <label><input id="annotationLatexModeInline" type="radio" name="annotationLatexMode" checked> Inline `$...$`</label>
+        <label><input id="annotationLatexModeBlock" type="radio" name="annotationLatexMode"> Display `$$...$$`</label>
       </div>
-      <div class="annotation-symbols-info">Вставится в позицию курсора.</div>
+      <div class="annotation-latex-body">
+        <div class="annotation-latex-col">
+          <div class="annotation-latex-label">LaTeX</div>
+          <textarea id="annotationLatexInput" class="annotation-latex-input" spellcheck="false" placeholder="\\frac{a}{b} + \\sqrt{x}"></textarea>
+        </div>
+        <div class="annotation-latex-col">
+          <div class="annotation-latex-label">Превью</div>
+          <div id="annotationLatexPreview" class="annotation-latex-preview"><span style="color:#64748b;font-size:12px;">Введите формулу…</span></div>
+        </div>
+      </div>
+      <div class="annotation-latex-footer">
+        <span id="annotationLatexError" class="annotation-latex-error"></span>
+        <button type="button" class="modal-btn modal-btn-cancel" onclick="closeAnnotationLatexEditor()">Отмена</button>
+        <button type="button" class="modal-btn modal-btn-save" onclick="insertAnnotationLatexFromPopup()">Вставить</button>
+      </div>
     </div>
   </div>
   <div id="annotationModalEditor" class="annotation-editor" contenteditable="true" spellcheck="true" autocomplete="off" autocorrect="off" autocapitalize="off" data-ms-editor="false" data-gramm="false" style="padding:24px;box-sizing:border-box;height:32vh;max-height:32vh;overflow-y:scroll;"></div>
@@ -6836,23 +7928,57 @@ function toggleAnnotationSymbolFavorite(id) {
 
 function insertAnnotationSymbol(item) {
   const editor = document.getElementById("annotationModalEditor");
+  const textarea = document.getElementById("annotationModalTextarea");
   const { latexToggle, autoCloseToggle, panel } = getAnnotationSymbolsElements();
-  if (!editor) return;
-  restoreAnnotationSelection();
-  editor.focus();
+  if (!editor && !textarea) return;
+  if (typeof setAnnotationPreviewState === "function" && typeof annotationPreviewEnabled !== "undefined" && annotationPreviewEnabled) {
+    setAnnotationPreviewState(false);
+  }
   const useLatex = latexToggle && latexToggle.checked && item.latex;
   const text = useLatex ? item.latex : item.char;
-  document.execCommand("insertText", false, text);
+
+  // В code-view вставляем прямо в textarea в позицию курсора.
+  if (typeof annotationCodeViewEnabled !== "undefined" && annotationCodeViewEnabled && textarea && textarea.style.display !== "none") {
+    const start = typeof textarea.selectionStart === "number" ? textarea.selectionStart : textarea.value.length;
+    const end = typeof textarea.selectionEnd === "number" ? textarea.selectionEnd : start;
+    const prev = textarea.value || "";
+    textarea.value = prev.slice(0, start) + text + prev.slice(end);
+    const pos = start + text.length;
+    textarea.selectionStart = pos;
+    textarea.selectionEnd = pos;
+    textarea.focus();
+  } else if (editor) {
+    restoreAnnotationSelection();
+    editor.focus();
+    // Основной путь для contenteditable.
+    if (!document.execCommand("insertText", false, text)) {
+      const selection = window.getSelection();
+      if (selection && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(document.createTextNode(text));
+        range.collapse(false);
+        selection.removeAllRanges();
+        selection.addRange(range);
+      }
+    }
+  }
+
   const recent = getAnnotationSymbolsStorage("annotation_symbols_recent", []);
   const filtered = recent.filter((id) => id !== item.id);
   filtered.unshift(item.id);
   setAnnotationSymbolsStorage("annotation_symbols_recent", filtered.slice(0, 20));
   renderAnnotationSymbolsLists();
   updateAnnotationStats();
-  if (autoCloseToggle && autoCloseToggle.checked && panel) {
+  if ((autoCloseToggle ? autoCloseToggle.checked : false) && panel) {
     closeAnnotationSymbolsPanel();
   }
-  editor.focus();
+  if (typeof saveAnnotationSelection === "function") saveAnnotationSelection();
+  if (editor && editor.style.display !== "none") {
+    editor.focus();
+  } else if (textarea) {
+    textarea.focus();
+  }
 }
 
 function openAnnotationSymbolsPanel() {
@@ -6892,6 +8018,20 @@ function initAnnotationSymbolsPanel() {
   window.__annotationSymbolsHandlersAdded = true;
   const { search, category, grid } = getAnnotationSymbolsElements();
   if (search) search.addEventListener("input", renderAnnotationSymbolsPanel);
+  if (search) {
+    search.addEventListener("keydown", (event) => {
+      const buttons = Array.from((grid || document).querySelectorAll(".annotation-symbol-btn"));
+      if (!buttons.length) return;
+      if (event.key === "Enter") {
+        event.preventDefault();
+        buttons[0].click();
+      }
+      if (event.key === "ArrowDown") {
+        event.preventDefault();
+        buttons[0].focus();
+      }
+    });
+  }
   if (category) category.addEventListener("change", renderAnnotationSymbolsPanel);
   document.addEventListener("mousedown", (event) => {
     const target = event.target;
@@ -6943,9 +8083,7 @@ function setAnnotationCodeView(enabled) {
   const textarea = document.getElementById("annotationModalTextarea");
   if (!editor || !textarea) return;
   annotationCodeViewEnabled = enabled;
-  annotationPreviewEnabled = false;
-  editor.contentEditable = "true";
-  editor.classList.remove("preview");
+  setAnnotationPreviewState(false);
   if (enabled) {
     textarea.value = editor.innerHTML;
     textarea.style.display = "block";
@@ -6959,11 +8097,7 @@ function setAnnotationCodeView(enabled) {
 }
 
 function toggleAnnotationPreview() {
-  const editor = document.getElementById("annotationModalEditor");
-  if (!editor) return;
-  annotationPreviewEnabled = !annotationPreviewEnabled;
-  editor.contentEditable = annotationPreviewEnabled ? "false" : "true";
-  editor.classList.toggle("preview", annotationPreviewEnabled);
+  setAnnotationPreviewState(!annotationPreviewEnabled);
 }
 
 function getAnnotationPlainText() {
@@ -7115,15 +8249,11 @@ function applyAnnotationCommand(action, value) {
       toggleAnnotationSymbolsPanel();
       break;
     case "insert-latex": {
-      const latex = prompt("LaTeX формула:");
-      if (!latex) break;
-      document.execCommand("insertText", false, `\\(${latex}\\)`);
+      openAnnotationLatexEditor("", false);
       break;
     }
     case "insert-formula": {
-      const formula = prompt("Формула:");
-      if (!formula) break;
-      document.execCommand("insertText", false, `∑ ${formula}`);
+      openAnnotationLatexEditorFromTemplate("sum");
       break;
     }
     case "toggle-preview":
@@ -7457,6 +8587,66 @@ async function processReferencesWithAI(fieldId) {
   }
 }
 
+async function processAnnotationWithAI(fieldId) {
+  const field = document.getElementById(fieldId);
+  if (!field) {
+    toast("Поле аннотации не найдено", "error");
+    return;
+  }
+
+  const rawText = String(field.value || "").trim();
+  if (!rawText) {
+    toast("Поле аннотации пусто. Сначала добавьте текст.", "error");
+    return;
+  }
+
+  const btnId = fieldId === "annotation" ? "ai-process-annotation-btn-ru" : "ai-process-annotation-btn-en";
+  const btn = document.getElementById(btnId);
+  const originalText = btn ? btn.textContent : "🤖 Обработать с ИИ";
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ Обработка ИИ...";
+  }
+
+  try {
+    const response = await fetch("/process-annotation-ai", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        field_id: fieldId,
+        text: rawText,
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || "Не удалось обработать аннотацию.");
+    }
+
+    const cleaned = String(data.text || "").trim();
+    if (!cleaned) {
+      throw new Error("ИИ вернул пустой результат.");
+    }
+
+    field.value = cleaned;
+    const htmlField = getAnnotationHtmlField(fieldId);
+    if (htmlField) {
+      htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(cleaned));
+    }
+    toast("✅ Аннотация очищена с помощью ИИ", "success");
+  } catch (error) {
+    toast(`❌ Ошибка при обработке: ${error.message}`, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
+}
+
 function saveEditedReferences() {
   if (!currentRefsFieldId) return;
   
@@ -7524,80 +8714,7 @@ function toggleRefsModalSize() {
 
 let currentAnnotationFieldId = null;
 
-function annotationTextToHtml(text) {
-  if (!text) return "";
-  const escaped = escapeHtml(text);
-  return escaped
-    .replace(/&lt;(sup|sub)&gt;/gi, "<$1>")
-    .replace(/&lt;\/(sup|sub)&gt;/gi, "</$1>")
-    .replace(/&lt;br\s*\/?&gt;/gi, "<br>")
-    .replace(/\n/g, "<br>");
-}
-
-function annotationHtmlToText(html) {
-  const container = document.createElement("div");
-  container.innerHTML = html || "";
-  let output = "";
-
-  const walk = (node) => {
-    if (node.nodeType === Node.TEXT_NODE) {
-      output += node.nodeValue;
-      return;
-    }
-    if (node.nodeType !== Node.ELEMENT_NODE) {
-      return;
-    }
-
-    const tag = node.tagName;
-    const verticalAlign = node.style && node.style.verticalAlign;
-
-    if (verticalAlign === "super") {
-      output += "<sup>";
-      node.childNodes.forEach(walk);
-      output += "</sup>";
-      return;
-    }
-    if (verticalAlign === "sub") {
-      output += "<sub>";
-      node.childNodes.forEach(walk);
-      output += "</sub>";
-      return;
-    }
-
-    if (tag === "BR") {
-      output += "\n";
-      return;
-    }
-    if (tag === "DIV" || tag === "P") {
-      if (output && !output.endsWith("\n")) {
-        output += "\n";
-      }
-      node.childNodes.forEach(walk);
-      if (!output.endsWith("\n")) {
-        output += "\n";
-      }
-      return;
-    }
-    if (tag === "SUP") {
-      output += "<sup>";
-      node.childNodes.forEach(walk);
-      output += "</sup>";
-      return;
-    }
-    if (tag === "SUB") {
-      output += "<sub>";
-      node.childNodes.forEach(walk);
-      output += "</sub>";
-      return;
-    }
-
-    node.childNodes.forEach(walk);
-  };
-
-  container.childNodes.forEach(walk);
-  return output.replace(/\n{3,}/g, "\n\n").trim();
-}
-
+/*__ANNOTATION_EDITOR_SHARED__*/
 function wrapAnnotationRange(range, tag) {
   const editor = document.getElementById("annotationModalEditor");
   if (!editor) return;
@@ -7921,6 +9038,8 @@ function viewAnnotation(fieldId, title) {
   currentAnnotationFieldId = fieldId;
 
   const annotationText = field.value.trim();
+  const htmlField = getAnnotationHtmlField(fieldId);
+  const storedAnnotationHtml = (htmlField?.value || "").trim();
 
   const modal = document.getElementById("annotationModal");
   const modalTitle = document.getElementById("annotationModalTitle");
@@ -7929,7 +9048,9 @@ function viewAnnotation(fieldId, title) {
   if (!modal || !modalTitle || !modalEditor) return;
 
   modalTitle.textContent = title;
-  modalEditor.innerHTML = annotationTextToHtml(annotationText);
+  modalEditor.innerHTML = storedAnnotationHtml
+    ? sanitizeAnnotationHtml(storedAnnotationHtml)
+    : annotationTextToHtml(annotationText);
   modal.dataset.fieldId = fieldId;
   if (fieldId === "annotation" || fieldId === "annotation_en") {
     const lang = fieldId === "annotation_en" ? "en" : "ru";
@@ -7941,19 +9062,29 @@ function viewAnnotation(fieldId, title) {
     modalEditor.contentEditable = "true";
     modalEditor.classList.remove("preview");
     modalEditor.lang = lang;
-    const normalize = () => {
-      const cleaned = window.processAnnotation(annotationHtmlToText(modalEditor.innerHTML), lang);
-      modalEditor.innerHTML = annotationTextToHtml(cleaned);
+    modalEditor.onkeydown = (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        insertAnnotationHtml("<br>");
+        updateAnnotationStats();
+      }
     };
     modalEditor.onpaste = () => {
-      setTimeout(normalize, 0);
+      setTimeout(() => {
+        modalEditor.innerHTML = sanitizeAnnotationHtml(modalEditor.innerHTML || "");
+        updateAnnotationStats();
+      }, 0);
     };
-    modalEditor.onblur = normalize;
+    modalEditor.onblur = null;
   } else {
+    modalEditor.onkeydown = null;
     modalEditor.onpaste = null;
     modalEditor.onblur = null;
   }
   updateAnnotationStats();
+  initAnnotationSymbolsPanel();
+  initAnnotationLatexEditor();
+  closeAnnotationLatexEditor();
 
   modal.classList.add("active");
   setTimeout(() => {
@@ -7982,10 +9113,13 @@ function saveEditedAnnotation() {
 
   if (!field || !modalEditor) return;
 
-  const lang = targetFieldId === "annotation_en" ? "en" : "ru";
   const html = annotationCodeViewEnabled && modalTextarea ? modalTextarea.value : modalEditor.innerHTML;
-  const cleaned = window.processAnnotation(annotationHtmlToText(html), lang);
-  field.value = cleaned;
+  const sanitizedHtml = sanitizeAnnotationHtml(html);
+  field.value = annotationHtmlToText(sanitizedHtml);
+  const htmlField = getAnnotationHtmlField(targetFieldId);
+  if (htmlField) {
+    htmlField.value = sanitizedHtml;
+  }
   closeAnnotationModal();
 
   const notification = document.createElement("div");
@@ -7998,6 +9132,7 @@ function saveEditedAnnotation() {
 }
 
 function closeAnnotationModal() {
+  setAnnotationPreviewState(false);
   const modal = document.getElementById("annotationModal");
   const modalContent = document.getElementById("annotationModalContent");
   const expandBtn = document.getElementById("annotationModalExpandBtn");
@@ -8012,6 +9147,7 @@ function closeAnnotationModal() {
     }
   }
   closeAnnotationSymbolsPanel();
+  closeAnnotationLatexEditor();
   annotationCodeViewEnabled = false;
   annotationPreviewEnabled = false;
   currentAnnotationFieldId = null;
@@ -9345,23 +10481,70 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
     });
   }
 
-  window.processAnnotation = function processAnnotation(text, lang) {
+  window.removeAnnotationPrefix = function removeAnnotationPrefix(text, lang) {
     if (!text) return "";
     const hasCyr = /[А-Яа-яЁё]/.test(text);
     const detected = hasCyr ? "ru" : "en";
     const langToUse = lang || detected;
-    // Удаляем префикс и чистим переносы/разрывы слов из PDF
     const prefixRe = langToUse === "en"
       ? /^(Annotation|Abstract|Summary|Resume|Résumé)\s*[.:]?\s*/i
       : /^(Аннотация|Резюме|Аннот\.|Рез\.|Annotation|Abstract|Summary)\s*[.:]?\s*/i;
-    let cleaned = String(text).replace(prefixRe, "");
+    return String(text).replace(prefixRe, "");
+  };
+
+  window.cleanAnnotationPdfArtifacts = function cleanAnnotationPdfArtifacts(text, lang, options) {
+    if (!text) return "";
+    const opts = options || {};
+    const hasCyr = /[А-Яа-яЁё]/.test(text);
+    const detected = hasCyr ? "ru" : "en";
+    const langToUse = lang || detected;
+    let cleaned = String(text);
     cleaned = cleaned.replace(/\r\n?/g, "\n");
     cleaned = cleaned.replace(/\u00ad/g, "");
     cleaned = cleaned.replace(/([A-Za-zА-Яа-яЁё])[-‑–—]\s*\n\s*([A-Za-zА-Яа-яЁё])/g, "$1$2");
     cleaned = cleaned.replace(/[ \t]*\n[ \t]*/g, " ");
     cleaned = cleaned.replace(/[ \t]+/g, " ");
-    cleaned = repairBrokenWords(cleaned, langToUse);
+    if (opts.repairWords === true) {
+      cleaned = repairBrokenWords(cleaned, langToUse);
+    }
     return cleaned.trim();
+  };
+
+  // Legacy wrapper: kept for backward compatibility with existing calls.
+  window.processAnnotation = function processAnnotation(text, lang, options) {
+    if (!text) return "";
+    const opts = options || {};
+    const hasCyr = /[А-Яа-яЁё]/.test(text);
+    const detected = hasCyr ? "ru" : "en";
+    const langToUse = lang || detected;
+    let cleaned = String(text);
+    if (opts.removePrefix !== false) {
+      cleaned = window.removeAnnotationPrefix(cleaned, langToUse);
+    }
+    cleaned = window.cleanAnnotationPdfArtifacts(cleaned, langToUse, { repairWords: opts.repairWords === true });
+    return cleaned.trim();
+  };
+
+  window.cleanAnnotationField = function cleanAnnotationField(fieldId, options) {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    const lang = fieldId === "annotation_en" ? "en" : "ru";
+    const opts = options || {};
+    let value = String(field.value || "");
+    if (opts.removePrefix === true) {
+      value = window.removeAnnotationPrefix(value, lang);
+    }
+    value = window.cleanAnnotationPdfArtifacts(value, lang, { repairWords: opts.repairWords === true });
+    field.value = value;
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  window.stripAnnotationPrefixField = function stripAnnotationPrefixField(fieldId) {
+    const field = document.getElementById(fieldId);
+    if (!field) return;
+    const lang = fieldId === "annotation_en" ? "en" : "ru";
+    field.value = window.removeAnnotationPrefix(field.value || "", lang).trim();
+    field.dispatchEvent(new Event("input", { bubbles: true }));
   };
 
   function processReferences(texts) {
@@ -9745,10 +10928,13 @@ function applySelectionToField(fieldId) {
       const funding = processFunding(fullText, fieldId === "funding_en" ? "en" : "ru");
       value = funding;
     } else if (fieldId === "annotation" || fieldId === "annotation_en") {
-      // Обрабатываем аннотацию: удаляем префикс "Аннотация" или "Annotation" если он есть
-      const annotation = window.processAnnotation(fullText, fieldId === "annotation_en" ? "en" : "ru");
-      // Заменяем содержимое поля, не добавляя к предыдущему
-      value = annotation;
+      // Для аннотации при вставке из выделения автоматически удаляем только префикс.
+      const lang = fieldId === "annotation_en" ? "en" : "ru";
+      value = window.removeAnnotationPrefix(fullText, lang).trim();
+      const htmlField = getAnnotationHtmlField(fieldId);
+      if (htmlField) {
+        htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(value));
+      }
     } else if (fieldId === "year") {
       const year = extractYear(fullText);
       if (year) {
@@ -9768,40 +10954,40 @@ function applySelectionToField(fieldId) {
   }
 
   document.addEventListener("DOMContentLoaded", () => {
-    // Очищаем префикс "Аннотация" из полей аннотации при загрузке страницы
     const annotationField = document.getElementById("annotation");
-    if (annotationField && annotationField.value) {
-      const cleaned = window.processAnnotation(annotationField.value, "ru");
-      if (cleaned !== annotationField.value) {
-        annotationField.value = cleaned;
-      }
-    }
+    const annotationEnField = document.getElementById("annotation_en");
     if (annotationField) {
+      annotationField.addEventListener("input", () => {
+        const htmlField = getAnnotationHtmlField("annotation");
+        if (htmlField) {
+          htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationField.value || ""));
+        }
+      });
       annotationField.addEventListener("paste", () => {
         setTimeout(() => {
-          annotationField.value = window.processAnnotation(annotationField.value, "ru");
+          annotationField.value = window.removeAnnotationPrefix(annotationField.value || "", "ru").trim();
+          const htmlField = getAnnotationHtmlField("annotation");
+          if (htmlField) {
+            htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationField.value || ""));
+          }
         }, 0);
       });
-      annotationField.addEventListener("blur", () => {
-        annotationField.value = window.processAnnotation(annotationField.value, "ru");
-      });
-    }
-    
-    const annotationEnField = document.getElementById("annotation_en");
-    if (annotationEnField && annotationEnField.value) {
-      const cleaned = window.processAnnotation(annotationEnField.value, "en");
-      if (cleaned !== annotationEnField.value) {
-        annotationEnField.value = cleaned;
-      }
     }
     if (annotationEnField) {
+      annotationEnField.addEventListener("input", () => {
+        const htmlField = getAnnotationHtmlField("annotation_en");
+        if (htmlField) {
+          htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationEnField.value || ""));
+        }
+      });
       annotationEnField.addEventListener("paste", () => {
         setTimeout(() => {
-          annotationEnField.value = window.processAnnotation(annotationEnField.value, "en");
+          annotationEnField.value = window.removeAnnotationPrefix(annotationEnField.value || "", "en").trim();
+          const htmlField = getAnnotationHtmlField("annotation_en");
+          if (htmlField) {
+            htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(annotationEnField.value || ""));
+          }
         }, 0);
-      });
-      annotationEnField.addEventListener("blur", () => {
-        annotationEnField.value = window.processAnnotation(annotationEnField.value, "en");
       });
     }
 
@@ -10059,6 +11245,10 @@ function applySelectionToField(fieldId) {
           if (crossrefAnnotationEnField && abstractText) {
             if (!crossrefAnnotationEnField.value.trim() || confirm("Заменить текущую Annotation (English) данными из Crossref?")) {
               crossrefAnnotationEnField.value = abstractText;
+              const htmlField = getAnnotationHtmlField("annotation_en");
+              if (htmlField) {
+                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(abstractText));
+              }
               crossrefAnnotationEnField.dispatchEvent(new Event("input", { bubbles: true }));
             }
           }
@@ -10124,8 +11314,23 @@ function applySelectionToField(fieldId) {
 
     const form = $("#metadataForm");
     if (form) {
+      const syncAnnotationHtmlFields = () => {
+        const ruField = document.getElementById("annotation");
+        const enField = document.getElementById("annotation_en");
+        const ruHtmlField = getAnnotationHtmlField("annotation");
+        const enHtmlField = getAnnotationHtmlField("annotation_en");
+        if (ruField && ruHtmlField) {
+          const source = (ruHtmlField.value || "").trim() || annotationTextToHtml(ruField.value || "");
+          ruHtmlField.value = sanitizeAnnotationHtml(source);
+        }
+        if (enField && enHtmlField) {
+          const source = (enHtmlField.value || "").trim() || annotationTextToHtml(enField.value || "");
+          enHtmlField.value = sanitizeAnnotationHtml(source);
+        }
+      };
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
+        syncAnnotationHtmlFields();
         const fd = new FormData(form);
         const data = {};
         for (const [k, v] of fd.entries()) data[k] = v;
@@ -10217,3 +11422,5 @@ function applySelectionToField(fieldId) {
 </body>
 </html>
 """
+HTML_TEMPLATE = HTML_TEMPLATE.replace("/*__ANNOTATION_EDITOR_SHARED__*/", ANNOTATION_EDITOR_SHARED_JS)
+MARKUP_TEMPLATE = MARKUP_TEMPLATE.replace("/*__ANNOTATION_EDITOR_SHARED__*/", ANNOTATION_EDITOR_SHARED_JS)

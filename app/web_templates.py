@@ -5511,6 +5511,10 @@ function closeAnnotationModal() {
               status.textContent = data.message || "Архив загружен.";
               status.style.color = "#2e7d32";
             }
+            if (data.archive) {
+              window.currentArchive = data.archive;
+              sessionStorage.setItem("lastArchiveName", data.archive);
+            }
             const existingNotice = document.getElementById("archiveUploadNotice");
             if (existingNotice) {
               existingNotice.remove();
@@ -5518,11 +5522,16 @@ function closeAnnotationModal() {
             const notice = document.createElement("div");
             notice.id = "archiveUploadNotice";
             notice.style.cssText = "margin-top:10px;background:#e8f5e9;border:1px solid #81c784;color:#2e7d32;padding:8px 10px;border-radius:4px;font-size:12px;font-weight:600;";
-            notice.textContent = "Архив успешно загружен.";
+            notice.textContent = "Архив успешно загружен. Можно запускать обработку ИИ.";
             inputArchiveForm.appendChild(notice);
-            setTimeout(() => {
-              window.location.reload();
-            }, 4000);
+            if (typeof fetchArchiveStatus === "function") {
+              fetchArchiveStatus();
+            } else if (typeof updateArchiveUi === "function") {
+              updateArchiveUi({ status: "idle", archive: data.archive || window.currentArchive || null });
+            } else if (processArchiveBtn) {
+              processArchiveBtn.classList.remove("is-disabled");
+              processArchiveBtn.setAttribute("aria-disabled", "false");
+            }
           } catch (error) {
             if (status) {
               status.textContent = "Ошибка загрузки архива.";

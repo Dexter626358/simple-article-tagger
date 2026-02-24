@@ -320,6 +320,39 @@ def register_archive_routes(app, ctx):
             pdf_root = raw_dir
         else:
             pdf_root = archive_dir
+        # Preflight checks for AI processing in production.
+        # Fail fast here instead of starting background thread and failing silently later.
+        try:
+            from config import get_config
+            from services.gpt_extraction import OPENAI_AVAILABLE
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": f"Не удалось инициализировать модуль ИИ: {e}",
+            }), 500
+        if not OPENAI_AVAILABLE:
+            return jsonify({
+                "success": False,
+                "error": "Пакет openai не установлен на сервере. Установите зависимость и перезапустите сервис.",
+            }), 500
+        config = None
+        try:
+            config = get_config()
+        except Exception:
+            config = None
+        if config and not config.get("gpt_extraction.enabled", True):
+            return jsonify({
+                "success": False,
+                "error": "ИИ-обработка отключена в конфигурации (gpt_extraction.enabled=false).",
+            }), 400
+        api_key = os.getenv("OPENAI_API_KEY", "").strip()
+        if not api_key and config:
+            api_key = (config.get("gpt_extraction.api_key", "") or "").strip()
+        if not api_key:
+            return jsonify({
+                "success": False,
+                "error": "Не настроен OPENAI_API_KEY на сервере (или пустой gpt_extraction.api_key).",
+            }), 400
         set_current_archive(archive_name)
         progress_state = _get_progress_state(session_id)
         progress_lock = _get_progress_lock(session_id)

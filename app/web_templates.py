@@ -2326,6 +2326,51 @@ HTML_TEMPLATE = """
             overflow:auto;
             padding:2px 0 2px;
           }
+          .annotation-modal-content .annotation-symbol-btn.is-selected{
+            border-color:#7c86f8;
+            background:#313b68;
+            box-shadow:0 0 0 2px rgba(124,134,248,.2);
+          }
+          .annotation-modal-content .annotation-symbol-preview{
+            margin-top:8px;
+            display:flex;
+            align-items:center;
+            gap:10px;
+            border:1px solid #2f3760;
+            background:#202744;
+            border-radius:10px;
+            padding:8px 10px;
+          }
+          .annotation-modal-content .annotation-symbol-preview-char{
+            min-width:42px;
+            height:42px;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            border-radius:8px;
+            border:1px solid #3b446d;
+            background:#252d4f;
+            color:#f4f7ff;
+            font-size:24px;
+            line-height:1;
+          }
+          .annotation-modal-content .annotation-symbol-preview-text{min-width:0;}
+          .annotation-modal-content .annotation-symbol-preview-name{
+            color:#e2e8f0;
+            font-size:12px;
+            font-weight:600;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          }
+          .annotation-modal-content .annotation-symbol-preview-meta{
+            margin-top:2px;
+            color:#94a3b8;
+            font-size:11px;
+            white-space:nowrap;
+            overflow:hidden;
+            text-overflow:ellipsis;
+          }
           .annotation-modal-content .annotation-latex-popup{
             position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:80;
             background:rgba(8,10,18,.76);backdrop-filter:blur(4px);
@@ -2473,6 +2518,13 @@ HTML_TEMPLATE = """
                 </select>
               </div>
               <div id="annotationSymbolsGrid" class="sym-grid annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+              <div class="annotation-symbol-preview" aria-live="polite">
+                <div id="annotationSymbolPreviewChar" class="annotation-symbol-preview-char">Ω</div>
+                <div class="annotation-symbol-preview-text">
+                  <div id="annotationSymbolPreviewName" class="annotation-symbol-preview-name">Выберите символ</div>
+                  <div id="annotationSymbolPreviewMeta" class="annotation-symbol-preview-meta">Клик вставит символ в позицию курсора</div>
+                </div>
+              </div>
             </section>
             <div id="annotationLatexPopup" class="annotation-latex-popup" role="dialog" aria-modal="true" aria-label="Редактор формул">
               <div class="annotation-latex-box">
@@ -3820,11 +3872,29 @@ function getAnnotationSymbolsElements() {
     search: document.getElementById("annotationSymbolsSearch"),
     category: document.getElementById("annotationSymbolsCategory"),
     grid: document.getElementById("annotationSymbolsGrid"),
+    previewChar: document.getElementById("annotationSymbolPreviewChar"),
+    previewName: document.getElementById("annotationSymbolPreviewName"),
+    previewMeta: document.getElementById("annotationSymbolPreviewMeta"),
     recent: document.getElementById("annotationSymbolsRecent"),
     favorites: document.getElementById("annotationSymbolsFavorites"),
     latexToggle: document.getElementById("annotationSymbolsLatex"),
     autoCloseToggle: document.getElementById("annotationSymbolsAutoClose")
   };
+}
+
+function setAnnotationSymbolPreview(item) {
+  const { previewChar, previewName, previewMeta } = getAnnotationSymbolsElements();
+  if (!previewChar || !previewName || !previewMeta) return;
+  if (!item) {
+    previewChar.textContent = "Ω";
+    previewName.textContent = "Выберите символ";
+    previewMeta.textContent = "Клик вставит символ в позицию курсора";
+    return;
+  }
+  previewChar.textContent = item.char || "Ω";
+  previewName.textContent = `${item.name_ru || ""}${item.name_en ? ` / ${item.name_en}` : ""}`.trim();
+  const latexPart = item.latex ? ` · ${item.latex}` : "";
+  previewMeta.textContent = `${item.codepoint || ""} · ${item.category || ""}${latexPart}`.trim();
 }
 
 function renderAnnotationSymbolsPanel() {
@@ -3859,7 +3929,16 @@ function renderAnnotationSymbolsPanel() {
     btn.dataset.index = String(index);
     btn.textContent = item.char;
     btn.title = `${item.name_ru} (${item.codepoint})`;
-    btn.addEventListener("click", () => insertAnnotationSymbol(item));
+    if (window.__annotationSelectedSymbolId === item.id) {
+      btn.classList.add("is-selected");
+    }
+    btn.addEventListener("mouseenter", () => setAnnotationSymbolPreview(item));
+    btn.addEventListener("focus", () => setAnnotationSymbolPreview(item));
+    btn.addEventListener("click", () => {
+      window.__annotationSelectedSymbolId = item.id;
+      setAnnotationSymbolPreview(item);
+      insertAnnotationSymbol(item);
+    });
     const fav = document.createElement("button");
     fav.type = "button";
     fav.className = "annotation-symbol-fav" + (favorites.has(item.id) ? " active" : "");
@@ -3875,6 +3954,7 @@ function renderAnnotationSymbolsPanel() {
     cell.appendChild(fav);
     grid.appendChild(cell);
   });
+  setAnnotationSymbolPreview(symbols.find((s) => s.id === window.__annotationSelectedSymbolId) || symbols[0] || null);
   renderAnnotationSymbolsLists();
 }
 
@@ -5392,19 +5472,24 @@ function closeAnnotationModal() {
           });
         }
 
-        window.handleArchiveUpload = async (event) => {
-          if (event && event.preventDefault) event.preventDefault();
-          const fileInput = document.getElementById("fileInput") || document.getElementById("inputArchiveFile");
+        window.uploadArchiveFile = async (file) => {
           const status = document.getElementById("inputArchiveStatus");
-          if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
+          if (!file) {
             if (status) {
               status.textContent = "Выберите ZIP файл.";
               status.style.color = "#c62828";
             }
             return false;
           }
+          if (!String(file.name || "").toLowerCase().endsWith(".zip")) {
+            if (status) {
+              status.textContent = "Поддерживается только ZIP архив.";
+              status.style.color = "#c62828";
+            }
+            return false;
+          }
           const formData = new FormData();
-          formData.append("archive", fileInput.files[0]);
+          formData.append("archive", file);
           if (status) {
             status.textContent = "Загрузка архива...";
             status.style.color = "#555";
@@ -5447,6 +5532,13 @@ function closeAnnotationModal() {
           return false;
         };
 
+        window.handleArchiveUpload = async (event) => {
+          if (event && event.preventDefault) event.preventDefault();
+          const fileInput = document.getElementById("fileInput") || document.getElementById("inputArchiveFile");
+          const file = fileInput && fileInput.files && fileInput.files.length ? fileInput.files[0] : null;
+          return window.uploadArchiveFile(file);
+        };
+
         if (inputArchiveForm) {
           inputArchiveForm.addEventListener("submit", window.handleArchiveUpload);
         }
@@ -5487,6 +5579,7 @@ function closeAnnotationModal() {
               archiveStatus.textContent = `Файл выбран: ${file.name}`;
               archiveStatus.style.color = "#9aa2b6";
             }
+            window.uploadArchiveFile(file);
           });
           archiveFileInput.addEventListener("change", () => {
             const file = archiveFileInput.files && archiveFileInput.files.length ? archiveFileInput.files[0] : null;
@@ -5497,6 +5590,7 @@ function closeAnnotationModal() {
             }
             archiveStatus.textContent = `Файл выбран: ${file.name}`;
             archiveStatus.style.color = "#9aa2b6";
+            window.uploadArchiveFile(file);
           });
         }
       </script>
@@ -7453,6 +7547,51 @@ MARKUP_TEMPLATE = r"""
     overflow:auto;
     padding:2px 0 2px;
   }
+  .annotation-modal-content .annotation-symbol-btn.is-selected{
+    border-color:#7c86f8;
+    background:#313b68;
+    box-shadow:0 0 0 2px rgba(124,134,248,.2);
+  }
+  .annotation-modal-content .annotation-symbol-preview{
+    margin-top:8px;
+    display:flex;
+    align-items:center;
+    gap:10px;
+    border:1px solid #2f3760;
+    background:#202744;
+    border-radius:10px;
+    padding:8px 10px;
+  }
+  .annotation-modal-content .annotation-symbol-preview-char{
+    min-width:42px;
+    height:42px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    border-radius:8px;
+    border:1px solid #3b446d;
+    background:#252d4f;
+    color:#f4f7ff;
+    font-size:24px;
+    line-height:1;
+  }
+  .annotation-modal-content .annotation-symbol-preview-text{min-width:0;}
+  .annotation-modal-content .annotation-symbol-preview-name{
+    color:#e2e8f0;
+    font-size:12px;
+    font-weight:600;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
+  .annotation-modal-content .annotation-symbol-preview-meta{
+    margin-top:2px;
+    color:#94a3b8;
+    font-size:11px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+  }
   .annotation-modal-content .annotation-latex-popup{
     position:absolute;inset:0;display:none;align-items:center;justify-content:center;z-index:80;
     background:rgba(8,10,18,.76);backdrop-filter:blur(4px);
@@ -7584,6 +7723,13 @@ MARKUP_TEMPLATE = r"""
       </select>
     </div>
     <div id="annotationSymbolsGrid" class="sym-grid annotation-symbols-grid" role="listbox" aria-label="Символы"></div>
+    <div class="annotation-symbol-preview" aria-live="polite">
+      <div id="annotationSymbolPreviewChar" class="annotation-symbol-preview-char">Ω</div>
+      <div class="annotation-symbol-preview-text">
+        <div id="annotationSymbolPreviewName" class="annotation-symbol-preview-name">Выберите символ</div>
+        <div id="annotationSymbolPreviewMeta" class="annotation-symbol-preview-meta">Клик вставит символ в позицию курсора</div>
+      </div>
+    </div>
   </section>
   <div id="annotationLatexPopup" class="annotation-latex-popup" role="dialog" aria-modal="true" aria-label="Редактор формул">
     <div class="annotation-latex-box">
@@ -7825,11 +7971,29 @@ function getAnnotationSymbolsElements() {
     search: document.getElementById("annotationSymbolsSearch"),
     category: document.getElementById("annotationSymbolsCategory"),
     grid: document.getElementById("annotationSymbolsGrid"),
+    previewChar: document.getElementById("annotationSymbolPreviewChar"),
+    previewName: document.getElementById("annotationSymbolPreviewName"),
+    previewMeta: document.getElementById("annotationSymbolPreviewMeta"),
     recent: document.getElementById("annotationSymbolsRecent"),
     favorites: document.getElementById("annotationSymbolsFavorites"),
     latexToggle: document.getElementById("annotationSymbolsLatex"),
     autoCloseToggle: document.getElementById("annotationSymbolsAutoClose")
   };
+}
+
+function setAnnotationSymbolPreview(item) {
+  const { previewChar, previewName, previewMeta } = getAnnotationSymbolsElements();
+  if (!previewChar || !previewName || !previewMeta) return;
+  if (!item) {
+    previewChar.textContent = "Ω";
+    previewName.textContent = "Выберите символ";
+    previewMeta.textContent = "Клик вставит символ в позицию курсора";
+    return;
+  }
+  previewChar.textContent = item.char || "Ω";
+  previewName.textContent = `${item.name_ru || ""}${item.name_en ? ` / ${item.name_en}` : ""}`.trim();
+  const latexPart = item.latex ? ` · ${item.latex}` : "";
+  previewMeta.textContent = `${item.codepoint || ""} · ${item.category || ""}${latexPart}`.trim();
 }
 
 function renderAnnotationSymbolsPanel() {
@@ -7864,7 +8028,16 @@ function renderAnnotationSymbolsPanel() {
     btn.dataset.index = String(index);
     btn.textContent = item.char;
     btn.title = `${item.name_ru} (${item.codepoint})`;
-    btn.addEventListener("click", () => insertAnnotationSymbol(item));
+    if (window.__annotationSelectedSymbolId === item.id) {
+      btn.classList.add("is-selected");
+    }
+    btn.addEventListener("mouseenter", () => setAnnotationSymbolPreview(item));
+    btn.addEventListener("focus", () => setAnnotationSymbolPreview(item));
+    btn.addEventListener("click", () => {
+      window.__annotationSelectedSymbolId = item.id;
+      setAnnotationSymbolPreview(item);
+      insertAnnotationSymbol(item);
+    });
     const fav = document.createElement("button");
     fav.type = "button";
     fav.className = "annotation-symbol-fav" + (favorites.has(item.id) ? " active" : "");
@@ -7880,6 +8053,7 @@ function renderAnnotationSymbolsPanel() {
     cell.appendChild(fav);
     grid.appendChild(cell);
   });
+  setAnnotationSymbolPreview(symbols.find((s) => s.id === window.__annotationSelectedSymbolId) || symbols[0] || null);
   renderAnnotationSymbolsLists();
 }
 

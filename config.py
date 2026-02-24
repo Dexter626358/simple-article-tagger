@@ -135,7 +135,7 @@ class Config:
             "pdf_reader": {
                 "first_pages": 3,  # Количество первых страниц для обработки
                 "last_pages": 3,   # Количество последних страниц для обработки
-                "extract_all_pages": False,  # Если True, обрабатывать все страницы
+                "extract_all_pages": True,  # Если True, обрабатывать все страницы
                 "clean_text": True,  # Очищать текст от лишних пробелов
                 "smart_columns": True,  # Автоопределение 1/2 колонок при извлечении
                 "two_column_min_words": 10,  # Мин. слов в каждой половине для 2-колоночной страницы
@@ -147,14 +147,14 @@ class Config:
             # ----------------------------
             "gpt_extraction": {
                 "enabled": True,  # Включить/выключить использование GPT для извлечения метаданных
-                "model": "gpt-4.1-mini",  # Модель GPT для использования gpt-4o-mini
+                "model": "gpt-4o-mini",  # Модель GPT для использования gpt-4o-mini
                 "temperature": 0.3,  # Температура для генерации (0.0-2.0)
                 "api_key": "",  # API ключ OpenAI (если пусто, используется переменная окружения OPENAI_API_KEY)
                 "cache_dir": "gpt_cache",  # Директория для кэширования результатов (относительно project_root)
                 "use_prompts_module": True,  # Использовать ли промпт из prompts.py
                 "use_cache": True,  # Использовать ли кэширование результатов
-                "extract_abstracts": False,  # Извлекать аннотации
-                "extract_references": False,  # Извлекать списки литературы
+                "extract_abstracts": True,  # Извлекать аннотации
+                "extract_references": True,  # Извлекать списки литературы
             },
         }
     

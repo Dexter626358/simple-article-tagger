@@ -4869,6 +4869,18 @@ function closeAnnotationModal() {
         const firstPagesInput = document.getElementById("firstPagesInput");
         const lastPagesInput = document.getElementById("lastPagesInput");
         const extractAllPagesInput = document.getElementById("extractAllPagesInput");
+        const syncPdfRangeInputsState = () => {
+          const disabled = !!extractAllPagesInput?.checked;
+          [firstPagesInput, lastPagesInput].forEach((input) => {
+            if (!input) return;
+            input.disabled = disabled;
+            input.style.opacity = disabled ? "0.6" : "1";
+            input.title = disabled ? "Диапазон недоступен при включенном режиме: Извлекать весь PDF целиком." : "";
+          });
+        };
+        if (extractAllPagesInput) {
+          extractAllPagesInput.addEventListener("change", syncPdfRangeInputsState);
+        }
         if (openProjectBtn) {
           openProjectBtn.addEventListener("click", () => {
             if (window.openProject) window.openProject();
@@ -4915,7 +4927,7 @@ function closeAnnotationModal() {
                 return;
               }
               if (aiModelInput) {
-                const currentModel = String(data.gpt_extraction?.model || "gpt-4.1-mini").trim();
+                const currentModel = String(data.gpt_extraction?.model || "gpt-4o-mini").trim();
                 const hasModel = Array.from(aiModelInput.options || []).some((opt) => opt.value === currentModel);
                 if (!hasModel && currentModel) {
                   const customOption = document.createElement("option");
@@ -4923,13 +4935,14 @@ function closeAnnotationModal() {
                   customOption.textContent = `${currentModel} (custom)`;
                   aiModelInput.appendChild(customOption);
                 }
-                aiModelInput.value = currentModel || "gpt-4.1-mini";
+                aiModelInput.value = currentModel || "gpt-4o-mini";
               }
-              if (extractAbstractsInput) extractAbstractsInput.checked = !!data.gpt_extraction?.extract_abstracts;
-              if (extractReferencesInput) extractReferencesInput.checked = !!data.gpt_extraction?.extract_references;
+              if (extractAbstractsInput) extractAbstractsInput.checked = data.gpt_extraction?.extract_abstracts ?? true;
+              if (extractReferencesInput) extractReferencesInput.checked = data.gpt_extraction?.extract_references ?? true;
               if (firstPagesInput) firstPagesInput.value = String(data.pdf_reader?.first_pages ?? 3);
               if (lastPagesInput) lastPagesInput.value = String(data.pdf_reader?.last_pages ?? 3);
-              if (extractAllPagesInput) extractAllPagesInput.checked = !!data.pdf_reader?.extract_all_pages;
+              if (extractAllPagesInput) extractAllPagesInput.checked = data.pdf_reader?.extract_all_pages ?? true;
+              syncPdfRangeInputsState();
               if (aiSettingsModal) aiSettingsModal.classList.add("active");
             } catch (_) {
               window.alert("Не удалось загрузить настройки.");
@@ -4940,7 +4953,7 @@ function closeAnnotationModal() {
           saveAiSettingsBtn.addEventListener("click", async () => {
             const payload = {
               gpt_extraction: {
-                model: (aiModelInput?.value || "").trim() || "gpt-4.1-mini",
+                model: (aiModelInput?.value || "").trim() || "gpt-4o-mini",
                 extract_abstracts: !!extractAbstractsInput?.checked,
                 extract_references: !!extractReferencesInput?.checked,
               },

@@ -313,7 +313,32 @@ def register_archive_routes(app, ctx):
         logger.info("USER process archive start name=%s", archive_name)
         archive_dir = (session_input_dir / archive_name).resolve()
         if not archive_dir.exists() or not archive_dir.is_dir():
-            return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
+            # Fallback for session drift between upload and process request.
+            sessions_root = (_input_files_dir / "_sessions").resolve()
+            recovered_from = None
+            if sessions_root.exists() and sessions_root.is_dir():
+                for candidate in sessions_root.glob(f"*/{archive_name}"):
+                    if candidate.is_dir():
+                        recovered_from = candidate.resolve()
+                        break
+            if recovered_from:
+                try:
+                    session_input_dir.mkdir(parents=True, exist_ok=True)
+                    restored_dir = (session_input_dir / archive_name).resolve()
+                    if restored_dir.exists():
+                        shutil.rmtree(restored_dir, ignore_errors=True)
+                    shutil.copytree(recovered_from, restored_dir)
+                    archive_dir = restored_dir
+                    logger.warning(
+                        "SYSTEM process archive recovered name=%s from=%s to_session=%s",
+                        archive_name,
+                        recovered_from,
+                        session_id,
+                    )
+                except Exception:
+                    return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
+            else:
+                return jsonify({"success": False, "error": f"Папка архива не найдена: {archive_name}"}), 404
         raw_dir = archive_dir / "raw"
         json_dir = archive_dir / "json"
         if raw_dir.exists():

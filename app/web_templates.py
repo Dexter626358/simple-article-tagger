@@ -4927,7 +4927,7 @@ function closeAnnotationModal() {
                 return;
               }
               if (aiModelInput) {
-                const currentModel = String(data.gpt_extraction?.model || "gpt-4o-mini").trim();
+                const currentModel = String(data.gpt_extraction?.model || "gpt-4.1-mini").trim();
                 const hasModel = Array.from(aiModelInput.options || []).some((opt) => opt.value === currentModel);
                 if (!hasModel && currentModel) {
                   const customOption = document.createElement("option");
@@ -4935,7 +4935,7 @@ function closeAnnotationModal() {
                   customOption.textContent = `${currentModel} (custom)`;
                   aiModelInput.appendChild(customOption);
                 }
-                aiModelInput.value = currentModel || "gpt-4o-mini";
+                aiModelInput.value = currentModel || "gpt-4.1-mini";
               }
               if (extractAbstractsInput) extractAbstractsInput.checked = data.gpt_extraction?.extract_abstracts ?? true;
               if (extractReferencesInput) extractReferencesInput.checked = data.gpt_extraction?.extract_references ?? true;
@@ -4953,7 +4953,7 @@ function closeAnnotationModal() {
           saveAiSettingsBtn.addEventListener("click", async () => {
             const payload = {
               gpt_extraction: {
-                model: (aiModelInput?.value || "").trim() || "gpt-4o-mini",
+                model: (aiModelInput?.value || "").trim() || "gpt-4.1-mini",
                 extract_abstracts: !!extractAbstractsInput?.checked,
                 extract_references: !!extractReferencesInput?.checked,
               },

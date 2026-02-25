@@ -139,8 +139,8 @@ def register_archive_routes(app, ctx):
             "success": True,
             "gpt_extraction": {
                 "model": gpt_cfg.get("model", "gpt-4.1-mini"),
-                "extract_abstracts": bool(gpt_cfg.get("extract_abstracts", False)),
-                "extract_references": bool(gpt_cfg.get("extract_references", False)),
+                "extract_abstracts": bool(gpt_cfg.get("extract_abstracts", True)),
+                "extract_references": bool(gpt_cfg.get("extract_references", True)),
             },
             "pdf_reader": {
                 "first_pages": int(pdf_cfg.get("first_pages", 3) or 0),

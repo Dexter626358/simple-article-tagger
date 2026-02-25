@@ -11433,39 +11433,52 @@ function applySelectionToField(fieldId) {
             return;
           }
 
+          let updatedCount = 0;
+          let skippedCount = 0;
+
           if (doiField && data.doi) {
-            doiField.value = String(data.doi);
+            if (!doiField.value.trim()) {
+              doiField.value = String(data.doi);
+              updatedCount += 1;
+            } else {
+              skippedCount += 1;
+            }
           }
 
           const abstractText = (data.abstract || "").trim();
           if (crossrefAnnotationEnField && abstractText) {
-            if (!crossrefAnnotationEnField.value.trim() || confirm("Заменить текущую Annotation (English) данными из Crossref?")) {
+            if (!crossrefAnnotationEnField.value.trim()) {
               crossrefAnnotationEnField.value = abstractText;
               const htmlField = getAnnotationHtmlField("annotation_en");
               if (htmlField) {
                 htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(abstractText));
               }
               crossrefAnnotationEnField.dispatchEvent(new Event("input", { bubbles: true }));
+              updatedCount += 1;
+            } else {
+              skippedCount += 1;
             }
           }
 
           const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
           if (crossrefReferencesEnField && refs.length) {
             const nextRefs = refs.join("\n");
-            if (!crossrefReferencesEnField.value.trim() || confirm("Заменить текущий список литературы (английский) данными из Crossref?")) {
+            if (!crossrefReferencesEnField.value.trim()) {
               crossrefReferencesEnField.value = nextRefs;
               crossrefReferencesEnField.dispatchEvent(new Event("input", { bubbles: true }));
               if (window.updateReferencesCount) {
                 window.updateReferencesCount("references_en");
               }
+              updatedCount += 1;
+            } else {
+              skippedCount += 1;
             }
           }
 
-          const parts = [];
-          if (abstractText) parts.push("аннотация");
-          if (refs.length) parts.push(`ссылки: ${refs.length}`);
           setCrossrefStatus(
-            parts.length ? `Данные обновлены (${parts.join(", ")}).` : "Данные получены, но обновлять было нечего.",
+            updatedCount
+              ? `Обновлено пустых полей: ${updatedCount}${skippedCount ? `, пропущено заполненных: ${skippedCount}` : ""}.`
+              : "Данные получены, но подходящих пустых полей для обновления не найдено.",
             "#2e7d32"
           );
         } catch (err) {

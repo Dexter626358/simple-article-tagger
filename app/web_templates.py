@@ -1641,8 +1641,8 @@ HTML_TEMPLATE = """
             <li>📁 Без папок внутри</li>
             <li>🏷 Имя: <code>issn_год_том_номер</code> или <code>issn_год_номер_выпуска</code></li>
             <li>📄 Обязательно: PDF статей выпуска</li>
-            <li>📝 Дополнительно: DOCX / RTF / HTML / IDML / LaTeX</li>
-            <li>📦 Общий файл: <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.tex</code>)</li>
+            <li>📝 Дополнительно: DOCX / RTF / HTML / IDML / LaTeX (нзвания должны соответствовать pdf файлам)</li>
+            <li>📦 Общий файл: <code>full_issue</code> (например, <code>full_issue.docx</code> или <code>full_issue.tex</code>) если нет отдельных файлов верстки статей</li>
           </ul>
         </details>
         <div class="upload-subtitle">ZIP с PDF статей и дополнительными файлами (DOCX, RTF, HTML, IDML, LaTeX).</div>
@@ -1708,6 +1708,7 @@ HTML_TEMPLATE = """
           <input type="file" id="restoreProjectArchiveInput" accept=".zip,application/zip" style="display:none;">
           <span id="projectStatus" class="upload-status muted-text"></span>
         </div>
+        <small>Внимание! После генерации xml проект удаляется</small>
         
         <script>
           window.saveProject = async () => {

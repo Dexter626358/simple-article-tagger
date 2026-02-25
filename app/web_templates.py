@@ -1689,24 +1689,30 @@ HTML_TEMPLATE = """
             </div>
           </div>
         </div>
-        <div class="actions-row" style="margin-top: 10px;">
+        <div class="actions-row" style="margin-top: 10px; align-items:flex-start;">
           {% set total_files = files|length %}
           {% set processed_files = files|selectattr('is_processed')|list|length %}
           {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
-          <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-start;">
+          <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-start; max-width:320px;">
             <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn btn-primary" style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
               🚀 Сгенерировать XML
             </button>
-            <label class="checkbox-inline" style="margin:0;">
-              <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px);">
-              Генерировать XML даже при ошибках
-              <small>(не все статьи могут быть обработаны)</small>
+            <label class="checkbox-inline" style="margin:0; display:flex; align-items:flex-start; flex-wrap:wrap; row-gap:2px;">
+              <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px); margin-top:2px;">
+              <span>Генерировать XML даже при ошибках</span>
+              <small style="display:block; flex-basis:100%; margin-left:24px;">(не все статьи могут быть обработаны)</small>
             </label>
           </div>
-          <button type="button" id="downloadProjectBtn" class="btn btn-secondary">⬇ Скачать проект</button>
-          <button type="button" id="restoreProjectBtn" class="btn btn-secondary">📤 Восстановить проект</button>
+          <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start; max-width:260px;">
+            <button type="button" id="downloadProjectBtn" class="btn btn-secondary">⬇ Скачать проект</button>
+            <small class="muted-text" style="display:block; line-height:1.3;">Скачивает архив проекта в текущем состоянии.</small>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:4px; align-items:flex-start; max-width:300px;">
+            <button type="button" id="restoreProjectBtn" class="btn btn-secondary">📤 Восстановить проект</button>
+            <small class="muted-text" style="display:block; line-height:1.3;">Позволяет загрузить ранее скачанный проект и продолжить работу.</small>
+          </div>
           <input type="file" id="restoreProjectArchiveInput" accept=".zip,application/zip" style="display:none;">
-          <span id="projectStatus" class="upload-status muted-text"></span>
+          <span id="projectStatus" class="upload-status muted-text" style="flex-basis:100%;"></span>
         </div>
         <small>Внимание! После генерации xml проект удаляется</small>
         

@@ -138,14 +138,14 @@ def register_archive_routes(app, ctx):
         return jsonify({
             "success": True,
             "gpt_extraction": {
-                "model": gpt_cfg.get("model", "gpt-4o-mini"),
+                "model": gpt_cfg.get("model", "gpt-4.1-mini"),
                 "extract_abstracts": bool(gpt_cfg.get("extract_abstracts", False)),
                 "extract_references": bool(gpt_cfg.get("extract_references", False)),
             },
             "pdf_reader": {
                 "first_pages": int(pdf_cfg.get("first_pages", 3) or 0),
                 "last_pages": int(pdf_cfg.get("last_pages", 3) or 0),
-                "extract_all_pages": bool(pdf_cfg.get("extract_all_pages", False)),
+                "extract_all_pages": bool(pdf_cfg.get("extract_all_pages", True)),
             }
         })
 

@@ -32,6 +32,40 @@ def _get_message(data: Dict[str, Any]) -> Dict[str, Any]:
     return data
 
 
+def _first_non_empty(*values: Any) -> Optional[str]:
+    for value in values:
+        if isinstance(value, str):
+            candidate = value.strip()
+            if candidate:
+                return candidate
+        elif isinstance(value, list):
+            for item in value:
+                if isinstance(item, str):
+                    candidate = item.strip()
+                    if candidate:
+                        return candidate
+    return None
+
+
+def _extract_author_affiliation(author: Dict[str, Any]) -> str:
+    raw_aff = author.get("affiliation")
+    if isinstance(raw_aff, list):
+        names = []
+        for item in raw_aff:
+            if isinstance(item, dict):
+                name = str(item.get("name") or "").strip()
+                if name:
+                    names.append(name)
+            elif isinstance(item, str):
+                name = item.strip()
+                if name:
+                    names.append(name)
+        return "; ".join(names)
+    if isinstance(raw_aff, str):
+        return raw_aff.strip()
+    return ""
+
+
 def fetch_crossref_data(doi: str) -> Optional[Dict[str, Any]]:
     """
     Fetch Crossref metadata by DOI.
@@ -103,11 +137,18 @@ def extract_references(crossref_data: Dict[str, Any]) -> List[Dict[str, Any]]:
                 "doi": ref.get("DOI") or ref.get("doi"),
                 "author": ref.get("author"),
                 "year": ref.get("year"),
-                "title": ref.get("article-title") or ref.get("article_title") or ref.get("title"),
-                "journal": ref.get("journal-title") or ref.get("journal_title") or ref.get("journal"),
+                "title": _first_non_empty(ref.get("article-title"), ref.get("article_title"), ref.get("title")),
+                "journal": _first_non_empty(ref.get("journal-title"), ref.get("journal_title"), ref.get("journal")),
                 "volume": ref.get("volume"),
                 "issue": ref.get("issue"),
                 "first_page": ref.get("first-page") or ref.get("first_page"),
+                "publisher": ref.get("publisher"),
+                "isbn": ref.get("ISBN") or ref.get("isbn"),
+                "issn": ref.get("ISSN") or ref.get("issn"),
+                "series_title": ref.get("series-title") or ref.get("series_title"),
+                "volume_title": ref.get("volume-title") or ref.get("volume_title"),
+                "edition": ref.get("edition"),
+                "key": ref.get("key"),
                 "unstructured": ref.get("unstructured"),
             }
         )
@@ -126,6 +167,7 @@ def update_article_by_doi(doi: str) -> Dict[str, Any]:
             "abstract": None,
             "references": [],
             "title": None,
+            "original_title": None,
             "authors": [],
             "year": None,
             "journal": None,
@@ -133,11 +175,8 @@ def update_article_by_doi(doi: str) -> Dict[str, Any]:
             "raw": None,
         }
 
-    title = None
-    if isinstance(data.get("title"), list) and data.get("title"):
-        title = data["title"][0]
-    elif isinstance(data.get("title"), str):
-        title = data.get("title")
+    title = _first_non_empty(data.get("title"))
+    original_title = _first_non_empty(data.get("original-title"))
 
     journal = None
     if isinstance(data.get("container-title"), list) and data.get("container-title"):
@@ -158,16 +197,28 @@ def update_article_by_doi(doi: str) -> Dict[str, Any]:
         for author in raw_authors:
             if not isinstance(author, dict):
                 continue
-            family = author.get("family") or ""
-            given = author.get("given") or ""
+            family = str(author.get("family") or "").strip()
+            given = str(author.get("given") or "").strip()
             name = " ".join(p for p in [given, family] if p).strip()
-            authors.append({"family": family, "given": given, "name": name})
+            orcid = str(author.get("ORCID") or author.get("orcid") or "").strip()
+            affiliation = _extract_author_affiliation(author)
+            authors.append(
+                {
+                    "family": family,
+                    "given": given,
+                    "name": name,
+                    "orcid": orcid,
+                    "affiliation": affiliation,
+                    "sequence": str(author.get("sequence") or "").strip(),
+                }
+            )
 
     return {
         "doi": doi,
         "abstract": extract_abstract(data),
         "references": extract_references(data),
         "title": title,
+        "original_title": original_title,
         "authors": authors,
         "year": year,
         "journal": journal,

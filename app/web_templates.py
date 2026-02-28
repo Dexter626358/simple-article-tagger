@@ -6754,10 +6754,10 @@ VIEWER_TEMPLATE = """
       <h1>{{ filename }}</h1>
       <div class="header-actions">
         <div class="view-toggle">
-          <a href="{{ html_url }}" class="toggle-btn {% if view_mode == 'html' %}active{% endif %}">HTML</a>
           {% if pdf_url %}
             <a href="{{ pdf_view_url }}" class="toggle-btn {% if view_mode == 'pdf' %}active{% endif %}">PDF</a>
           {% endif %}
+          <a href="{{ html_url }}" class="toggle-btn {% if view_mode == 'html' %}active{% endif %}">HTML</a>
         </div>
         <a href="/markup/{{ filename }}" class="markup-btn">📝 Разметить метаданные</a>
         <a href="/" class="back-btn">← Назад к списку</a>
@@ -6988,8 +6988,8 @@ MARKUP_TEMPLATE = r"""
     </p>
     {% endif %}
     <div class="header-actions">
-      <button type="button" class="header-btn header-toggle-btn{% if view_mode == 'html' %} active{% endif %}" data-view="html">HTML</button>
       <button type="button" class="header-btn header-toggle-btn{% if view_mode == 'pdf' %} active{% endif %}" data-view="pdf"{% if not show_pdf_viewer %} disabled{% endif %}>PDF</button>
+      <button type="button" class="header-btn header-toggle-btn{% if view_mode == 'html' %} active{% endif %}" data-view="html">HTML</button>
       <a href="/" class="header-btn">← К списку</a>
     </div>
   </div>
@@ -11412,8 +11412,171 @@ function applySelectionToField(fieldId) {
     const crossrefBtn = $("#crossrefDoiBtn");
     const crossrefStatus = $("#crossrefStatus");
     const doiField = $("#doi");
+    const crossrefTitleRuField = $("#title");
+    const crossrefTitleEnField = $("#title_en");
+    const crossrefAnnotationRuField = $("#annotation");
     const crossrefAnnotationEnField = $("#annotation_en");
+    const crossrefReferencesRuField = $("#references_ru");
     const crossrefReferencesEnField = $("#references_en");
+    const normalizeText = (value) => String(value || "").trim();
+    const setFieldValue = (field, value, onApplied) => {
+      if (!field) return false;
+      field.value = normalizeText(value);
+      if (typeof onApplied === "function") onApplied();
+      return true;
+    };
+    const chooseTargetField = (preferredField, fallbackField) => preferredField || fallbackField || null;
+    const escapeHtml = (value) => String(value || "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+    const ensureCrossrefSuggestionModal = () => {
+      let modal = document.getElementById("crossrefSuggestionModal");
+      if (modal) return modal;
+      modal = document.createElement("div");
+      modal.id = "crossrefSuggestionModal";
+      modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:none;align-items:center;justify-content:center;padding:24px;";
+      modal.innerHTML = `
+        <div style="background:#fff;max-width:1100px;width:min(1100px,96vw);max-height:90vh;overflow:auto;border-radius:10px;padding:16px 16px 12px 16px;box-shadow:0 12px 38px rgba(0,0,0,.28);">
+          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+            <div id="crossrefSuggestionTitle" style="font-size:17px;font-weight:700;color:#222;">Предложение обновления</div>
+            <button type="button" id="crossrefSuggestionClose" style="border:1px solid #ddd;background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;">Закрыть</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+            <div>
+              <div style="font-size:12px;color:#666;margin-bottom:4px;">Текущее значение</div>
+              <pre id="crossrefSuggestionCurrent" style="white-space:pre-wrap;word-break:break-word;min-height:160px;max-height:280px;overflow:auto;background:#fafafa;border:1px solid #e6e6e6;border-radius:6px;padding:10px;margin:0;"></pre>
+            </div>
+            <div>
+              <div style="font-size:12px;color:#666;margin-bottom:4px;">Предлагается вставить</div>
+              <pre id="crossrefSuggestionProposed" style="white-space:pre-wrap;word-break:break-word;min-height:160px;max-height:280px;overflow:auto;background:#f3fbf5;border:1px solid #d5ecd8;border-radius:6px;padding:10px;margin:0;"></pre>
+            </div>
+          </div>
+          <div style="margin-top:10px;">
+            <div style="font-size:12px;color:#666;margin-bottom:4px;">Редактировать перед вставкой (опционально)</div>
+            <textarea id="crossrefSuggestionEdit" style="width:100%;min-height:130px;resize:vertical;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:13px;"></textarea>
+          </div>
+          <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
+            <button type="button" id="crossrefSuggestionReject" style="border:1px solid #e2a4a4;background:#fff4f4;color:#8e1f1f;border-radius:6px;padding:8px 12px;cursor:pointer;">Отклонить</button>
+            <button type="button" id="crossrefSuggestionAccept" style="border:1px solid #2e7d32;background:#4caf50;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;">Принять</button>
+            <button type="button" id="crossrefSuggestionAcceptEdited" style="border:1px solid #1e5fab;background:#2d7de0;color:#fff;border-radius:6px;padding:8px 12px;cursor:pointer;">Принять после редактирования</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      return modal;
+    };
+    const askCrossrefSuggestion = (payload) => new Promise((resolve) => {
+      const modal = ensureCrossrefSuggestionModal();
+      const titleNode = document.getElementById("crossrefSuggestionTitle");
+      const currentNode = document.getElementById("crossrefSuggestionCurrent");
+      const proposedNode = document.getElementById("crossrefSuggestionProposed");
+      const editNode = document.getElementById("crossrefSuggestionEdit");
+      const closeBtn = document.getElementById("crossrefSuggestionClose");
+      const rejectBtn = document.getElementById("crossrefSuggestionReject");
+      const acceptBtn = document.getElementById("crossrefSuggestionAccept");
+      const acceptEditedBtn = document.getElementById("crossrefSuggestionAcceptEdited");
+
+      titleNode.textContent = payload?.label ? `Предложение: ${payload.label}` : "Предложение обновления";
+      currentNode.innerHTML = escapeHtml(payload?.currentValue || "(пусто)");
+      proposedNode.innerHTML = escapeHtml(payload?.proposedValue || "");
+      editNode.value = normalizeText(payload?.proposedValue || "");
+
+      const finish = (result) => {
+        modal.style.display = "none";
+        closeBtn.onclick = null;
+        rejectBtn.onclick = null;
+        acceptBtn.onclick = null;
+        acceptEditedBtn.onclick = null;
+        modal.onclick = null;
+        resolve(result);
+      };
+
+      closeBtn.onclick = () => finish({ action: "reject" });
+      rejectBtn.onclick = () => finish({ action: "reject" });
+      acceptBtn.onclick = () => finish({ action: "accept", value: normalizeText(payload?.proposedValue || "") });
+      acceptEditedBtn.onclick = () => finish({ action: "accept", value: normalizeText(editNode.value) });
+      modal.onclick = (event) => {
+        if (event.target === modal) finish({ action: "reject" });
+      };
+
+      modal.style.display = "flex";
+    });
+    const hasAuthorContent = () => {
+      const authorItems = $$(".author-item");
+      if (!authorItems.length) return false;
+      for (const item of authorItems) {
+        const hasFilledInput = Array.from(item.querySelectorAll(".author-input")).some((input) => String(input.value || "").trim());
+        const hasCorrespondence = !!item.querySelector(".author-correspondence:checked");
+        if (hasFilledInput || hasCorrespondence) return true;
+      }
+      return false;
+    };
+    const extractInitials = (given) => {
+      const parts = String(given || "").split(/\s+/).map((s) => s.trim()).filter(Boolean);
+      if (!parts.length) return "";
+      return parts.map((part) => {
+        const letter = (part[0] || "").toUpperCase();
+        return letter ? `${letter}.` : "";
+      }).join("");
+    };
+    const fillAuthorsFromCrossref = (authors) => {
+      if (!Array.isArray(authors) || !authors.length) return false;
+      const validAuthors = authors.filter((author) => author && typeof author === "object");
+      if (!validAuthors.length) return false;
+      validAuthors.forEach((author, idx) => {
+        addNewAuthor();
+        const authorItem = document.querySelector(".author-item:last-of-type");
+        if (!authorItem) return;
+        const parsedIndex = parseInt(authorItem.dataset.authorIndex, 10);
+        if (Number.isNaN(parsedIndex)) return;
+        const index = parsedIndex;
+        const family = String(author.family || "").trim();
+        const given = String(author.given || "").trim();
+        const fullName = String(author.name || "").trim();
+        const surname = family || (fullName ? fullName.split(/\s+/).slice(-1)[0] : "");
+        const initials = extractInitials(given);
+        const affiliation = String(author.affiliation || "").trim();
+        const orcid = String(author.orcid || "").replace(/^https?:\/\/orcid\.org\//i, "").trim();
+
+        const setAuthorField = (field, lang, value) => {
+          const input = authorItem.querySelector(`.author-input[data-field="${field}"][data-lang="${lang}"][data-index="${index}"]`);
+          if (!input) return;
+          input.value = String(value || "").trim();
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        };
+
+        setAuthorField("surname", "ENG", surname);
+        setAuthorField("initials", "ENG", initials);
+        setAuthorField("surname", "RUS", surname);
+        setAuthorField("initials", "RUS", initials);
+        setAuthorField("orgName", "ENG", affiliation);
+        setAuthorField("orgName", "RUS", affiliation);
+        setAuthorField("orcid", "CODES", orcid);
+
+        const orgRus = authorItem.querySelector(".org-row-org-rus");
+        const orgEng = authorItem.querySelector(".org-row-org-eng");
+        if (orgRus && affiliation && !String(orgRus.value || "").trim()) {
+          orgRus.value = affiliation;
+          handleOrganizationCardInput(index, orgRus);
+        }
+        if (orgEng && affiliation && !String(orgEng.value || "").trim()) {
+          orgEng.value = affiliation;
+          handleOrganizationCardInput(index, orgEng);
+        }
+
+        const correspondenceCheckbox = authorItem.querySelector(`.author-correspondence[data-index="${index}"]`);
+        if (correspondenceCheckbox && idx === 0) {
+          correspondenceCheckbox.checked = true;
+        }
+
+        updateAuthorName(index);
+        syncOrganizationCards(index);
+      });
+      return true;
+    };
     const setCrossrefStatus = (text, color) => {
       if (!crossrefStatus) return;
       crossrefStatus.textContent = text || "";
@@ -11440,53 +11603,137 @@ function applySelectionToField(fieldId) {
             return;
           }
 
-          let updatedCount = 0;
-          let skippedCount = 0;
+          const suggestions = [];
+          let unchangedCount = 0;
+          let blockedCount = 0;
 
-          if (doiField && data.doi) {
-            if (!doiField.value.trim()) {
-              doiField.value = String(data.doi);
-              updatedCount += 1;
-            } else {
-              skippedCount += 1;
+          const addSuggestion = (config) => {
+            const proposedValue = normalizeText(config.proposedValue);
+            if (!proposedValue) return;
+            const currentValue = normalizeText(config.currentValue);
+            if (currentValue === proposedValue) {
+              unchangedCount += 1;
+              return;
             }
-          }
+            suggestions.push({
+              label: config.label,
+              currentValue,
+              proposedValue,
+              apply: (nextValue) => config.apply(nextValue),
+            });
+          };
 
-          const abstractText = (data.abstract || "").trim();
-          if (crossrefAnnotationEnField && abstractText) {
-            if (!crossrefAnnotationEnField.value.trim()) {
-              crossrefAnnotationEnField.value = abstractText;
-              const htmlField = getAnnotationHtmlField("annotation_en");
+          addSuggestion({
+            label: "DOI",
+            currentValue: doiField?.value || "",
+            proposedValue: data.doi,
+            apply: (nextValue) => setFieldValue(doiField, nextValue, () => doiField?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const titleRuTarget = chooseTargetField(crossrefTitleRuField, crossrefTitleEnField);
+          addSuggestion({
+            label: "Заголовок (RU/original)",
+            currentValue: titleRuTarget?.value || "",
+            proposedValue: data.original_title,
+            apply: (nextValue) => setFieldValue(titleRuTarget, nextValue, () => titleRuTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const titleEnTarget = chooseTargetField(crossrefTitleEnField, crossrefTitleRuField);
+          addSuggestion({
+            label: "Заголовок (EN)",
+            currentValue: titleEnTarget?.value || "",
+            proposedValue: data.title,
+            apply: (nextValue) => setFieldValue(titleEnTarget, nextValue, () => titleEnTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const annotationTarget = chooseTargetField(crossrefAnnotationEnField, crossrefAnnotationRuField);
+          addSuggestion({
+            label: "Аннотация / Abstract",
+            currentValue: annotationTarget?.value || "",
+            proposedValue: data.abstract,
+            apply: (nextValue) => setFieldValue(annotationTarget, nextValue, () => {
+              const htmlField = getAnnotationHtmlField(annotationTarget?.id === "annotation" ? "annotation" : "annotation_en");
               if (htmlField) {
-                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(abstractText));
+                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(normalizeText(nextValue)));
               }
-              crossrefAnnotationEnField.dispatchEvent(new Event("input", { bubbles: true }));
-              updatedCount += 1;
-            } else {
-              skippedCount += 1;
-            }
-          }
+              annotationTarget?.dispatchEvent(new Event("input", { bubbles: true }));
+            }),
+          });
 
           const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
-          if (crossrefReferencesEnField && refs.length) {
-            const nextRefs = refs.join("\n");
-            if (!crossrefReferencesEnField.value.trim()) {
-              crossrefReferencesEnField.value = nextRefs;
-              crossrefReferencesEnField.dispatchEvent(new Event("input", { bubbles: true }));
-              if (window.updateReferencesCount) {
-                window.updateReferencesCount("references_en");
+          const refsTarget = chooseTargetField(crossrefReferencesEnField, crossrefReferencesRuField);
+          addSuggestion({
+            label: "Список литературы / References",
+            currentValue: refsTarget?.value || "",
+            proposedValue: refs.length ? refs.join("\n") : "",
+            apply: (nextValue) => setFieldValue(refsTarget, nextValue, () => {
+              refsTarget?.dispatchEvent(new Event("input", { bubbles: true }));
+              if (window.updateReferencesCount && refsTarget?.id) {
+                window.updateReferencesCount(refsTarget.id);
               }
-              updatedCount += 1;
+            }),
+          });
+
+          const incomingAuthors = Array.isArray(data.authors) ? data.authors : [];
+          if (incomingAuthors.length) {
+            const formatAuthorLine = (author, idx) => {
+              const family = normalizeText(author?.family);
+              const given = normalizeText(author?.given);
+              const name = normalizeText(author?.name);
+              const aff = normalizeText(author?.affiliation);
+              const left = name || [family, given].filter(Boolean).join(" ");
+              return `${idx + 1}. ${left || "(без имени)"}${aff ? ` — ${aff}` : ""}`;
+            };
+            if (!hasAuthorContent()) {
+              const proposedAuthors = incomingAuthors.map(formatAuthorLine).join("\n");
+              suggestions.push({
+                label: "Авторы",
+                currentValue: "(пусто)",
+                proposedValue: proposedAuthors,
+                apply: () => fillAuthorsFromCrossref(incomingAuthors),
+              });
             } else {
-              skippedCount += 1;
+              blockedCount += 1;
+            }
+          }
+
+          if (!suggestions.length) {
+            setCrossrefStatus(
+              `Данные получены, но новых отличающихся значений нет.${unchangedCount ? ` Совпадающих полей: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}`,
+              "#2e7d32"
+            );
+            return;
+          }
+
+          let acceptedCount = 0;
+          let rejectedCount = 0;
+          for (const suggestion of suggestions) {
+            const decision = await askCrossrefSuggestion(suggestion);
+            if (!decision || decision.action !== "accept") {
+              rejectedCount += 1;
+              continue;
+            }
+            const valueToApply = normalizeText(decision.value || suggestion.proposedValue);
+            if (!valueToApply) {
+              rejectedCount += 1;
+              continue;
+            }
+            try {
+              const applied = suggestion.apply(valueToApply);
+              if (applied === false) {
+                rejectedCount += 1;
+              } else {
+                acceptedCount += 1;
+              }
+            } catch (applyErr) {
+              rejectedCount += 1;
+              console.error("Crossref apply error:", applyErr);
             }
           }
 
           setCrossrefStatus(
-            updatedCount
-              ? `Обновлено пустых полей: ${updatedCount}${skippedCount ? `, пропущено заполненных: ${skippedCount}` : ""}.`
-              : "Данные получены, но подходящих пустых полей для обновления не найдено.",
-            "#2e7d32"
+            `Проверка Crossref завершена. Принято: ${acceptedCount}, отклонено: ${rejectedCount}.${unchangedCount ? ` Совпадений: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}`,
+            acceptedCount ? "#2e7d32" : "#666"
           );
         } catch (err) {
           setCrossrefStatus(`Ошибка Crossref: ${err.message || err}`, "#c62828");

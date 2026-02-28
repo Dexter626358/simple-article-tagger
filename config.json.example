@@ -57,7 +57,8 @@
   "markup": {
     "auto_select_range": true,
     "show_line_numbers": true,
-    "enable_search": true
+    "enable_search": true,
+    "pdf_html_for_markup": false
   },
   "pdf_reader": {
     "first_pages": 3,

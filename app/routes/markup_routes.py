@@ -73,7 +73,7 @@ def register_markup_routes(app, ctx):
         except ValueError:
             abort(404)
         
-        view_mode = (request.args.get("mode") or "html").lower()
+        requested_mode = (request.args.get("mode") or "").lower()
         pdf_url = None
         if file_path.suffix.lower() == ".pdf":
             pdf_candidate = file_path
@@ -95,6 +95,12 @@ def register_markup_routes(app, ctx):
                 pdf_url = f"/pdf/{rel_pdf_url}"
             except Exception:
                 pdf_url = None
+
+        view_mode = requested_mode or ("pdf" if pdf_url else "html")
+        if view_mode not in ("html", "pdf"):
+            view_mode = "pdf" if pdf_url else "html"
+        if view_mode == "pdf" and not pdf_url:
+            view_mode = "html"
 
         try:
             html_body, warnings = convert_file_to_html(file_path, use_word_reader=use_word_reader)
@@ -180,30 +186,40 @@ def register_markup_routes(app, ctx):
             is_pdf_for_html = file_for_html.suffix.lower() == ".pdf"
             is_common_file = file_for_html.stem != json_path.stem
             
+            # Загружаем конфиг (используется и для Word, и для PDF режима)
+            config = None
+            try:
+                config_path = Path("config.json")
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+            except Exception:
+                pass
+
+            use_mistral = False
+            render_pdf_to_html = False
+            if config:
+                use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
+                render_pdf_to_html = bool(config.get("markup", {}).get("pdf_html_for_markup", False))
+
             # Для HTML: используем Word файл если есть, иначе PDF
             if is_pdf_for_html:
-                # Для PDF файлов извлекаем текст для разметки
                 pdf_path_for_html = file_for_html
                 warnings = []
-                html_body = ""
-                # Извлекаем текст из PDF для разметки
-                lines = extract_text_from_pdf(pdf_path_for_html)
+                if render_pdf_to_html:
+                    # Полноценный PDF -> HTML даёт более корректную структуру (абзацы/колонки).
+                    html_body, warnings = convert_file_to_html(
+                        pdf_path_for_html,
+                        use_word_reader=use_word_reader,
+                        use_mistral=use_mistral,
+                        config=config,
+                    )
+                    lines = extract_text_from_html(html_body)
+                else:
+                    # Быстрый fallback: плоское извлечение строк из PDF.
+                    html_body = ""
+                    lines = extract_text_from_pdf(pdf_path_for_html)
             else:
-                # Загружаем конфигурацию для определения использования Mistral
-                config = None
-                try:
-                    config_path = Path("config.json")
-                    if config_path.exists():
-                        with open(config_path, "r", encoding="utf-8") as f:
-                            config = json.load(f)
-                except Exception:
-                    pass
-                
-                # Определяем, использовать ли Mistral из конфига
-                use_mistral = False
-                if config:
-                    use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
-                
                 # Конвертируем Word файл в HTML
                 html_body, warnings = convert_file_to_html(
                     file_for_html,
@@ -408,9 +424,9 @@ def register_markup_routes(app, ctx):
             show_pdf_viewer = pdf_path_for_viewer is not None
             show_text_panel = True
 
-            view_mode = (request.args.get("view") or "html").lower()
+            view_mode = (request.args.get("view") or ("pdf" if show_pdf_viewer else "html")).lower()
             if view_mode not in ("html", "pdf"):
-                view_mode = "html"
+                view_mode = "pdf" if show_pdf_viewer else "html"
             if view_mode == "pdf" and not show_pdf_viewer:
                 view_mode = "html"
 
@@ -507,29 +523,37 @@ def register_markup_routes(app, ctx):
             # Проверяем, является ли файл PDF
             is_pdf = docx_path.suffix.lower() == ".pdf"
             
+            # Загружаем конфиг (используется и для Word, и для PDF режима)
+            config = None
+            try:
+                config_path = Path("config.json")
+                if config_path.exists():
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        config = json.load(f)
+            except Exception:
+                pass
+
+            use_mistral = False
+            render_pdf_to_html = False
+            if config:
+                use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
+                render_pdf_to_html = bool(config.get("markup", {}).get("pdf_html_for_markup", False))
+
             if is_pdf:
-                # Для PDF файлов извлекаем текст для разметки
-                pdf_path = docx_path  # Сохраняем путь к PDF
-                warnings = []  # Пустой список предупреждений для PDF
-                html_body = ""  # Пустое тело HTML для PDF
-                # Извлекаем текст из PDF для разметки
-                lines = extract_text_from_pdf(pdf_path)
+                pdf_path = docx_path
+                warnings = []
+                if render_pdf_to_html:
+                    html_body, warnings = convert_file_to_html(
+                        pdf_path,
+                        use_word_reader=use_word_reader,
+                        use_mistral=use_mistral,
+                        config=config,
+                    )
+                    lines = extract_text_from_html(html_body)
+                else:
+                    html_body = ""
+                    lines = extract_text_from_pdf(pdf_path)
             else:
-                # Загружаем конфигурацию для определения использования Mistral
-                config = None
-                try:
-                    config_path = Path("config.json")
-                    if config_path.exists():
-                        with open(config_path, "r", encoding="utf-8") as f:
-                            config = json.load(f)
-                except Exception:
-                    pass
-                
-                # Определяем, использовать ли Mistral из конфига
-                use_mistral = False
-                if config:
-                    use_mistral = config.get("pdf_to_html", {}).get("use_mistral", False)
-                
                 # Конвертируем файл (DOCX/RTF) в HTML
                 html_body, warnings = convert_file_to_html(
                     docx_path,
@@ -1103,25 +1127,50 @@ def register_markup_routes(app, ctx):
                 raw_path = state_dir / f"crossref_{safe_doi}_{timestamp}.json"
                 with raw_path.open("w", encoding="utf-8") as handle:
                     json.dump(raw_payload, handle, ensure_ascii=False, indent=2)
+
+            def _format_reference_line(ref: dict) -> str:
+                unstructured = str(ref.get("unstructured") or "").strip()
+                if unstructured:
+                    return unstructured
+                parts = []
+                for key in (
+                    "author",
+                    "title",
+                    "journal",
+                    "series_title",
+                    "volume_title",
+                    "publisher",
+                    "edition",
+                    "volume",
+                    "issue",
+                    "first_page",
+                    "year",
+                    "doi",
+                    "isbn",
+                    "issn",
+                ):
+                    value = ref.get(key)
+                    if value is None:
+                        continue
+                    text = str(value).strip()
+                    if text:
+                        parts.append(text)
+                return ". ".join(parts)
+
             references = []
             for ref in payload.get("references") or []:
                 if not isinstance(ref, dict):
                     continue
-                unstructured = ref.get("unstructured")
-                if unstructured:
-                    references.append(str(unstructured))
-                    continue
-                parts = []
-                for key in ("author", "title", "journal", "volume", "issue", "first_page", "year", "doi"):
-                    val = ref.get(key)
-                    if val:
-                        parts.append(str(val))
-                if parts:
-                    references.append(". ".join(parts))
+                line = _format_reference_line(ref)
+                if line:
+                    references.append(line)
             return jsonify(
                 success=True,
                 doi=payload.get("doi"),
+                title=payload.get("title"),
+                original_title=payload.get("original_title"),
                 abstract=payload.get("abstract"),
+                authors=payload.get("authors") or [],
                 references=references,
             )
         except Exception as e:

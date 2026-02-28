@@ -127,6 +127,7 @@ class Config:
                 "auto_select_range": True,
                 "show_line_numbers": True,
                 "enable_search": True,
+                "pdf_html_for_markup": False,  # Если True, строить HTML из PDF для текстовой панели разметки
             },
             
             # ----------------------------

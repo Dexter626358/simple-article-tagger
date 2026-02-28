@@ -153,11 +153,21 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
     def _html_to_text(fragment: str) -> str:
         if not fragment:
             return ""
+        # Preserve natural text boundaries from block tags to avoid glued words.
         fragment = re.sub(r'(?i)<br\\s*/?>', "\n", fragment)
-        fragment = re.sub(r'<[^>]+>', '', fragment)
+        fragment = re.sub(r'(?i)</(p|div|li|h[1-6]|tr|td|th)>', "\n", fragment)
+        fragment = re.sub(r'<[^>]+>', ' ', fragment)
         fragment = html.unescape(fragment)
+        fragment = fragment.replace("\xa0", " ")
         fragment = fragment.replace("\r\n", "\n").replace("\r", "\n")
-        return " ".join(line.strip() for line in fragment.split("\n") if line.strip()).strip()
+        # Remove soft hyphens and normalize whitespace.
+        fragment = fragment.replace("\u00ad", "")
+        cleaned_lines = []
+        for line in fragment.split("\n"):
+            line = re.sub(r"\s+", " ", line).strip()
+            if line:
+                cleaned_lines.append(line)
+        return " ".join(cleaned_lines).strip()
 
     table_ranges: List[tuple[int, int]] = []
     table_pattern = r'<table[^>]*>(.*?)</table>'

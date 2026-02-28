@@ -7006,7 +7006,7 @@ MARKUP_TEMPLATE = r"""
       <div class="pdf-viewer-container">
         <iframe
           id="pdfViewerIframe"
-          src="/static/pdfjs/web/viewer.html?file=/pdf/{{ pdf_path|urlencode }}#zoom=page-width"
+          src="/static/pdfjs/web/viewer.html?file=/pdf/{{ pdf_path|urlencode }}#zoom=100"
           style="width: 100%; height: 95vh; border: none;"
           title="PDF viewer"
         ></iframe>
@@ -11850,34 +11850,6 @@ function applySelectionToField(fieldId) {
         extractEndpoint: "/api/pdf-extract-text",
         saveEndpoint: "/api/pdf-save-coordinates",
       });
-      
-      // Устанавливаем ISSN журнала для шаблонов bbox
-      const journalIssn = "{{ journal_issn|default('', true)|e }}";
-      const journalName = "{{ journal_name|default('', true)|e }}";
-      if (journalIssn) {
-        pdfBbox.setIssn(journalIssn, journalName);
-        
-        // Загружаем шаблоны и показываем уведомление если есть предложения
-        pdfBbox.loadTemplateSuggestions(journalIssn).then(data => {
-          if (data && data.suggestions && Object.keys(data.suggestions).length > 0) {
-            const count = Object.keys(data.suggestions).length;
-            const toast = window.toast || ((msg) => console.log(msg));
-            toast(`Доступно ${count} шаблонов bbox для этого журнала. Нажмите "Применить шаблоны" для автозаполнения.`, "info");
-            
-            // Добавляем кнопку применения шаблонов в toolbar
-            const toolbar = document.querySelector('.pdf-bbox-toolbar');
-            if (toolbar && !document.getElementById('applyTemplatesBtn')) {
-              const btn = document.createElement('button');
-              btn.id = 'applyTemplatesBtn';
-              btn.className = 'bbox-btn';
-              btn.style.cssText = 'background: #4caf50; color: white; margin-left: 10px;';
-              btn.innerHTML = '📋 Применить шаблоны (' + count + ')';
-              btn.onclick = () => pdfBbox.showSuggestionsPanel();
-              toolbar.appendChild(btn);
-            }
-          }
-        });
-      }
     }
   });
 })();

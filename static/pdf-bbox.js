@@ -1,4 +1,4 @@
-(() => {
+﻿(() => {
   const state = {
     initialized: false,
     activeFieldId: null,
@@ -6,7 +6,7 @@
     selections: [],
     config: {},
     pdfIframe: null,
-    // Шаблоны bbox
+    // РЁР°Р±Р»РѕРЅС‹ bbox
     templateSuggestions: {},
     currentIssn: null,
     journalName: null,
@@ -89,9 +89,9 @@
         value = window.processKeywords(value);
       }
     } else if (fieldId === "references_ru" || fieldId === "references_en") {
-      // Для списка литературы НЕ обрабатываем текст при извлечении —
-      // оставляем как есть, чтобы можно было добавлять несколько областей
-      // Обработка будет при финальном сохранении или по кнопке
+      // Р”Р»СЏ СЃРїРёСЃРєР° Р»РёС‚РµСЂР°С‚СѓСЂС‹ РќР• РѕР±СЂР°Р±Р°С‚С‹РІР°РµРј С‚РµРєСЃС‚ РїСЂРё РёР·РІР»РµС‡РµРЅРёРё вЂ”
+      // РѕСЃС‚Р°РІР»СЏРµРј РєР°Рє РµСЃС‚СЊ, С‡С‚РѕР±С‹ РјРѕР¶РЅРѕ Р±С‹Р»Рѕ РґРѕР±Р°РІР»СЏС‚СЊ РЅРµСЃРєРѕР»СЊРєРѕ РѕР±Р»Р°СЃС‚РµР№
+      // РћР±СЂР°Р±РѕС‚РєР° Р±СѓРґРµС‚ РїСЂРё С„РёРЅР°Р»СЊРЅРѕРј СЃРѕС…СЂР°РЅРµРЅРёРё РёР»Рё РїРѕ РєРЅРѕРїРєРµ
     } else if (fieldId === "annotation" || fieldId === "annotation_en") {
       if (window.processAnnotation) {
         value = window.processAnnotation(value, fieldId === "annotation_en" ? "en" : "ru");
@@ -112,9 +112,9 @@
       }
     }
 
-    // Добавляем текст к существующему (если поле не пустое)
+    // Р”РѕР±Р°РІР»СЏРµРј С‚РµРєСЃС‚ Рє СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРјСѓ (РµСЃР»Рё РїРѕР»Рµ РЅРµ РїСѓСЃС‚РѕРµ)
     if (field.value.trim()) {
-      // Определяем разделитель в зависимости от типа поля
+      // РћРїСЂРµРґРµР»СЏРµРј СЂР°Р·РґРµР»РёС‚РµР»СЊ РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ С‚РёРїР° РїРѕР»СЏ
       let separator = " ";
       if (fieldId === "references_ru" || fieldId === "references_en") {
         separator = "\n";
@@ -199,7 +199,7 @@
     let overlay = pageContainer.querySelector(".bbox-overlay");
 
     if (!overlay) {
-      // Создаём элемент в контексте документа iframe
+      // РЎРѕР·РґР°С‘Рј СЌР»РµРјРµРЅС‚ РІ РєРѕРЅС‚РµРєСЃС‚Рµ РґРѕРєСѓРјРµРЅС‚Р° iframe
       const ownerDoc = pageView.div.ownerDocument || document;
       overlay = ownerDoc.createElement("div");
       overlay.className = "bbox-overlay";
@@ -221,10 +221,10 @@
       let drag = null;
 
       const getOverlayPoint = (e) => {
-        // Получаем позицию курсора относительно overlay
+        // РџРѕР»СѓС‡Р°РµРј РїРѕР·РёС†РёСЋ РєСѓСЂСЃРѕСЂР° РѕС‚РЅРѕСЃРёС‚РµР»СЊРЅРѕ overlay
         const rect = overlay.getBoundingClientRect();
         
-        // Позиция курсора на экране минус позиция overlay на экране
+        // РџРѕР·РёС†РёСЏ РєСѓСЂСЃРѕСЂР° РЅР° СЌРєСЂР°РЅРµ РјРёРЅСѓСЃ РїРѕР·РёС†РёСЏ overlay РЅР° СЌРєСЂР°РЅРµ
         const x = e.clientX - rect.left;
         const y = e.clientY - rect.top;
         
@@ -245,7 +245,7 @@
         
         if (e.button !== 0) return;
         if (!state.activeFieldId) {
-          notify("Выберите поле для bbox.");
+          notify("Р’С‹Р±РµСЂРёС‚Рµ РїРѕР»Рµ РґР»СЏ bbox.");
           return;
         }
 
@@ -258,7 +258,7 @@
           el: null,
         };
 
-        // Создаём элемент в контексте документа iframe (не родительского окна)
+        // РЎРѕР·РґР°С‘Рј СЌР»РµРјРµРЅС‚ РІ РєРѕРЅС‚РµРєСЃС‚Рµ РґРѕРєСѓРјРµРЅС‚Р° iframe (РЅРµ СЂРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ РѕРєРЅР°)
         const ownerDoc = overlay.ownerDocument || document;
         const temp = ownerDoc.createElement("div");
         temp.className = "bbox-rect temp";
@@ -297,7 +297,7 @@
         drag.el.style.width = `${width}px`;
         drag.el.style.height = `${height}px`;
         
-        // Логируем каждые 10 пикселей движения
+        // Р›РѕРіРёСЂСѓРµРј РєР°Р¶РґС‹Рµ 10 РїРёРєСЃРµР»РµР№ РґРІРёР¶РµРЅРёСЏ
         if (width > 10 || height > 10) {
           console.log("DRAG:", { left, top, width, height });
         }
@@ -329,14 +329,14 @@
         const pdfPage = pageViewLocal?.pdfPage;
         if (!viewport || !pdfPage) return;
 
-        // ===== ШАГ 1: Получаем реальные размеры PDF страницы =====
-        const pageRect = pdfPage.view; // [x1, y1, x2, y2] в PDF координатах
+        // ===== РЁРђР“ 1: РџРѕР»СѓС‡Р°РµРј СЂРµР°Р»СЊРЅС‹Рµ СЂР°Р·РјРµСЂС‹ PDF СЃС‚СЂР°РЅРёС†С‹ =====
+        const pageRect = pdfPage.view; // [x1, y1, x2, y2] РІ PDF РєРѕРѕСЂРґРёРЅР°С‚Р°С…
         const pdfWidth = pageRect[2] - pageRect[0];
         const pdfHeight = pageRect[3] - pageRect[1];
         
         console.log("PDF page size:", pdfWidth, "x", pdfHeight);
 
-        // ===== ШАГ 2: Находим canvas и его размеры =====
+        // ===== РЁРђР“ 2: РќР°С…РѕРґРёРј canvas Рё РµРіРѕ СЂР°Р·РјРµСЂС‹ =====
         const canvas = pageViewLocal.div.querySelector("canvas");
         const canvasWidth = canvas.offsetWidth;
         const canvasHeight = canvas.offsetHeight;
@@ -344,12 +344,12 @@
         console.log("Canvas size:", canvasWidth, "x", canvasHeight);
         console.log("Viewport size:", viewport.width, "x", viewport.height);
 
-        // ===== ШАГ 3: Масштаб из экранных координат в viewport =====
+        // ===== РЁРђР“ 3: РњР°СЃС€С‚Р°Р± РёР· СЌРєСЂР°РЅРЅС‹С… РєРѕРѕСЂРґРёРЅР°С‚ РІ viewport =====
         const scale = viewport.width / canvasWidth;
         
         console.log("Scale factor:", scale);
 
-        // ===== ШАГ 4: Преобразуем экранные координаты в viewport =====
+        // ===== РЁРђР“ 4: РџСЂРµРѕР±СЂР°Р·СѓРµРј СЌРєСЂР°РЅРЅС‹Рµ РєРѕРѕСЂРґРёРЅР°С‚С‹ РІ viewport =====
         const vp_x1 = left * scale;
         const vp_y1 = top * scale;
         const vp_x2 = (left + width) * scale;
@@ -357,13 +357,13 @@
         
         console.log("Viewport coords:", vp_x1, vp_y1, vp_x2, vp_y2);
 
-        // ===== ШАГ 5: Преобразуем viewport в PDF координаты =====
+        // ===== РЁРђР“ 5: РџСЂРµРѕР±СЂР°Р·СѓРµРј viewport РІ PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ =====
         const [pdf_x1, pdf_y1] = viewport.convertToPdfPoint(vp_x1, vp_y1);
         const [pdf_x2, pdf_y2] = viewport.convertToPdfPoint(vp_x2, vp_y2);
         
         console.log("PDF coords (raw):", pdf_x1, pdf_y1, pdf_x2, pdf_y2);
 
-        // ===== ШАГ 6: Нормализуем (PDF координаты идут снизу вверх) =====
+        // ===== РЁРђР“ 6: РќРѕСЂРјР°Р»РёР·СѓРµРј (PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ РёРґСѓС‚ СЃРЅРёР·Сѓ РІРІРµСЂС…) =====
         const normalized = {
           x1: Math.min(pdf_x1, pdf_x2),
           y1: Math.min(pdfHeight - pdf_y1, pdfHeight - pdf_y2),
@@ -373,7 +373,7 @@
         
         console.log("Normalized PDF coords:", normalized);
 
-        // ===== ШАГ 7: Сохраняем =====
+        // ===== РЁРђР“ 7: РЎРѕС…СЂР°РЅСЏРµРј =====
         const selection = {
           schema: "pdfbbox-v2",
           id: window.crypto?.randomUUID?.() || 
@@ -388,7 +388,7 @@
           page_height: pdfHeight,
         };
 
-        // Добавляем новый bbox (не удаляем предыдущие — разрешаем множественное выделение)
+        // Р”РѕР±Р°РІР»СЏРµРј РЅРѕРІС‹Р№ bbox (РЅРµ СѓРґР°Р»СЏРµРј РїСЂРµРґС‹РґСѓС‰РёРµ вЂ” СЂР°Р·СЂРµС€Р°РµРј РјРЅРѕР¶РµСЃС‚РІРµРЅРЅРѕРµ РІС‹РґРµР»РµРЅРёРµ)
         state.selections.push(selection);
         renderBboxes(app);
 
@@ -397,14 +397,14 @@
           "/api/pdf-extract-text"
         );
 
-        // Определяем тип поля для настройки опций
+        // РћРїСЂРµРґРµР»СЏРµРј С‚РёРї РїРѕР»СЏ РґР»СЏ РЅР°СЃС‚СЂРѕР№РєРё РѕРїС†РёР№
         const isReferencesField = selection.field_id === "references_ru" || selection.field_id === "references_en";
         
-        // Для списка литературы: не удалять префиксы, не склеивать строки
+        // Р”Р»СЏ СЃРїРёСЃРєР° Р»РёС‚РµСЂР°С‚СѓСЂС‹: РЅРµ СѓРґР°Р»СЏС‚СЊ РїСЂРµС„РёРєСЃС‹, РЅРµ СЃРєР»РµРёРІР°С‚СЊ СЃС‚СЂРѕРєРё
         const options = isReferencesField ? {
           fix_hyphenation: true,
-          strip_prefix: false,    // НЕ удалять номера [1], 1. и т.д.
-          join_lines: false,      // НЕ склеивать строки (каждый источник на своей строке)
+          strip_prefix: false,    // РќР• СѓРґР°Р»СЏС‚СЊ РЅРѕРјРµСЂР° [1], 1. Рё С‚.Рґ.
+          join_lines: false,      // РќР• СЃРєР»РµРёРІР°С‚СЊ СЃС‚СЂРѕРєРё (РєР°Р¶РґС‹Р№ РёСЃС‚РѕС‡РЅРёРє РЅР° СЃРІРѕРµР№ СЃС‚СЂРѕРєРµ)
           merge_by_field: false,
         } : {
           fix_hyphenation: true,
@@ -434,18 +434,8 @@
             );
             applyFn(selection.field_id, extracted);
             
-            // Автоматически сохраняем в шаблон если ISSN установлен
-            if (state.currentIssn) {
-              saveToTemplate(selection.field_id, {
-                page: selection.page,
-                pdf_x1: selection.pdf_x1,
-                pdf_y1: selection.pdf_y1,
-                pdf_x2: selection.pdf_x2,
-                pdf_y2: selection.pdf_y2,
-                page_width: pdfWidth,
-                page_height: pdfHeight,
-              });
-            }
+            // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРѕС…СЂР°РЅСЏРµРј РІ С€Р°Р±Р»РѕРЅ РµСЃР»Рё ISSN СѓСЃС‚Р°РЅРѕРІР»РµРЅ
+            // BBox templates are disabled: keep only per-article manual selections.
           }
         } catch (err) {
           console.warn("PDF extract failed:", err);
@@ -483,12 +473,12 @@
     const pdfPage = pageView.pdfPage;
     if (!pdfPage) return;
 
-    // ===== ШАГ 1: Размеры PDF страницы =====
+    // ===== РЁРђР“ 1: Р Р°Р·РјРµСЂС‹ PDF СЃС‚СЂР°РЅРёС†С‹ =====
     const pageRect = pdfPage.view;
     const pdfWidth = pageRect[2] - pageRect[0];
     const pdfHeight = pageRect[3] - pageRect[1];
 
-    // ===== ШАГ 2: Масштаб viewport → экран =====
+    // ===== РЁРђР“ 2: РњР°СЃС€С‚Р°Р± viewport в†’ СЌРєСЂР°РЅ =====
     const canvas = pageView.div.querySelector("canvas");
     const scale = canvas ? canvas.offsetWidth / viewport.width : 1;
 
@@ -498,16 +488,16 @@
     state.selections
       .filter((s) => s.page === pageIndex)
       .forEach((s) => {
-        // ===== ШАГ 3: Обратное преобразование: PDF → viewport =====
-        // Инвертируем Y (PDF координаты снизу вверх → сверху вниз)
+        // ===== РЁРђР“ 3: РћР±СЂР°С‚РЅРѕРµ РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёРµ: PDF в†’ viewport =====
+        // РРЅРІРµСЂС‚РёСЂСѓРµРј Y (PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ СЃРЅРёР·Сѓ РІРІРµСЂС… в†’ СЃРІРµСЂС…Сѓ РІРЅРёР·)
         const pdf_y1_inverted = pdfHeight - s.pdf_y1;
         const pdf_y2_inverted = pdfHeight - s.pdf_y2;
 
-        // Преобразуем в viewport (учитывает rotation автоматически)
+        // РџСЂРµРѕР±СЂР°Р·СѓРµРј РІ viewport (СѓС‡РёС‚С‹РІР°РµС‚ rotation Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё)
         const [vp_x1, vp_y1] = viewport.convertToViewportPoint(s.pdf_x1, pdf_y1_inverted);
         const [vp_x2, vp_y2] = viewport.convertToViewportPoint(s.pdf_x2, pdf_y2_inverted);
 
-        // ===== ШАГ 4: Viewport → экранные координаты =====
+        // ===== РЁРђР“ 4: Viewport в†’ СЌРєСЂР°РЅРЅС‹Рµ РєРѕРѕСЂРґРёРЅР°С‚С‹ =====
         const screen_x1 = vp_x1 * scale;
         const screen_y1 = vp_y1 * scale;
         const screen_x2 = vp_x2 * scale;
@@ -518,7 +508,7 @@
         const width = Math.abs(screen_x2 - screen_x1);
         const height = Math.abs(screen_y2 - screen_y1);
 
-        // ===== ШАГ 5: Создаём элемент =====
+        // ===== РЁРђР“ 5: РЎРѕР·РґР°С‘Рј СЌР»РµРјРµРЅС‚ =====
         const ownerDoc = overlay.ownerDocument || document;
         const rect = ownerDoc.createElement("div");
         rect.className = "bbox-rect";
@@ -662,147 +652,27 @@
   ======================= */
 
   const loadTemplateSuggestions = async (issn, pageWidth = 595, pageHeight = 842) => {
-    if (!issn) return null;
-    
-    state.currentIssn = issn;
-    
-    try {
-      const resp = await fetch(
-        `/api/bbox-templates/suggestions?issn=${encodeURIComponent(issn)}&page_width=${pageWidth}&page_height=${pageHeight}`
-      );
-      const data = await resp.json();
-      
-      if (data.suggestions && Object.keys(data.suggestions).length > 0) {
-        state.templateSuggestions = data.suggestions;
-        state.journalName = data.journal_name || "";
-        console.log(`Loaded ${Object.keys(data.suggestions).length} template suggestions for ${issn}`);
-        return data;
-      }
-    } catch (err) {
-      console.warn("Failed to load template suggestions:", err);
-    }
-    
+    void issn;
+    void pageWidth;
+    void pageHeight;
+    state.templateSuggestions = {};
     return null;
   };
 
   const saveToTemplate = async (fieldId, coords) => {
-    if (!state.currentIssn || !fieldId || !coords) return;
-    
-    try {
-      const resp = await fetch("/api/bbox-templates/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          issn: state.currentIssn,
-          journal_name: state.journalName || "",
-          field_id: fieldId,
-          coords: coords,
-        }),
-      });
-      
-      const data = await resp.json();
-      if (data.success && data.suggestions) {
-        state.templateSuggestions = data.suggestions.suggestions || {};
-        console.log(`Saved template for ${fieldId}, confidence: ${data.suggestions.suggestions?.[fieldId]?.confidence || 0}`);
-      }
-    } catch (err) {
-      console.warn("Failed to save to template:", err);
-    }
+    void fieldId;
+    void coords;
+    return;
   };
 
   const applySuggestion = async (fieldId) => {
-    const suggestion = state.templateSuggestions[fieldId];
-    if (!suggestion) {
-      notify(`Нет шаблона для поля ${fieldId}`, "error");
-      return null;
-    }
-    
-    const coords = suggestion.coords;
-    const pdfWin = state.pdfIframe?.contentWindow;
-    const app = pdfWin?.PDFViewerApplication;
-    
-    if (!app) return null;
-    
-    // Создаём selection из шаблона
-    const selection = {
-      schema: "pdfbbox-v2",
-      id: window.crypto?.randomUUID?.() || Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
-      field_id: fieldId,
-      page: coords.page,
-      pdf_x1: coords.pdf_x1,
-      pdf_y1: coords.pdf_y1,
-      pdf_x2: coords.pdf_x2,
-      pdf_y2: coords.pdf_y2,
-      page_width: coords.page_width,
-      page_height: coords.page_height,
-      from_template: true,
-      confidence: suggestion.confidence,
-    };
-    
-    // Удаляем предыдущие bbox для этого поля
-    state.selections = state.selections.filter(s => s.field_id !== fieldId);
-    state.selections.push(selection);
-    renderBboxes(app);
-    
-    // Извлекаем текст
-    const extractEndpoint = getConfig("extractEndpoint", "/api/pdf-extract-text");
-    const isReferencesField = fieldId === "references_ru" || fieldId === "references_en";
-    
-    const options = isReferencesField ? {
-      fix_hyphenation: true,
-      strip_prefix: false,
-      join_lines: false,
-      merge_by_field: false,
-    } : {
-      fix_hyphenation: true,
-      strip_prefix: true,
-      join_lines: true,
-      merge_by_field: false,
-    };
-    
-    try {
-      const resp = await fetch(extractEndpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          pdf_file: getConfig("pdfFile", ""),
-          selections: [selection],
-          options: options,
-        }),
-      });
-      
-      const data = await resp.json();
-      const extracted = data?.extracted?.[0]?.text;
-      
-      if (extracted) {
-        const applyFn = getConfig("applyExtractedText", defaultApplyExtractedText);
-        applyFn(fieldId, extracted);
-        notify(`Шаблон применён (уверенность: ${Math.round(suggestion.confidence * 100)}%)`, "info");
-        return extracted;
-      }
-    } catch (err) {
-      console.warn("Failed to apply suggestion:", err);
-    }
-    
+    void fieldId;
+    notify("BBox templates are disabled.", "info");
     return null;
   };
 
   const applyAllSuggestions = async () => {
-    const suggestions = state.templateSuggestions;
-    if (!suggestions || Object.keys(suggestions).length === 0) {
-      notify("Нет доступных шаблонов", "error");
-      return;
-    }
-    
-    notify(`Применение ${Object.keys(suggestions).length} шаблонов...`, "info");
-    
-    for (const fieldId of Object.keys(suggestions)) {
-      await applySuggestion(fieldId);
-      // Небольшая задержка между запросами
-      await new Promise(resolve => setTimeout(resolve, 100));
-    }
-    
-    notify("Все шаблоны применены", "info");
+    notify("BBox templates are disabled.", "info");
   };
 
   const getSuggestionStatus = () => {
@@ -823,198 +693,17 @@
   };
 
   const showSuggestionsPanel = () => {
-    const status = getSuggestionStatus();
-    if (!status.available) {
-      notify("Нет доступных шаблонов для этого журнала", "info");
-      return;
-    }
-    
-    // Создаём или показываем панель
-    let panel = document.getElementById("bbox-suggestions-panel");
-    if (!panel) {
-      panel = document.createElement("div");
-      panel.id = "bbox-suggestions-panel";
-      panel.style.cssText = `
-        position: fixed;
-        top: 50%;
-        left: 50%;
-        transform: translate(-50%, -50%);
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        padding: 20px;
-        z-index: 10000;
-        max-width: 500px;
-        max-height: 80vh;
-        overflow-y: auto;
-      `;
-      document.body.appendChild(panel);
-    }
-    
-    const fieldLabels = {
-      title: "Название (рус)",
-      title_en: "Название (англ)",
-      annotation: "Аннотация (рус)",
-      annotation_en: "Аннотация (англ)",
-      keywords: "Ключевые слова (рус)",
-      keywords_en: "Ключевые слова (англ)",
-      references_ru: "Список литературы (рус)",
-      references_en: "Список литературы (англ)",
-      funding: "Финансирование (рус)",
-      funding_en: "Финансирование (англ)",
-    };
-    
-    let html = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-        <h3 style="margin: 0;">Шаблоны bbox</h3>
-        <button onclick="document.getElementById('bbox-suggestions-panel').style.display='none'" 
-                style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
-      </div>
-      <p style="color: #666; margin-bottom: 15px;">
-        Журнал: <strong>${status.journal_name || status.issn}</strong><br>
-        Доступно шаблонов: <strong>${status.count}</strong>
-      </p>
-      <div style="margin-bottom: 15px;">
-    `;
-    
-    for (const field of status.fields) {
-      const label = fieldLabels[field.field_id] || field.field_id;
-      const confidence = Math.round(field.confidence * 100);
-      const color = confidence >= 70 ? "#4caf50" : confidence >= 40 ? "#ff9800" : "#f44336";
-      
-      html += `
-        <div style="display: flex; align-items: center; padding: 8px; border-bottom: 1px solid #eee; gap: 5px;">
-          <span style="flex: 1;">${label}</span>
-          <span style="color: ${color}; min-width: 40px; text-align: right;">${confidence}%</span>
-          <span style="color: #999; font-size: 11px; min-width: 30px;">(${field.sample_count})</span>
-          <button onclick="window.PdfBbox.applySuggestion('${field.field_id}')" 
-                  style="padding: 4px 10px; cursor: pointer; background: #e3f2fd; border: 1px solid #90caf9; border-radius: 3px;"
-                  title="Применить шаблон">✓</button>
-          <button onclick="window.PdfBbox.resetFieldTemplate('${field.field_id}')" 
-                  style="padding: 4px 10px; cursor: pointer; background: #ffebee; border: 1px solid #ef9a9a; border-radius: 3px;"
-                  title="Сбросить шаблон (удалить образцы)">✕</button>
-        </div>
-      `;
-    }
-    
-    html += `
-      </div>
-      <p style="color: #888; font-size: 12px; margin: 10px 0;">
-        💡 <strong>Подсказка:</strong> Если шаблон промахнулся — просто выделите правильную область вручную. 
-        Новый образец улучшит точность. Кнопка ✕ сбрасывает все образцы для поля.
-      </p>
-      <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-        <button onclick="window.PdfBbox.applyAllSuggestions(); document.getElementById('bbox-suggestions-panel').style.display='none';"
-                style="flex: 1; min-width: 120px; padding: 10px; background: #1976d2; color: white; border: none; border-radius: 4px; cursor: pointer;">
-          ✓ Применить все
-        </button>
-        <button onclick="document.getElementById('bbox-suggestions-panel').style.display='none'"
-                style="flex: 1; min-width: 120px; padding: 10px; background: #eee; border: none; border-radius: 4px; cursor: pointer;">
-          Закрыть
-        </button>
-      </div>
-      <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-        <button onclick="window.PdfBbox.resetAllTemplates()"
-                style="width: 100%; padding: 8px; background: #fff; color: #d32f2f; border: 1px solid #d32f2f; border-radius: 4px; cursor: pointer; font-size: 12px;">
-          🗑 Удалить все шаблоны для этого журнала
-        </button>
-      </div>
-    `;
-    
-    panel.innerHTML = html;
-    panel.style.display = "block";
+    notify("BBox templates are disabled.", "info");
   };
 
   const resetFieldTemplate = async (fieldId) => {
-    if (!state.currentIssn || !fieldId) {
-      notify("Не удалось сбросить шаблон", "error");
-      return false;
-    }
-    
-    if (!confirm(`Сбросить все образцы для поля "${fieldId}"?\nЭто удалит накопленные данные шаблона.`)) {
-      return false;
-    }
-    
-    try {
-      const resp = await fetch("/api/bbox-templates/reset-field", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          issn: state.currentIssn,
-          field_id: fieldId,
-        }),
-      });
-      
-      const data = await resp.json();
-      if (data.success) {
-        // Удаляем из локального состояния
-        delete state.templateSuggestions[fieldId];
-        // Удаляем bbox для этого поля
-        state.selections = state.selections.filter(s => s.field_id !== fieldId);
-        
-        // Перерисовываем
-        const pdfWin = state.pdfIframe?.contentWindow;
-        const app = pdfWin?.PDFViewerApplication;
-        if (app) renderBboxes(app);
-        
-        notify(`Шаблон для "${fieldId}" сброшен`, "info");
-        
-        // Обновляем панель
-        showSuggestionsPanel();
-        return true;
-      } else {
-        notify(data.error || "Ошибка сброса шаблона", "error");
-      }
-    } catch (err) {
-      console.warn("Failed to reset field template:", err);
-      notify("Ошибка сброса шаблона", "error");
-    }
-    
+    void fieldId;
+    notify("BBox templates are disabled.", "info");
     return false;
   };
 
   const resetAllTemplates = async () => {
-    if (!state.currentIssn) {
-      notify("ISSN журнала не установлен", "error");
-      return false;
-    }
-    
-    if (!confirm(`Удалить ВСЕ шаблоны для журнала ${state.currentIssn}?\nЭто действие нельзя отменить.`)) {
-      return false;
-    }
-    
-    try {
-      const resp = await fetch("/api/bbox-templates/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ issn: state.currentIssn }),
-      });
-      
-      const data = await resp.json();
-      if (data.success) {
-        state.templateSuggestions = {};
-        state.selections = [];
-        
-        const pdfWin = state.pdfIframe?.contentWindow;
-        const app = pdfWin?.PDFViewerApplication;
-        if (app) renderBboxes(app);
-        
-        notify("Все шаблоны удалены", "info");
-        
-        // Закрываем панель
-        const panel = document.getElementById("bbox-suggestions-panel");
-        if (panel) panel.style.display = "none";
-        
-        // Удаляем кнопку применения шаблонов
-        const btn = document.getElementById("applyTemplatesBtn");
-        if (btn) btn.remove();
-        
-        return true;
-      }
-    } catch (err) {
-      console.warn("Failed to reset all templates:", err);
-    }
-    
+    notify("BBox templates are disabled.", "info");
     return false;
   };
 
@@ -1044,3 +733,6 @@
     },
   };
 })();
+
+
+

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import io
 import json
@@ -1520,246 +1520,37 @@ def register_pdf_routes(app, ctx):
     
     # ==================== BBOX Templates API ====================
     
-    from bbox_templates import get_template_manager, BboxCoords
-    
+    def _bbox_templates_disabled_response():
+        return jsonify(
+            {
+                "success": False,
+                "disabled": True,
+                "error": "Функция шаблонов bbox отключена.",
+            }
+        ), 410
+
     @app.route("/api/bbox-templates/suggestions", methods=["GET"])
     def get_bbox_suggestions():
-        """
-        Получить предложения bbox для журнала.
-        
-        Query params:
-            issn: ISSN журнала
-            page_width: ширина страницы PDF (default 595)
-            page_height: высота страницы PDF (default 842)
-        """
-        issn = request.args.get("issn", "")
-        if not issn:
-            return jsonify({"error": "ISSN не указан"}), 400
-        
-        page_width = float(request.args.get("page_width", 595))
-        page_height = float(request.args.get("page_height", 842))
-        
-        manager = get_template_manager()
-        suggestions = manager.get_suggestions_for_journal(issn, page_width, page_height)
-        
-        return jsonify(suggestions)
-    
+        return _bbox_templates_disabled_response()
+
     @app.route("/api/bbox-templates/save", methods=["POST"])
     def save_bbox_template():
-        """
-        Сохранить bbox как образец для шаблона.
-        
-        Body JSON:
-            issn: ISSN журнала
-            journal_name: название журнала (опционально)
-            field_id: ID поля (title, annotation, references_ru, etc.)
-            coords: {page, pdf_x1, pdf_y1, pdf_x2, pdf_y2, page_width, page_height}
-        """
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Нет данных"}), 400
-        
-        issn = data.get("issn", "")
-        if not issn:
-            return jsonify({"error": "ISSN не указан"}), 400
-        
-        field_id = data.get("field_id", "")
-        if not field_id:
-            return jsonify({"error": "field_id не указан"}), 400
-        
-        coords_data = data.get("coords", {})
-        if not coords_data:
-            return jsonify({"error": "coords не указаны"}), 400
-        
-        try:
-            coords = BboxCoords(
-                page=int(coords_data.get("page", 0)),
-                pdf_x1=float(coords_data.get("pdf_x1", 0)),
-                pdf_y1=float(coords_data.get("pdf_y1", 0)),
-                pdf_x2=float(coords_data.get("pdf_x2", 0)),
-                pdf_y2=float(coords_data.get("pdf_y2", 0)),
-                page_width=float(coords_data.get("page_width", 595)),
-                page_height=float(coords_data.get("page_height", 842)),
-            )
-        except (ValueError, TypeError) as e:
-            return jsonify({"error": f"Неверный формат координат: {e}"}), 400
-        
-        manager = get_template_manager()
-        journal_name = data.get("journal_name", "")
-        manager.add_bbox_sample(issn, field_id, coords, journal_name)
-        
-        # Возвращаем обновлённые предложения
-        suggestions = manager.get_suggestions_for_journal(
-            issn, 
-            coords.page_width, 
-            coords.page_height
-        )
-        
-        return jsonify({
-            "success": True,
-            "message": f"Шаблон для {field_id} сохранён",
-            "suggestions": suggestions,
-        })
-    
+        return _bbox_templates_disabled_response()
+
     @app.route("/api/bbox-templates/list", methods=["GET"])
     def list_bbox_templates():
-        """Получить список всех доступных шаблонов."""
-        manager = get_template_manager()
-        templates = manager.list_templates()
-        return jsonify({"templates": templates})
-    
+        return _bbox_templates_disabled_response()
+
     @app.route("/api/bbox-templates/delete", methods=["POST"])
     def delete_bbox_template():
-        """Удалить шаблон для журнала."""
-        data = request.get_json()
-        issn = data.get("issn", "") if data else ""
-        
-        if not issn:
-            return jsonify({"error": "ISSN не указан"}), 400
-        
-        manager = get_template_manager()
-        success = manager.delete_template(issn)
-        
-        if success:
-            return jsonify({"success": True, "message": f"Шаблон для {issn} удалён"})
-        else:
-            return jsonify({"error": "Шаблон не найден"}), 404
-    
+        return _bbox_templates_disabled_response()
+
     @app.route("/api/bbox-templates/reset-field", methods=["POST"])
     def reset_field_template():
-        """Сбросить шаблон для конкретного поля."""
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Нет данных"}), 400
-        
-        issn = data.get("issn", "")
-        field_id = data.get("field_id", "")
-        
-        if not issn:
-            return jsonify({"error": "ISSN не указан"}), 400
-        if not field_id:
-            return jsonify({"error": "field_id не указан"}), 400
-        
-        manager = get_template_manager()
-        template = manager.get_template(issn)
-        
-        if not template:
-            return jsonify({"error": "Шаблон не найден"}), 404
-        
-        if field_id not in template.fields:
-            return jsonify({"error": f"Поле {field_id} не найдено в шаблоне"}), 404
-        
-        # Удаляем поле из шаблона
-        del template.fields[field_id]
-        manager.save_template(template)
-        
-        return jsonify({
-            "success": True,
-            "message": f"Шаблон для поля {field_id} сброшен",
-            "remaining_fields": list(template.fields.keys()),
-        })
-    
+        return _bbox_templates_disabled_response()
+
     @app.route("/api/bbox-templates/apply", methods=["POST"])
     def apply_bbox_template():
-        """
-        Применить шаблон и извлечь текст из всех предложенных областей.
-        
-        Body JSON:
-            issn: ISSN журнала
-            pdf_file: путь к PDF файлу
-            page_width: ширина страницы
-            page_height: высота страницы
-            fields: список полей для извлечения (опционально, если пусто - все)
-        """
-        data = request.get_json()
-        if not data:
-            return jsonify({"error": "Нет данных"}), 400
-        
-        issn = data.get("issn", "")
-        pdf_file = data.get("pdf_file", "")
-        
-        if not issn:
-            return jsonify({"error": "ISSN не указан"}), 400
-        if not pdf_file:
-            return jsonify({"error": "PDF файл не указан"}), 400
-        
-        page_width = float(data.get("page_width", 595))
-        page_height = float(data.get("page_height", 842))
-        fields_filter = data.get("fields", [])
-        
-        manager = get_template_manager()
-        suggestions = manager.get_suggestions_for_journal(issn, page_width, page_height)
-        
-        if not suggestions.get("suggestions"):
-            return jsonify({"error": "Нет шаблонов для этого журнала"}), 404
-        
-        # Проверяем путь к PDF
-        if ".." in pdf_file or pdf_file.startswith("/") or pdf_file.startswith("\\"):
-            return jsonify({"error": "Недопустимый путь к файлу"}), 400
-        
-        session_input_dir = _session_input_dir()
-        pdf_path = session_input_dir / pdf_file
-        if not pdf_path.exists():
-            return jsonify({"error": f"Файл не найден: {pdf_file}"}), 404
-        
-        # Извлекаем текст из каждой области
-        extracted = {}
-        try:
-            import pdfplumber
-            with pdfplumber.open(str(pdf_path)) as pdf:
-                total_pages = len(pdf.pages)
-                
-                for field_id, suggestion in suggestions["suggestions"].items():
-                    if fields_filter and field_id not in fields_filter:
-                        continue
-                    
-                    coords = suggestion["coords"]
-                    page_num = coords["page"]
-                    
-                    # Обработка отрицательных номеров страниц
-                    if page_num < 0:
-                        page_num = total_pages + page_num
-                    
-                    if page_num < 0 or page_num >= total_pages:
-                        continue
-                    
-                    page = pdf.pages[page_num]
-                    
-                    # Извлекаем текст
-                    try:
-                        cropped = page.crop((
-                            coords["pdf_x1"],
-                            coords["pdf_y1"],
-                            coords["pdf_x2"],
-                            coords["pdf_y2"]
-                        ))
-                        text = cropped.extract_text(x_tolerance=3, y_tolerance=5)
-                        
-                        if text:
-                            # Нормализуем текст
-                            options = {
-                                "fix_hyphenation": True,
-                                "strip_prefix": True,
-                                "join_lines": field_id not in {"references_ru", "references_en"},
-                            }
-                            text = _normalize_extracted_text(text, field_id, options)
-                            
-                            extracted[field_id] = {
-                                "text": text,
-                                "confidence": suggestion["confidence"],
-                                "page": page_num,
-                            }
-                    except Exception as e:
-                        print(f"Error extracting {field_id}: {e}")
-                        continue
-        
-        except Exception as e:
-            return jsonify({"error": f"Ошибка при извлечении: {str(e)}"}), 500
-        
-        return jsonify({
-            "success": True,
-            "issn": issn,
-            "pdf_file": pdf_file,
-            "extracted": extracted,
-        })
+        return _bbox_templates_disabled_response()
+
 

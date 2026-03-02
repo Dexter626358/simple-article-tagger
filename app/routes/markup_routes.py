@@ -785,6 +785,79 @@ def register_markup_routes(app, ctx):
                     max_chunk_chars,
                 )
 
+            def _normalize_ref_item(item: str) -> str:
+                return re.sub(r"\s+", " ", str(item or "")).strip()
+
+            def _dedupe_references(items: list[str]) -> list[str]:
+                out: list[str] = []
+                seen: set[str] = set()
+                for raw in items or []:
+                    s = _normalize_ref_item(raw)
+                    if not s:
+                        continue
+                    doi_m = re.search(r"\b(?:doi:\s*)?(10\.\d{4,9}/[^\s,;]+)", s, re.IGNORECASE)
+                    url_m = re.search(r"\bhttps?://[^\s)]+", s, re.IGNORECASE)
+                    if doi_m:
+                        key = f"doi:{doi_m.group(1).lower()}"
+                    elif url_m:
+                        key = f"url:{url_m.group(0).lower()}"
+                    else:
+                        key = "txt:" + re.sub(r"[^\w]+", " ", s.lower()).strip()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    out.append(s)
+                return out
+
+            def _estimate_reference_candidates(text: str) -> int:
+                t = str(text or "")
+                numbered = len(re.findall(r"(?:^|\n)\s*(?:\[\d{1,3}\]|\d{1,3}[.)])\s+", t))
+                year_dash = len(re.findall(r"\b[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*", t))
+                return max(numbered, year_dash)
+
+            def _fallback_references(text: str) -> list[str]:
+                raw = str(text or "").strip()
+                if not raw:
+                    return []
+
+                # 1) Дет. нормализатор из PDF-конвертера (если доступен)
+                try:
+                    from converters.pdf_to_html import normalize_references_block  # type: ignore
+                    lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                    header = "Литература" if language == "RUS" else "References"
+                    entries, _score = normalize_references_block([header, *lines])
+                    if entries:
+                        return _dedupe_references(entries)
+                except Exception:
+                    pass
+
+                # 2) Консервативный fallback без LLM
+                lines = [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                if not lines:
+                    lines = [raw]
+
+                entries: list[str] = []
+                cur = ""
+                for ln in lines:
+                    is_cont = bool(
+                        re.match(r"^(doi\s*:|https?://|doi\.org/|10\.\d{4,9}/)", ln, re.IGNORECASE)
+                        or re.search(r"(doi\s*:|url\s*:)\s*$", cur, re.IGNORECASE)
+                    )
+                    starts_new = bool(
+                        re.match(r"^(?:\[\d{1,3}\]|\d{1,3}[.)])\s+", ln)
+                        or re.match(r"^[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*", ln)
+                    )
+                    if not cur:
+                        cur = ln
+                    elif is_cont or not starts_new:
+                        cur = f"{cur} {ln}".strip()
+                    else:
+                        entries.append(cur)
+                        cur = ln
+                if cur:
+                    entries.append(cur)
+                return _dedupe_references(entries)
+
             def _chunk_references(text: str) -> list[str]:
                 lines = [line.strip() for line in text.splitlines() if line.strip()]
                 if len(lines) >= 2:
@@ -917,6 +990,23 @@ def register_markup_routes(app, ctx):
                     references = [str(references)]
 
                 cleaned = [r for r in references if str(r).strip()]
+                cleaned = _dedupe_references(cleaned)
+
+                # Если LLM вернул пусто/явно мало — fallback на детерминированный разбор чанка
+                estimated = _estimate_reference_candidates(chunk_text)
+                if not cleaned or (len(cleaned) <= 1 and estimated >= 2):
+                    fb = _fallback_references(chunk_text)
+                    if fb:
+                        current_app.logger.info(
+                            "SYSTEM references ai chunk fallback used field=%s chunk=%s llm_count=%s fb_count=%s est=%s",
+                            field_id,
+                            chunk_index,
+                            len(cleaned),
+                            len(fb),
+                            estimated,
+                        )
+                        cleaned = fb
+
                 elapsed = time.time() - chunk_start
                 current_app.logger.info(
                     "SYSTEM references ai chunk done field=%s chunk=%s elapsed=%.2fs count=%s",
@@ -972,6 +1062,10 @@ def register_markup_routes(app, ctx):
                     time.sleep(0)
 
             # Объединяем в строку с переносами
+            all_references = _dedupe_references(all_references)
+            if not all_references:
+                # Финальная страховка на весь исходный текст
+                all_references = _fallback_references(raw_text)
             normalized_text = "\n".join(all_references)
             total_elapsed = time.time() - request_start
             current_app.logger.info(

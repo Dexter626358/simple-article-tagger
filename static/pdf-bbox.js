@@ -34,6 +34,8 @@
     }
   };
 
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+
   const normalizeRotation = (point, rotation, width, height) => {
     const rot = ((rotation || 0) % 360 + 360) % 360;
     const [x, y] = point;
@@ -55,6 +57,107 @@
   const getConfig = (key, fallback) => {
     const value = state.config[key];
     return value === undefined ? fallback : value;
+  };
+
+  const getPageMetrics = (pageView) => {
+    const viewport = pageView?.viewport;
+    const pdfPage = pageView?.pdfPage;
+    const canvas = pageView?.div?.querySelector("canvas");
+    if (!viewport || !pdfPage || !canvas) return null;
+
+    const pageRect = pdfPage.view; // [x1, y1, x2, y2]
+    const pdfWidth = pageRect[2] - pageRect[0];
+    const pdfHeight = pageRect[3] - pageRect[1];
+    const scale = canvas.offsetWidth / viewport.width;
+
+    return { viewport, pdfWidth, pdfHeight, scale };
+  };
+
+  const pdfSelectionToScreenRect = (pageView, selection) => {
+    const metrics = getPageMetrics(pageView);
+    if (!metrics || !selection) return null;
+    const { viewport, pdfHeight, scale } = metrics;
+
+    const pdfY1Inv = pdfHeight - selection.pdf_y1;
+    const pdfY2Inv = pdfHeight - selection.pdf_y2;
+    const [vpX1, vpY1] = viewport.convertToViewportPoint(selection.pdf_x1, pdfY1Inv);
+    const [vpX2, vpY2] = viewport.convertToViewportPoint(selection.pdf_x2, pdfY2Inv);
+
+    const sx1 = vpX1 * scale;
+    const sy1 = vpY1 * scale;
+    const sx2 = vpX2 * scale;
+    const sy2 = vpY2 * scale;
+
+    return {
+      left: Math.min(sx1, sx2),
+      top: Math.min(sy1, sy2),
+      width: Math.abs(sx2 - sx1),
+      height: Math.abs(sy2 - sy1),
+    };
+  };
+
+  const screenRectToPdfCoords = (pageView, rect) => {
+    const metrics = getPageMetrics(pageView);
+    if (!metrics || !rect) return null;
+    const { viewport, pdfWidth, pdfHeight, scale } = metrics;
+
+    const vpX1 = rect.left / scale;
+    const vpY1 = rect.top / scale;
+    const vpX2 = (rect.left + rect.width) / scale;
+    const vpY2 = (rect.top + rect.height) / scale;
+
+    const [pdfX1, pdfY1] = viewport.convertToPdfPoint(vpX1, vpY1);
+    const [pdfX2, pdfY2] = viewport.convertToPdfPoint(vpX2, vpY2);
+
+    return {
+      pdf_x1: Math.min(pdfX1, pdfX2),
+      pdf_y1: Math.min(pdfHeight - pdfY1, pdfHeight - pdfY2),
+      pdf_x2: Math.max(pdfX1, pdfX2),
+      pdf_y2: Math.max(pdfHeight - pdfY1, pdfHeight - pdfY2),
+      page_width: pdfWidth,
+      page_height: pdfHeight,
+    };
+  };
+
+  const extractAndApplySelectionText = async (selection) => {
+    if (!selection) return;
+    const extractEndpoint = getConfig("extractEndpoint", "/api/pdf-extract-text");
+    const isReferencesField =
+      selection.field_id === "references_ru" || selection.field_id === "references_en";
+
+    const options = isReferencesField
+      ? {
+          fix_hyphenation: true,
+          strip_prefix: false,
+          join_lines: false,
+          merge_by_field: false,
+        }
+      : {
+          fix_hyphenation: true,
+          strip_prefix: true,
+          join_lines: true,
+          merge_by_field: false,
+        };
+
+    try {
+      const resp = await fetch(extractEndpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          pdf_file: getConfig("pdfFile", ""),
+          selections: [selection],
+          options,
+        }),
+      });
+
+      const data = await resp.json();
+      const extracted = data?.extracted?.[0]?.text;
+      if (!extracted) return;
+      const applyFn = getConfig("applyExtractedText", defaultApplyExtractedText);
+      applyFn(selection.field_id, extracted);
+    } catch (err) {
+      console.warn("PDF extract failed:", err);
+    }
   };
 
   /* =======================
@@ -239,6 +342,7 @@
       };
 
       overlay.addEventListener("mousedown", (e) => {
+        if (e.target.closest(".bbox-rect")) return;
         console.log("=== MOUSEDOWN EVENT ===");
         console.log("e.button:", e.button);
         console.log("state.activeFieldId:", state.activeFieldId);
@@ -325,53 +429,8 @@
           Number(overlay.dataset.pageIndex)
         );
 
-        const viewport = pageViewLocal?.viewport;
-        const pdfPage = pageViewLocal?.pdfPage;
-        if (!viewport || !pdfPage) return;
-
-        // ===== РЁРђР“ 1: РџРѕР»СѓС‡Р°РµРј СЂРµР°Р»СЊРЅС‹Рµ СЂР°Р·РјРµСЂС‹ PDF СЃС‚СЂР°РЅРёС†С‹ =====
-        const pageRect = pdfPage.view; // [x1, y1, x2, y2] РІ PDF РєРѕРѕСЂРґРёРЅР°С‚Р°С…
-        const pdfWidth = pageRect[2] - pageRect[0];
-        const pdfHeight = pageRect[3] - pageRect[1];
-        
-        console.log("PDF page size:", pdfWidth, "x", pdfHeight);
-
-        // ===== РЁРђР“ 2: РќР°С…РѕРґРёРј canvas Рё РµРіРѕ СЂР°Р·РјРµСЂС‹ =====
-        const canvas = pageViewLocal.div.querySelector("canvas");
-        const canvasWidth = canvas.offsetWidth;
-        const canvasHeight = canvas.offsetHeight;
-        
-        console.log("Canvas size:", canvasWidth, "x", canvasHeight);
-        console.log("Viewport size:", viewport.width, "x", viewport.height);
-
-        // ===== РЁРђР“ 3: РњР°СЃС€С‚Р°Р± РёР· СЌРєСЂР°РЅРЅС‹С… РєРѕРѕСЂРґРёРЅР°С‚ РІ viewport =====
-        const scale = viewport.width / canvasWidth;
-        
-        console.log("Scale factor:", scale);
-
-        // ===== РЁРђР“ 4: РџСЂРµРѕР±СЂР°Р·СѓРµРј СЌРєСЂР°РЅРЅС‹Рµ РєРѕРѕСЂРґРёРЅР°С‚С‹ РІ viewport =====
-        const vp_x1 = left * scale;
-        const vp_y1 = top * scale;
-        const vp_x2 = (left + width) * scale;
-        const vp_y2 = (top + height) * scale;
-        
-        console.log("Viewport coords:", vp_x1, vp_y1, vp_x2, vp_y2);
-
-        // ===== РЁРђР“ 5: РџСЂРµРѕР±СЂР°Р·СѓРµРј viewport РІ PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ =====
-        const [pdf_x1, pdf_y1] = viewport.convertToPdfPoint(vp_x1, vp_y1);
-        const [pdf_x2, pdf_y2] = viewport.convertToPdfPoint(vp_x2, vp_y2);
-        
-        console.log("PDF coords (raw):", pdf_x1, pdf_y1, pdf_x2, pdf_y2);
-
-        // ===== РЁРђР“ 6: РќРѕСЂРјР°Р»РёР·СѓРµРј (PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ РёРґСѓС‚ СЃРЅРёР·Сѓ РІРІРµСЂС…) =====
-        const normalized = {
-          x1: Math.min(pdf_x1, pdf_x2),
-          y1: Math.min(pdfHeight - pdf_y1, pdfHeight - pdf_y2),
-          x2: Math.max(pdf_x1, pdf_x2),
-          y2: Math.max(pdfHeight - pdf_y1, pdfHeight - pdf_y2),
-        };
-        
-        console.log("Normalized PDF coords:", normalized);
+        const normalized = screenRectToPdfCoords(pageViewLocal, { left, top, width, height });
+        if (!normalized) return;
 
         // ===== РЁРђР“ 7: РЎРѕС…СЂР°РЅСЏРµРј =====
         const selection = {
@@ -380,66 +439,18 @@
               Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
           field_id: state.activeFieldId,
           page: Number(overlay.dataset.pageIndex),
-          pdf_x1: normalized.x1,
-          pdf_y1: normalized.y1,
-          pdf_x2: normalized.x2,
-          pdf_y2: normalized.y2,
-          page_width: pdfWidth,
-          page_height: pdfHeight,
+          pdf_x1: normalized.pdf_x1,
+          pdf_y1: normalized.pdf_y1,
+          pdf_x2: normalized.pdf_x2,
+          pdf_y2: normalized.pdf_y2,
+          page_width: normalized.page_width,
+          page_height: normalized.page_height,
+          pending_apply: true,
         };
 
         // Р”РѕР±Р°РІР»СЏРµРј РЅРѕРІС‹Р№ bbox (РЅРµ СѓРґР°Р»СЏРµРј РїСЂРµРґС‹РґСѓС‰РёРµ вЂ” СЂР°Р·СЂРµС€Р°РµРј РјРЅРѕР¶РµСЃС‚РІРµРЅРЅРѕРµ РІС‹РґРµР»РµРЅРёРµ)
         state.selections.push(selection);
         renderBboxes(app);
-
-        const extractEndpoint = getConfig(
-          "extractEndpoint",
-          "/api/pdf-extract-text"
-        );
-
-        // РћРїСЂРµРґРµР»СЏРµРј С‚РёРї РїРѕР»СЏ РґР»СЏ РЅР°СЃС‚СЂРѕР№РєРё РѕРїС†РёР№
-        const isReferencesField = selection.field_id === "references_ru" || selection.field_id === "references_en";
-        
-        // Р”Р»СЏ СЃРїРёСЃРєР° Р»РёС‚РµСЂР°С‚СѓСЂС‹: РЅРµ СѓРґР°Р»СЏС‚СЊ РїСЂРµС„РёРєСЃС‹, РЅРµ СЃРєР»РµРёРІР°С‚СЊ СЃС‚СЂРѕРєРё
-        const options = isReferencesField ? {
-          fix_hyphenation: true,
-          strip_prefix: false,    // РќР• СѓРґР°Р»СЏС‚СЊ РЅРѕРјРµСЂР° [1], 1. Рё С‚.Рґ.
-          join_lines: false,      // РќР• СЃРєР»РµРёРІР°С‚СЊ СЃС‚СЂРѕРєРё (РєР°Р¶РґС‹Р№ РёСЃС‚РѕС‡РЅРёРє РЅР° СЃРІРѕРµР№ СЃС‚СЂРѕРєРµ)
-          merge_by_field: false,
-        } : {
-          fix_hyphenation: true,
-          strip_prefix: true,
-          join_lines: true,
-          merge_by_field: false,
-        };
-
-        try {
-          const resp = await fetch(extractEndpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              pdf_file: getConfig("pdfFile", ""),
-              selections: [selection],
-              options: options,
-            }),
-          });
-
-          const data = await resp.json();
-          const extracted = data?.extracted?.[0]?.text;
-
-          if (extracted) {
-            const applyFn = getConfig(
-              "applyExtractedText",
-              defaultApplyExtractedText
-            );
-            applyFn(selection.field_id, extracted);
-            
-            // РђРІС‚РѕРјР°С‚РёС‡РµСЃРєРё СЃРѕС…СЂР°РЅСЏРµРј РІ С€Р°Р±Р»РѕРЅ РµСЃР»Рё ISSN СѓСЃС‚Р°РЅРѕРІР»РµРЅ
-            // BBox templates are disabled: keep only per-article manual selections.
-          }
-        } catch (err) {
-          console.warn("PDF extract failed:", err);
-        }
       });
     }
 
@@ -473,14 +484,8 @@
     const pdfPage = pageView.pdfPage;
     if (!pdfPage) return;
 
-    // ===== РЁРђР“ 1: Р Р°Р·РјРµСЂС‹ PDF СЃС‚СЂР°РЅРёС†С‹ =====
-    const pageRect = pdfPage.view;
-    const pdfWidth = pageRect[2] - pageRect[0];
-    const pdfHeight = pageRect[3] - pageRect[1];
-
-    // ===== РЁРђР“ 2: РњР°СЃС€С‚Р°Р± viewport в†’ СЌРєСЂР°РЅ =====
-    const canvas = pageView.div.querySelector("canvas");
-    const scale = canvas ? canvas.offsetWidth / viewport.width : 1;
+    const metrics = getPageMetrics(pageView);
+    if (!metrics) return;
 
     const getColor = getConfig("getFieldColor", defaultGetFieldColor);
     const getLabel = getConfig("getFieldLabel", defaultGetFieldLabel);
@@ -488,25 +493,12 @@
     state.selections
       .filter((s) => s.page === pageIndex)
       .forEach((s) => {
-        // ===== РЁРђР“ 3: РћР±СЂР°С‚РЅРѕРµ РїСЂРµРѕР±СЂР°Р·РѕРІР°РЅРёРµ: PDF в†’ viewport =====
-        // РРЅРІРµСЂС‚РёСЂСѓРµРј Y (PDF РєРѕРѕСЂРґРёРЅР°С‚С‹ СЃРЅРёР·Сѓ РІРІРµСЂС… в†’ СЃРІРµСЂС…Сѓ РІРЅРёР·)
-        const pdf_y1_inverted = pdfHeight - s.pdf_y1;
-        const pdf_y2_inverted = pdfHeight - s.pdf_y2;
-
-        // РџСЂРµРѕР±СЂР°Р·СѓРµРј РІ viewport (СѓС‡РёС‚С‹РІР°РµС‚ rotation Р°РІС‚РѕРјР°С‚РёС‡РµСЃРєРё)
-        const [vp_x1, vp_y1] = viewport.convertToViewportPoint(s.pdf_x1, pdf_y1_inverted);
-        const [vp_x2, vp_y2] = viewport.convertToViewportPoint(s.pdf_x2, pdf_y2_inverted);
-
-        // ===== РЁРђР“ 4: Viewport в†’ СЌРєСЂР°РЅРЅС‹Рµ РєРѕРѕСЂРґРёРЅР°С‚С‹ =====
-        const screen_x1 = vp_x1 * scale;
-        const screen_y1 = vp_y1 * scale;
-        const screen_x2 = vp_x2 * scale;
-        const screen_y2 = vp_y2 * scale;
-
-        const left = Math.min(screen_x1, screen_x2);
-        const top = Math.min(screen_y1, screen_y2);
-        const width = Math.abs(screen_x2 - screen_x1);
-        const height = Math.abs(screen_y2 - screen_y1);
+        const sr = pdfSelectionToScreenRect(pageView, s);
+        if (!sr) return;
+        const left = sr.left;
+        const top = sr.top;
+        const width = sr.width;
+        const height = sr.height;
 
         // ===== РЁРђР“ 5: РЎРѕР·РґР°С‘Рј СЌР»РµРјРµРЅС‚ =====
         const ownerDoc = overlay.ownerDocument || document;
@@ -544,10 +536,152 @@
 
         rect.appendChild(label);
 
+        const applyBtn = ownerDoc.createElement("button");
+        applyBtn.type = "button";
+        applyBtn.className = "bbox-apply-btn";
+        applyBtn.title = "Вставить выделенный фрагмент";
+        applyBtn.textContent = "✓";
+        applyBtn.style.position = "absolute";
+        applyBtn.style.right = "-10px";
+        applyBtn.style.bottom = "-10px";
+        applyBtn.style.width = "18px";
+        applyBtn.style.height = "18px";
+        applyBtn.style.border = `1px solid ${color}`;
+        applyBtn.style.borderRadius = "50%";
+        applyBtn.style.background = "#fff";
+        applyBtn.style.color = "#15803d";
+        applyBtn.style.fontSize = "12px";
+        applyBtn.style.fontWeight = "700";
+        applyBtn.style.lineHeight = "16px";
+        applyBtn.style.cursor = "pointer";
+        applyBtn.style.padding = "0";
+        applyBtn.style.zIndex = "10002";
+        applyBtn.style.display = s.pending_apply === true ? "block" : "none";
+        applyBtn.addEventListener("click", async (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const idx = state.selections.findIndex((x) => x.id === s.id);
+          if (idx < 0) return;
+          await extractAndApplySelectionText(state.selections[idx]);
+          state.selections[idx] = { ...state.selections[idx], pending_apply: false };
+          renderBboxes(app);
+        });
+        rect.appendChild(applyBtn);
+
         rect.addEventListener("click", (e) => {
           e.stopPropagation();
           setActiveField(s.field_id);
           document.getElementById(s.field_id)?.focus();
+        });
+
+        const handleDefs = [
+          { dir: "nw", x: 0, y: 0, cursor: "nwse-resize" },
+          { dir: "n", x: 50, y: 0, cursor: "ns-resize" },
+          { dir: "ne", x: 100, y: 0, cursor: "nesw-resize" },
+          { dir: "e", x: 100, y: 50, cursor: "ew-resize" },
+          { dir: "se", x: 100, y: 100, cursor: "nwse-resize" },
+          { dir: "s", x: 50, y: 100, cursor: "ns-resize" },
+          { dir: "sw", x: 0, y: 100, cursor: "nesw-resize" },
+          { dir: "w", x: 0, y: 50, cursor: "ew-resize" },
+        ];
+
+        handleDefs.forEach((h) => {
+          const handle = ownerDoc.createElement("div");
+          handle.className = `bbox-handle bbox-handle-${h.dir}`;
+          handle.style.position = "absolute";
+          handle.style.width = "8px";
+          handle.style.height = "8px";
+          handle.style.background = "#fff";
+          handle.style.border = `1px solid ${color}`;
+          handle.style.borderRadius = "2px";
+          handle.style.left = `${h.x}%`;
+          handle.style.top = `${h.y}%`;
+          handle.style.transform = "translate(-50%, -50%)";
+          handle.style.cursor = h.cursor;
+          handle.style.zIndex = "10001";
+          handle.style.pointerEvents = "auto";
+
+          handle.addEventListener("mousedown", (ev) => {
+            ev.preventDefault();
+            ev.stopPropagation();
+
+            const startMouseX = ev.clientX;
+            const startMouseY = ev.clientY;
+            const startRect = { left, top, width, height };
+            const minSize = 6;
+            const overlayWidth = overlay.clientWidth;
+            const overlayHeight = overlay.clientHeight;
+
+            const onMove = (mv) => {
+              const dx = mv.clientX - startMouseX;
+              const dy = mv.clientY - startMouseY;
+
+              let nl = startRect.left;
+              let nt = startRect.top;
+              let nw = startRect.width;
+              let nh = startRect.height;
+
+              if (h.dir.includes("e")) nw = startRect.width + dx;
+              if (h.dir.includes("s")) nh = startRect.height + dy;
+              if (h.dir.includes("w")) {
+                nl = startRect.left + dx;
+                nw = startRect.width - dx;
+              }
+              if (h.dir.includes("n")) {
+                nt = startRect.top + dy;
+                nh = startRect.height - dy;
+              }
+
+              if (nw < minSize) {
+                if (h.dir.includes("w")) nl -= minSize - nw;
+                nw = minSize;
+              }
+              if (nh < minSize) {
+                if (h.dir.includes("n")) nt -= minSize - nh;
+                nh = minSize;
+              }
+
+              nl = clamp(nl, 0, overlayWidth - minSize);
+              nt = clamp(nt, 0, overlayHeight - minSize);
+              nw = clamp(nw, minSize, overlayWidth - nl);
+              nh = clamp(nh, minSize, overlayHeight - nt);
+
+              rect.style.left = `${nl}px`;
+              rect.style.top = `${nt}px`;
+              rect.style.width = `${nw}px`;
+              rect.style.height = `${nh}px`;
+            };
+
+            const onUp = async () => {
+              ownerDoc.removeEventListener("mousemove", onMove);
+              ownerDoc.removeEventListener("mouseup", onUp);
+
+              const finalRect = {
+                left: parseFloat(rect.style.left || "0"),
+                top: parseFloat(rect.style.top || "0"),
+                width: parseFloat(rect.style.width || "0"),
+                height: parseFloat(rect.style.height || "0"),
+              };
+
+              const next = screenRectToPdfCoords(pageView, finalRect);
+              if (!next) return;
+
+              const idx = state.selections.findIndex((x) => x.id === s.id);
+              if (idx < 0) return;
+              state.selections[idx] = {
+                ...state.selections[idx],
+                ...next,
+                pending_apply: true,
+              };
+
+              renderBboxes(app);
+            };
+
+            ownerDoc.addEventListener("mousemove", onMove);
+            ownerDoc.addEventListener("mouseup", onUp);
+          });
+
+          rect.appendChild(handle);
         });
 
         overlay.appendChild(rect);

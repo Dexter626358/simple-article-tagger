@@ -297,6 +297,9 @@ Return only valid JSON without additional comments or explanations.
 - Preserve original formatting and punctuation.
 - Return as array of strings, one entry per element.
 - Use RUS and ENG arrays if both versions are present.
+- IMPORTANT: Do NOT route entries by entry language.
+- Route by list section only (where the entry was found).
+- English entries inside "Список литературы" must remain in RUS.
 ### References Structure Rules
 - If ONLY section titled "Список литературы" exists: put ALL entries in RUS array, ENG empty.
 - If a COMBINED list is present: put ALL entries in RUS array, ENG empty.
@@ -368,6 +371,8 @@ COLUMN ARTIFACTS:
 - Extract ABSOLUTELY ALL references from the input.
 - NEVER skip entries, even if damaged, unreadable, or incomplete.
 - DAMAGED ENTRIES: include as-is; do not repair or delete OCR noise.
+- If INPUT is non-empty and contains any bibliographic-looking text, OUTPUT MUST NOT be empty.
+- If boundaries are unclear, return fewer/larger entries rather than dropping content.
 - BEFORE returning JSON, perform an internal check:
   * Count entries in input: N_input.
   * If there is no numbering, estimate N_input by counting distinct reference-start patterns.

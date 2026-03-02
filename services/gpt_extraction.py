@@ -6,6 +6,7 @@
 
 import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -25,6 +26,62 @@ except ImportError:
 class GPTExtractionError(Exception):
     """Ошибки при извлечении метаданных с помощью GPT."""
     pass
+
+
+_RE_RUS_REFS_HEADER = re.compile(
+    r"(?im)^\s*(список\s+литературы|литература|библиография|источники)\s*[:.]?\s*$"
+)
+_RE_ENG_REFS_HEADER = re.compile(
+    r"(?im)^\s*references\s*[:.]?\s*$"
+)
+
+
+def _as_reference_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(x).strip() for x in value if str(x).strip()]
+    if isinstance(value, str):
+        return [x.strip() for x in value.splitlines() if x.strip()]
+    return []
+
+
+def _normalize_references_by_section(metadata: Dict[str, Any], article_text: str) -> Dict[str, Any]:
+    """
+    Normalize references allocation by section structure, not by entry language.
+    Rules:
+    - Only RU section in text -> all refs go to RUS.
+    - Only EN section in text -> all refs go to ENG.
+    - Both sections -> keep model split as-is.
+    - No clear section headers -> default all refs to RUS.
+    """
+    refs_block = metadata.get("references")
+    if not isinstance(refs_block, dict):
+        return metadata
+
+    refs_ru = _as_reference_list(refs_block.get("RUS"))
+    refs_eng = _as_reference_list(refs_block.get("ENG"))
+    if not refs_ru and not refs_eng:
+        return metadata
+
+    has_rus_section = bool(_RE_RUS_REFS_HEADER.search(article_text or ""))
+    has_eng_section = bool(_RE_ENG_REFS_HEADER.search(article_text or ""))
+    all_refs = [*refs_ru, *refs_eng]
+
+    if has_rus_section and not has_eng_section:
+        refs_block["RUS"] = all_refs
+        refs_block["ENG"] = []
+    elif has_eng_section and not has_rus_section:
+        refs_block["RUS"] = []
+        refs_block["ENG"] = all_refs
+    elif not has_rus_section and not has_eng_section:
+        refs_block["RUS"] = all_refs
+        refs_block["ENG"] = []
+    else:
+        # Both sections are present. Keep as provided by model.
+        refs_block["RUS"] = refs_ru
+        refs_block["ENG"] = refs_eng
+
+    metadata["references"] = refs_block
+    return metadata
 
 
 def hash_prompt(prompt: str) -> str:
@@ -280,6 +337,7 @@ def extract_metadata_with_gpt(
             except Exception as e:
                 print(f"⚠️  Ошибка при сохранении в кэш: {e}")
         
+        metadata = _normalize_references_by_section(metadata, text if not raw_prompt else "")
         print(f"✅ Метаданные успешно извлечены")
         return metadata
         

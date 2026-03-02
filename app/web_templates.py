@@ -2593,293 +2593,7 @@ HTML_TEMPLATE = """
         
         <!-- Глобальные JavaScript функции для работы с формой -->
         <script>
-        // Глобальные функции для работы с модальным окном списка литературы
-        function escapeHtml(text) {
-          const div = document.createElement("div");
-          div.textContent = text;
-          return div.innerHTML;
-        }
-        
-        let currentRefsFieldId = null;
-        
-        function viewReferences(fieldId, title) {
-          const field = document.getElementById(fieldId);
-          if (!field) return;
-          
-          currentRefsFieldId = fieldId;
-          
-          const refsText = field.value.trim();
-          if (!refsText) {
-            alert("Список литературы пуст");
-            return;
-          }
-          
-          const refs = refsText.split("\\n")
-            .map(s => s.trim())
-            .filter(Boolean);
-          
-          const modal = document.getElementById("refsModal");
-          const modalTitle = document.getElementById("modalTitle");
-          const refsList = document.getElementById("refsList");
-          
-          if (!modal || !modalTitle || !refsList) return;
-          
-          modalTitle.textContent = title;
-          refsList.innerHTML = "";
-          
-          if (refs.length === 0) {
-            refsList.innerHTML = "<p style='color:#999;text-align:center;padding:20px;'>Список литературы пуст</p>";
-          } else {
-            refs.forEach((ref, index) => {
-              const refItem = document.createElement("div");
-              refItem.className = "ref-item";
-              refItem.dataset.index = index;
-              const hasNext = index < refs.length - 1;
-              refItem.innerHTML = `
-                <span class="ref-number">${index + 1}.</span>
-                <span class="ref-text" contenteditable="true" spellcheck="false">${escapeHtml(ref)}</span>
-                <div class="ref-actions">
-                  ${hasNext ? `<button class="ref-action-btn merge" onclick="mergeWithNext(this)" title="Объединить со следующим">⇅</button>` : ''}
-                  <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
-                </div>
-              `;
-              attachRefTextHandlers(refItem);
-              refsList.appendChild(refItem);
-            });
-          }
-          
-          modal.classList.add("active");
-        }
-        
-        function syncReferencesField() {
-          if (!currentRefsFieldId) return;
-          const field = document.getElementById(currentRefsFieldId);
-          if (!field) return;
-          const refItems = document.querySelectorAll("#refsList .ref-item");
-          const refs = Array.from(refItems)
-            .map(item => {
-              const textSpan = item.querySelector(".ref-text");
-              return textSpan ? textSpan.textContent.trim() : "";
-            })
-            .filter(ref => ref.length > 0);
-          field.value = refs.join("\\n");
-          field.dispatchEvent(new Event("input", { bubbles: true }));
-          if (window.updateReferencesCount) {
-            window.updateReferencesCount(currentRefsFieldId);
-          }
-        }
-
-        function mergeWithNext(btn) {
-          const refItem = btn.closest(".ref-item");
-          if (!refItem) return;
-          
-          const nextItem = refItem.nextElementSibling;
-          if (!nextItem || !nextItem.classList.contains("ref-item")) {
-            alert("Нет следующего источника для объединения");
-            return;
-          }
-          
-          const currentText = refItem.querySelector(".ref-text")?.textContent.trim() || "";
-          const nextText = nextItem.querySelector(".ref-text")?.textContent.trim() || "";
-          
-          if (!currentText || !nextText) {
-            alert("Нельзя объединить пустые источники");
-            return;
-          }
-          
-          const mergedText = currentText + " " + nextText;
-          const currentTextSpan = refItem.querySelector(".ref-text");
-          if (currentTextSpan) {
-            currentTextSpan.textContent = mergedText;
-          }
-          nextItem.remove();
-          renumberReferences();
-          updateMergeButtons();
-          syncReferencesField();
-        }
-        
-        function updateMergeButtons() {
-          const refItems = document.querySelectorAll("#refsList .ref-item");
-          refItems.forEach((item, index) => {
-            const actions = item.querySelector(".ref-actions");
-            if (!actions) return;
-            
-            const hasNext = index < refItems.length - 1;
-            const existingMergeBtn = actions.querySelector(".ref-action-btn.merge");
-            
-            if (hasNext && !existingMergeBtn) {
-              const deleteBtn = actions.querySelector(".ref-action-btn.delete");
-              if (deleteBtn) {
-                const mergeBtn = document.createElement("button");
-                mergeBtn.className = "ref-action-btn merge";
-                mergeBtn.onclick = () => mergeWithNext(mergeBtn);
-                mergeBtn.title = "Объединить со следующим";
-                mergeBtn.textContent = "⇅";
-                actions.insertBefore(mergeBtn, deleteBtn);
-              }
-            } else if (!hasNext && existingMergeBtn) {
-              existingMergeBtn.remove();
-            }
-          });
-        }
-        
-        function deleteReference(btn) {
-          const refItem = btn.closest(".ref-item");
-          if (refItem && confirm("Удалить эту ссылку из списка?")) {
-            refItem.remove();
-            renumberReferences();
-            updateMergeButtons();
-          }
-        }
-        
-        function renumberReferences() {
-          const refItems = document.querySelectorAll("#refsList .ref-item");
-          refItems.forEach((item, index) => {
-            const numberSpan = item.querySelector(".ref-number");
-            if (numberSpan) {
-              numberSpan.textContent = (index + 1) + ".";
-            }
-          });
-          updateMergeButtons();
-        }
-
-        function attachRefTextHandlers(refItem) {
-          const refText = refItem.querySelector(".ref-text");
-          if (!refText) return;
-          refText.addEventListener("keydown", handleRefKeydown);
-        }
-
-        function handleRefKeydown(event) {
-          if (event.key !== "Enter") return;
-          event.preventDefault();
-          const refText = event.currentTarget;
-          splitReferenceAtCursor(refText);
-        }
-
-        function splitReferenceAtCursor(refText) {
-          const refItem = refText.closest(".ref-item");
-          if (!refItem) return;
-
-          const fullText = refText.textContent || "";
-          const caretOffset = getCaretOffset(refText);
-          const left = fullText.slice(0, caretOffset).trim();
-          const right = fullText.slice(caretOffset).trim();
-
-          if (!left && !right) return;
-
-          refText.textContent = left;
-
-          const newItem = document.createElement("div");
-          newItem.className = "ref-item";
-          newItem.innerHTML = `
-            <span class="ref-number"></span>
-            <span class="ref-text" contenteditable="true" spellcheck="false">${escapeHtml(right)}</span>
-            <div class="ref-actions">
-              <button class="ref-action-btn merge" onclick="mergeWithNext(this)" title="Объединить со следующим">⇅</button>
-              <button class="ref-action-btn delete" onclick="deleteReference(this)" title="Удалить">✕</button>
-            </div>
-          `;
-
-          refItem.insertAdjacentElement("afterend", newItem);
-          attachRefTextHandlers(newItem);
-          renumberReferences();
-          updateMergeButtons();
-          syncReferencesField();
-
-          const newText = newItem.querySelector(".ref-text");
-          if (newText) {
-            placeCaretAtStart(newText);
-          }
-        }
-
-        function getCaretOffset(element) {
-          const selection = window.getSelection();
-          if (!selection || selection.rangeCount === 0) {
-            return (element.textContent || "").length;
-          }
-          const range = selection.getRangeAt(0);
-          if (!element.contains(range.startContainer)) {
-            return (element.textContent || "").length;
-          }
-          const preRange = range.cloneRange();
-          preRange.selectNodeContents(element);
-          preRange.setEnd(range.startContainer, range.startOffset);
-          return preRange.toString().length;
-        }
-
-        function placeCaretAtStart(element) {
-          element.focus();
-          const range = document.createRange();
-          range.selectNodeContents(element);
-          range.collapse(true);
-          const selection = window.getSelection();
-          if (!selection) return;
-          selection.removeAllRanges();
-          selection.addRange(range);
-        }
-        
-        function saveEditedReferences() {
-          if (!currentRefsFieldId) return;
-          
-          const field = document.getElementById(currentRefsFieldId);
-          if (!field) return;
-          
-          const refItems = document.querySelectorAll("#refsList .ref-item");
-          const refs = Array.from(refItems)
-            .map(item => {
-              const textSpan = item.querySelector(".ref-text");
-              return textSpan ? textSpan.textContent.trim() : "";
-            })
-            .filter(ref => ref.length > 0);
-          
-          field.value = refs.join("\\n");
-          field.dispatchEvent(new Event("input", { bubbles: true }));
-          if (window.updateReferencesCount) {
-            window.updateReferencesCount(currentRefsFieldId);
-          }
-          closeRefsModal();
-          
-          const notification = document.createElement("div");
-          notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;";
-          notification.textContent = "Список литературы обновлен";
-          document.body.appendChild(notification);
-          setTimeout(() => {
-            notification.remove();
-          }, 2000);
-        }
-        
-        function closeRefsModal() {
-          const modal = document.getElementById("refsModal");
-          const modalContent = document.getElementById("refsModalContent");
-          const expandBtn = document.getElementById("refsModalExpandBtn");
-          if (modal) {
-            modal.classList.remove("active");
-            // Сбрасываем размер при закрытии
-            if (modalContent) {
-              modalContent.classList.remove("expanded");
-            }
-            if (expandBtn) {
-              expandBtn.classList.remove("expanded");
-            }
-          }
-        }
-        
-        function toggleRefsModalSize() {
-          const modalContent = document.getElementById("refsModalContent");
-          const expandBtn = document.getElementById("refsModalExpandBtn");
-          if (modalContent && expandBtn) {
-            const isExpanded = modalContent.classList.contains("expanded");
-            if (isExpanded) {
-              modalContent.classList.remove("expanded");
-              expandBtn.classList.remove("expanded");
-              expandBtn.title = "Увеличить окно";
-            } else {
-              modalContent.classList.add("expanded");
-              expandBtn.classList.add("expanded");
-              expandBtn.title = "Уменьшить окно";
-            }
-          }
-        }
+        // Функции модального окна списка литературы определены ниже (актуальная версия).
         
         let currentAnnotationFieldId = null;
 
@@ -7818,7 +7532,7 @@ MARKUP_TEMPLATE = r"""
   </div>
 </div>
 
-<script src="/static/pdf-bbox.js"></script>
+<script src="/static/pdf-bbox.js?v=20260228-applybtn"></script>
 <script>
   function initPdfBbox() {
     if (window.PdfBbox && typeof window.PdfBbox.init === "function") {
@@ -7832,6 +7546,7 @@ MARKUP_TEMPLATE = r"""
   function convertToViewportPoint() { return null; }
 </script>
 <script>
+console.debug("web_templates refs splitter v2026-02-28-3");
 // Глобальные функции для работы с модальным окном списка литературы
 function escapeHtml(text) {
   const div = document.createElement("div");
@@ -7843,6 +7558,18 @@ function normalizeReferencesText(text) {
   const original = text || "";
   if (!original.trim()) return original;
   let value = original;
+  // Разделяем записи, если после точки/восклицательного/вопросительного знака
+  // сразу идет маркер новой ссылки "Фамилия 2023 — ...".
+  value = value.replace(
+    /([.!?])\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*)/g,
+    "$1\n$2"
+  );
+  // Новый источник часто идет как "Фамилия 2023 — ..." и может быть склеен с предыдущим.
+  value = value.replace(/(\S)([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*)/g, "$1\n$2");
+  value = value.replace(
+    /(https?:\/\/\S+)\.?\s+([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*)/g,
+    "$1\n$2"
+  );
   value = value.replace(/(\S)([\u0410-\u042F\u0401][\u0430-\u044F\u0451]+\s+[\u0410-\u042F\u0401]\.[\u0410-\u042F\u0401]\.)/g, "$1\n$2");
   value = value.replace(/(\S)([A-Z][a-z]+\s+[A-Z]\.[A-Z]\.)/g, "$1\n$2");
   value = value.replace(/(https?:\/\/\S+)(?=[\u0410-\u042F\u0401A-Z])/g, "$1\n");
@@ -7864,7 +7591,9 @@ function normalizeReferenceWhitespace(text) {
 function splitReferences(text) {
   const cleaned = normalizeReferenceWhitespace(text);
   if (!cleaned.trim()) return [];
-  const numberedMatches = Array.from(cleaned.matchAll(/(^|\n)\s*(\d{1,3})\s*[).]/g));
+  // Нумерация источников должна иметь пробел после маркера: "1. " / "2) ".
+  // Это защищает DOI вида "10.24412/..." от ложного срабатывания.
+  const numberedMatches = Array.from(cleaned.matchAll(/(^|\n)\s*(\d{1,3})\s*[).]\s+/g));
   if (numberedMatches.length) {
     const refs = [];
     for (let i = 0; i < numberedMatches.length; i += 1) {
@@ -7882,10 +7611,8 @@ function splitReferences(text) {
     return refs;
   }
 
-  let working = cleaned;
-  if (!working.includes("\n")) {
-    working = normalizeReferencesText(working);
-  }
+  // Нормализуем всегда: в исходном тексте могут быть и переносы, и склейки внутри строк.
+  let working = normalizeReferencesText(cleaned);
   const lines = working
     .split("\n")
     .map((item) => item.trim())
@@ -7895,7 +7622,24 @@ function splitReferences(text) {
   let current = lines[0];
   for (let i = 1; i < lines.length; i += 1) {
     const line = lines[i];
-    const startsNew = /^[A-ZА-ЯЁ0-9]/.test(line);
+    // DOI/URL-строки почти всегда продолжение предыдущей записи.
+    const previousEndsWithRangeDash = /[–-]\s*$/u.test(current);
+    const pagesThenUrlContinuation = /^\d+\.\s+https?:\/\//i.test(line);
+    const pagesThenDoiContinuation = /^\d+\.\s+doi\s*:/i.test(line);
+    const isContinuation =
+      /^(doi\s*:|https?:\/\/|doi\.org\/|http:\/\/dx\.doi\.org\/|10\.\d{4,9}\/)/i.test(line) ||
+      /^\d+\s*[–-]\s*\d+\.?$/.test(line) || // диапазон страниц: "94-104."
+      /^[СC]\.?\s*\d+/i.test(line) || // "С. 94-104"
+      /^\d+\.$/.test(line) || // хвост страницы "104."
+      (previousEndsWithRangeDash && /^\d+/.test(line)) || // "С. 94–" + "104."
+      pagesThenUrlContinuation || // "104. https://..."
+      pagesThenDoiContinuation || // "104. DOI: ..."
+      /(?:doi\s*:|url\s*:)\s*$/i.test(current);
+    const startsNew = !isContinuation && (
+      /^(?:\[\d{1,3}\]|\d{1,3}[.)])\s+/.test(line) ||
+      /^[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*/.test(line) ||
+      /^[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+[A-ZА-ЯЁ]\.\s*[A-ZА-ЯЁ]\./.test(line)
+    );
     if (!startsNew) {
       current = `${current} ${line}`.trim();
     } else {
@@ -7904,6 +7648,52 @@ function splitReferences(text) {
     }
   }
   refs.push(current);
+  // Резервный сценарий: если всё еще один длинный блок, режем по "Фамилия Год —".
+  if (refs.length === 1 && refs[0].length > 300) {
+    const fallbackText = refs[0];
+    const markerRegex = /[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’.-]+\s+(?:18|19|20)\d{2}\s*[—–-]\s*/g;
+    const matches = Array.from(fallbackText.matchAll(markerRegex));
+    if (matches.length > 1) {
+      const parts = [];
+      const firstStart = matches[0].index ?? 0;
+      const prefix = fallbackText.slice(0, firstStart).trim();
+      for (let i = 0; i < matches.length; i += 1) {
+        const start = matches[i].index ?? 0;
+        const end = i + 1 < matches.length
+          ? (matches[i + 1].index ?? fallbackText.length)
+          : fallbackText.length;
+        let chunk = fallbackText.slice(start, end).trim();
+        if (i === 0 && prefix) {
+          chunk = `${prefix} ${chunk}`.trim();
+        }
+        if (chunk) parts.push(chunk);
+      }
+      if (parts.length > 1) return parts;
+    }
+
+    // Резерв 2: списки без "Год —", где записи идут как
+    // "Фамилия И. ..." или "Фамилия, Фамилия И. ...".
+    const byAuthorInitials = fallbackText
+      .replace(
+        /([.!?])\s+(?=([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’-]+(?:,\s*[A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’-]+)?\s+[A-ZА-ЯЁ](?:\.[A-ZА-ЯЁ])?\.(?!:)\s+[^\s]))/g,
+        "$1\n"
+      )
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (byAuthorInitials.length > 1) return byAuthorInitials;
+
+    // Резерв 3: упрощенно "Слово И. ...".
+    const bySimpleInitials = fallbackText
+      .replace(
+        /([.!?])\s+(?=([A-ZА-ЯЁ][A-Za-zА-Яа-яЁё'’-]+\s+[A-ZА-ЯЁ](?:\.[A-ZА-ЯЁ])?\.(?!:)\s+[^\s]))/g,
+        "$1\n"
+      )
+      .split("\n")
+      .map((item) => item.trim())
+      .filter(Boolean);
+    if (bySimpleInitials.length > 1) return bySimpleInitials;
+  }
   return refs;
 }
 
@@ -7914,6 +7704,96 @@ function splitReferencesStrict(text) {
     .split("\n")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function splitReferencesByYearDashBlob(text) {
+  const source = normalizeReferenceWhitespace(text).replace(/\s+/g, " ").trim();
+  if (!source) return [];
+  const markerRegex = /[A-ZА-ЯЁ][^\s]{1,40}\s+(?:18|19|20)\d{2}\s*[—–-]\s*/g;
+  const matches = Array.from(source.matchAll(markerRegex));
+  if (matches.length < 2) return [source];
+
+  const parts = [];
+  const firstStart = matches[0].index ?? 0;
+  const prefix = source.slice(0, firstStart).trim();
+  for (let i = 0; i < matches.length; i += 1) {
+    const start = matches[i].index ?? 0;
+    const end = i + 1 < matches.length
+      ? (matches[i + 1].index ?? source.length)
+      : source.length;
+    let chunk = source.slice(start, end).trim();
+    if (i === 0 && prefix) {
+      chunk = `${prefix} ${chunk}`.trim();
+    }
+    if (chunk) parts.push(chunk);
+  }
+  return parts.length ? parts : [source];
+}
+
+function splitReferencesBest(text, preferStrict = false) {
+  const strictRefs = splitReferencesStrict(text);
+  const smartRefs = splitReferences(text);
+  const blobRefs = splitReferencesByYearDashBlob(text);
+  if (preferStrict) {
+    // Если strict дал адекватный результат, оставляем его.
+    if (strictRefs.length > 1) return strictRefs;
+    // Иначе берем более информативное разбиение.
+    if (smartRefs.length > strictRefs.length) return smartRefs;
+    if (blobRefs.length > strictRefs.length) return blobRefs;
+    return strictRefs;
+  }
+  // Если в поле уже есть явный построчный список, не "улучшаем" его,
+  // чтобы не слипались корректно разделённые источники.
+  if (strictRefs.length > 1 && strictRefs.length >= smartRefs.length) return strictRefs;
+  if (smartRefs.length > 1) return smartRefs;
+  if (blobRefs.length > 1) return blobRefs;
+  return smartRefs.length ? smartRefs : strictRefs;
+}
+
+function buildDedupedSelectionText(lines) {
+  const out = [];
+  const seen = new Set();
+  (lines || []).forEach((line) => {
+    const raw = String(line || "");
+    const normalized = raw.replace(/\s+/g, " ").trim().toLowerCase();
+    if (!normalized) return;
+    if (seen.has(normalized)) return;
+    seen.add(normalized);
+    out.push(raw.trim());
+  });
+  return out.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function appendTextByOverlap(accum, newText) {
+  const normalize = (value) => String(value || "").replace(/\s+/g, " ").trim();
+  const current = normalize(accum);
+  const incoming = normalize(newText);
+  if (!current) return incoming;
+  if (!incoming) return current;
+  if (current.includes(incoming)) return current;
+
+  const maxLen = Math.min(current.length, incoming.length);
+  let overlap = 0;
+  for (let k = maxLen; k > 0; k -= 1) {
+    if (current.slice(-k) === incoming.slice(0, k)) {
+      overlap = k;
+      break;
+    }
+  }
+
+  const tail = incoming.slice(overlap).trim();
+  if (!tail) return current;
+  return `${current} ${tail}`.replace(/\s+/g, " ").trim();
+}
+
+function buildOverlapSelectionText(lines) {
+  let acc = "";
+  (lines || []).forEach((line) => {
+    const chunk = String(line || "").trim();
+    if (!chunk) return;
+    acc = appendTextByOverlap(acc, chunk);
+  });
+  return acc;
 }
 
 function ensureAnnotationSymbolsData() {
@@ -8514,7 +8394,7 @@ function viewReferences(fieldId, title) {
   currentRefsFieldId = fieldId;
   
   const useStrictSplit = field.dataset && field.dataset.aiProcessed === "1";
-  const refs = useStrictSplit ? splitReferencesStrict(field.value) : splitReferences(field.value);
+  const refs = splitReferencesBest(field.value, useStrictSplit);
   if (refs.length === 0) {
     alert("References list is empty");
     return;
@@ -10602,11 +10482,8 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
 
   window.countReferences = function(text, strict) {
     if (!text || !text.trim()) return 0;
-    if (strict && typeof splitReferencesStrict === "function") {
-      return splitReferencesStrict(text).length;
-    }
-    if (typeof splitReferences === "function") {
-      return splitReferences(text).length;
+    if (typeof splitReferencesBest === "function") {
+      return splitReferencesBest(text, !!strict).length;
     }
     const lines = text.split("\n")
       .map(line => line.trim())
@@ -10753,17 +10630,54 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
   function processReferences(texts) {
     const processed = [];
     texts.forEach(text => {
-      // Удаляем нумерацию в начале строки (например, "1. ", "2. "), но сохраняем остальной текст
-      let cleaned = String(text).replace(/^\d+\.\s*/, "").replace(/\t/g, " ").replace(/\s+/g, " ").trim();
+      // Удаляем только явную нумерацию источника, но не трогаем DOI вида "10.xxxx/...".
+      let cleaned = String(text)
+        .replace(/^(?:\[\d{1,3}\]|\d{1,3}[.)])\s+/, "")
+        .replace(/\t/g, " ")
+        .replace(/\s+/g, " ")
+        .trim();
       if (!cleaned) return;
-      const isUrl = /^(https?:\/\/|doi\.org\/|doi:\s*|http:\/\/dx\.doi\.org\/)/i.test(cleaned);
+      const isUrl = /^(https?:\/\/|doi\.org\/|doi:\s*|http:\/\/dx\.doi\.org\/|10\.\d{4,9}\/)/i.test(cleaned);
       if (isUrl && processed.length > 0) {
         processed[processed.length - 1] += " " + cleaned;
       } else {
         processed.push(cleaned);
       }
     });
-    return processed.filter(Boolean);
+
+    const normalizeRef = (value) => String(value || "")
+      .replace(/\s+/g, " ")
+      .replace(/\s*([,.;:])\s*/g, "$1 ")
+      .trim();
+    const extractDoi = (value) => {
+      const m = String(value || "").match(/\b(?:doi:\s*)?(10\.\d{4,9}\/[^\s,;]+)/i);
+      return m ? m[1].toLowerCase() : "";
+    };
+    const extractUrl = (value) => {
+      const m = String(value || "").match(/\bhttps?:\/\/[^\s)]+/i);
+      return m ? m[0].toLowerCase() : "";
+    };
+    const compactKey = (value) => String(value || "")
+      .toLowerCase()
+      .replace(/https?:\/\/\S+/g, "")
+      .replace(/\bdoi:\s*10\.\d{4,9}\/\S+/g, "")
+      .replace(/[^\p{L}\p{N}]+/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const unique = [];
+    const seen = new Set();
+    processed.forEach((item) => {
+      const normalized = normalizeRef(item);
+      if (!normalized) return;
+      const doi = extractDoi(normalized);
+      const url = extractUrl(normalized);
+      const key = doi ? `doi:${doi}` : (url ? `url:${url}` : `txt:${compactKey(normalized)}`);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      unique.push(normalized);
+    });
+    return unique;
   }
 
   window.extractUDC = extractUDC;
@@ -10774,7 +10688,7 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
   function mergeDoiUrlWithReferences(refs) {
     if (!refs || refs.length === 0) return refs;
     const result = [];
-    const doiUrlPattern = /^(https?:\/\/|doi\.org\/|doi:\s*|http:\/\/dx\.doi\.org\/)/i;
+    const doiUrlPattern = /^(https?:\/\/|doi\.org\/|doi:\s*|http:\/\/dx\.doi\.org\/|10\.\d{4,9}\/)/i;
     refs.forEach(ref => {
       const cleaned = String(ref).trim();
       if (!cleaned) return;
@@ -11103,8 +11017,10 @@ function applySelectionToField(fieldId) {
         autoResizeKeywordsField(fieldId);
       }, 100);
     } else if (fieldId === "references_ru" || fieldId === "references_en") {
-      const refs = processReferences(texts);
-      value = refs.join("\n");
+      const existingRefs = processReferences(splitReferencesBest(field.value || "", false));
+      const newRefs = processReferences(texts);
+      const mergedRefs = processReferences([...existingRefs, ...newRefs]);
+      value = mergedRefs.join("\n");
       // Обновляем счетчик после установки значения
       setTimeout(() => {
         if (window.updateReferencesCount) {
@@ -11128,12 +11044,15 @@ function applySelectionToField(fieldId) {
         value = fullText.replace(udcRe, "").trim();
       }
     } else if (fieldId === "funding" || fieldId === "funding_en") {
-      const funding = processFunding(fullText, fieldId === "funding_en" ? "en" : "ru");
-      value = funding;
+      const extractedFunding = buildOverlapSelectionText(texts) || fullText;
+      const funding = processFunding(extractedFunding, fieldId === "funding_en" ? "en" : "ru");
+      value = appendTextByOverlap(field.value || "", funding);
     } else if (fieldId === "annotation" || fieldId === "annotation_en") {
       // Для аннотации при вставке из выделения автоматически удаляем только префикс.
       const lang = fieldId === "annotation_en" ? "en" : "ru";
-      value = window.removeAnnotationPrefix(fullText, lang).trim();
+      const dedupedText = buildOverlapSelectionText(texts) || buildDedupedSelectionText(texts) || fullText;
+      const cleanedAnnotation = window.removeAnnotationPrefix(dedupedText, lang).trim();
+      value = appendTextByOverlap(field.value || "", cleanedAnnotation);
       const htmlField = getAnnotationHtmlField(fieldId);
       if (htmlField) {
         htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(value));
@@ -11661,7 +11580,15 @@ function applySelectionToField(fieldId) {
           });
 
           const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
-          const refsTarget = chooseTargetField(crossrefReferencesEnField, crossrefReferencesRuField);
+          const publLangField = document.getElementById("publ_lang");
+          const publLang = String(publLangField?.value || "").toUpperCase();
+          let refsTarget = crossrefReferencesRuField || crossrefReferencesEnField;
+          if (publLang === "ENG" && crossrefReferencesEnField) {
+            refsTarget = crossrefReferencesEnField;
+          } else if (crossrefReferencesRuField && !normalizeText(crossrefReferencesRuField.value) && crossrefReferencesEnField) {
+            // If RU is empty and EN already has user data, avoid overwriting RU by default.
+            if (normalizeText(crossrefReferencesEnField.value)) refsTarget = crossrefReferencesEnField;
+          }
           addSuggestion({
             label: "Список литературы / References",
             currentValue: refsTarget?.value || "",

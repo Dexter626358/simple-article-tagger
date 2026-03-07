@@ -45,12 +45,14 @@ try:
         form_data_to_json_structure,
         json_structure_to_form_data,
         find_docx_for_json,
+        _normalize_empty_field,
     )
     JSON_METADATA_AVAILABLE = True
 except ImportError:
     JSON_METADATA_AVAILABLE = False
     load_json_metadata = None
     save_json_metadata = None
+    _normalize_empty_field = None
     form_data_to_json_structure = None
     json_structure_to_form_data = None
     find_docx_for_json = None

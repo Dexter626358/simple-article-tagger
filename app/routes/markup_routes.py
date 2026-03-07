@@ -19,10 +19,23 @@ from app.app_dependencies import (
     form_data_to_json_structure,
     json_structure_to_form_data,
     find_docx_for_json,
+    _normalize_empty_field,
 )
 from app.app_helpers import convert_file_to_html, merge_doi_url_in_html, save_issue_state, is_json_processed
 from app.web_templates import VIEWER_TEMPLATE, MARKUP_TEMPLATE
 from app.session_utils import get_session_input_dir
+
+def _norm_empty(val):
+    """Пустые поля и прочерки (—, –, -) → пустая строка, не подставляем «—»."""
+    if _normalize_empty_field is not None:
+        return _normalize_empty_field(val)
+    if val is None:
+        return ""
+    s = str(val).strip()
+    if not s or re.match(r"^[\s\-–—\u2013\u2014]+$", s):
+        return ""
+    return s
+
 
 def register_markup_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
@@ -795,7 +808,9 @@ def register_markup_routes(app, ctx):
                     s = _normalize_ref_item(raw)
                     if not s:
                         continue
-                    doi_m = re.search(r"\b(?:doi:\s*)?(10\.\d{4,9}/[^\s,;]+)", s, re.IGNORECASE)
+                    s_for_doi = re.sub(r"[\u00AD\u200B-\u200F\u2060\uFEFF]", "", s)
+                    s_for_doi = re.sub(r"\s*([/-])\s*", r"\1", s_for_doi)
+                    doi_m = re.search(r"\b(?:doi:\s*)?(10\.\d{4,9}/[^\s,;]+)", s_for_doi, re.IGNORECASE)
                     url_m = re.search(r"\bhttps?://[^\s)]+", s, re.IGNORECASE)
                     if doi_m:
                         key = f"doi:{doi_m.group(1).lower()}"
@@ -1257,20 +1272,130 @@ def register_markup_routes(app, ctx):
                     continue
                 line = _format_reference_line(ref)
                 if line:
-                    references.append(line)
+                    line = _norm_empty(line)
+                    if line:
+                        references.append(line)
+            authors_list = payload.get("authors") or []
+            authors_list = [
+                {k: _norm_empty(v) if isinstance(v, str) else v for k, v in (a if isinstance(a, dict) else {}).items()}
+                for a in authors_list
+            ]
             return jsonify(
                 success=True,
-                doi=payload.get("doi"),
-                title=payload.get("title"),
-                original_title=payload.get("original_title"),
-                abstract=payload.get("abstract"),
-                authors=payload.get("authors") or [],
+                doi=_norm_empty(payload.get("doi")),
+                title=_norm_empty(payload.get("title")),
+                original_title=_norm_empty(payload.get("original_title")),
+                abstract=_norm_empty(payload.get("abstract")),
+                authors=authors_list,
                 references=references,
             )
         except Exception as e:
             current_app.logger.exception("SYSTEM crossref update error: %s", e)
             return jsonify(success=False, error=str(e)), 500
-    
+
+    @app.route("/mtfr-update", methods=["POST"])
+    def mtfr_update():
+        data = request.get_json(silent=True) or {}
+        doi = (data.get("doi") or "").strip()
+        title = (data.get("title") or "").strip()
+        if not doi and not title:
+            return jsonify(success=False, error="Укажите DOI или название статьи."), 400
+        try:
+            from mtfr_updater import update_article_by_doi as mtfr_update_article_by_doi
+        except Exception as e:
+            current_app.logger.exception("SYSTEM mtfr import error: %s", e)
+            return jsonify(success=False, error="Модуль MTFR недоступен."), 500
+        config_path = Path("config.json")
+        config = json.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+        try:
+            payload = mtfr_update_article_by_doi(doi, config, title=title)
+            # Конкретная причина ошибки (вход не выполнен, публикация не найдена и т.д.)
+            if payload.get("error"):
+                return jsonify(
+                    success=False,
+                    error=payload.get("error_message", "Не удалось получить данные из MTFR."),
+                ), 200
+            raw_payload = payload.get("raw")
+            if raw_payload is None:
+                return jsonify(
+                    success=False,
+                    error="Не удалось получить данные из MTFR. Публикация не найдена по DOI или нет доступа к Метафоре (проверьте логин и пароль в config.json).",
+                ), 200
+            if isinstance(raw_payload, dict):
+                session_input_dir = get_session_input_dir(_input_files_dir)
+                state_dir = session_input_dir / "state" / "mtfr"
+                state_dir.mkdir(parents=True, exist_ok=True)
+                safe_doi = re.sub(r"[^A-Za-z0-9._-]+", "_", doi) if doi else re.sub(r"[^A-Za-z0-9._-]+", "_", (title or "")[:50]) or "no_doi"
+                timestamp = int(time.time())
+                raw_path = state_dir / f"mtfr_{safe_doi}_{timestamp}.json"
+                with raw_path.open("w", encoding="utf-8") as handle:
+                    json.dump(raw_payload, handle, ensure_ascii=False, indent=2)
+
+            def _refs_to_list(refs):
+                out = []
+                for ref in refs or []:
+                    if isinstance(ref, str):
+                        if ref.strip():
+                            out.append(ref.strip())
+                    elif isinstance(ref, dict):
+                        unstructured = str(ref.get("unstructured") or ref.get("text") or "").strip()
+                        if unstructured:
+                            out.append(unstructured)
+                        else:
+                            parts = [ref.get(k) for k in ("author", "title", "journal", "year", "volume", "first_page", "doi") if ref.get(k)]
+                            line = ". ".join(str(p).strip() for p in parts).strip()
+                            if line:
+                                out.append(line)
+                return out
+
+            references = _refs_to_list(payload.get("references"))
+            references = [_norm_empty(r) for r in references if _norm_empty(r)]
+            references_ru = payload.get("references_ru")
+            references_en = payload.get("references_en")
+            if isinstance(references_ru, list):
+                references_ru = [_norm_empty(r) for r in references_ru if _norm_empty(r)]
+            else:
+                references_ru = []
+            if isinstance(references_en, list):
+                references_en = [_norm_empty(r) for r in references_en if _norm_empty(r)]
+            else:
+                references_en = []
+
+            title = _norm_empty(payload.get("title"))
+            original_title = _norm_empty(payload.get("original_title"))
+            abstract = _norm_empty(payload.get("abstract"))
+            abstract_ru = _norm_empty(payload.get("abstract_ru"))
+            abstract_en = _norm_empty(payload.get("abstract_en"))
+            authors_list = payload.get("authors") or []
+            authors_list = [
+                {k: _norm_empty(v) if isinstance(v, str) else v for k, v in (a if isinstance(a, dict) else {}).items()}
+                for a in authors_list
+            ]
+            has_any = bool(
+                title or original_title or abstract or abstract_ru or abstract_en
+                or references or references_ru or references_en or authors_list
+            )
+            if not has_any:
+                return jsonify(
+                    success=False,
+                    error="Данные из MTFR получены, но метаданные пусты (не удалось извлечь заголовок, аннотацию или список литературы).",
+                ), 200
+            return jsonify(
+                success=True,
+                doi=_norm_empty(payload.get("doi")),
+                title=title,
+                original_title=original_title,
+                abstract=abstract,
+                abstract_ru=abstract_ru,
+                abstract_en=abstract_en,
+                authors=authors_list,
+                references=references,
+                references_ru=references_ru,
+                references_en=references_en,
+            )
+        except Exception as e:
+            current_app.logger.exception("SYSTEM mtfr update error: %s", e)
+            return jsonify(success=False, error=str(e)), 500
 
     @app.route("/markup/<path:json_filename>/save", methods=["POST"])
     def save_metadata(json_filename: str):

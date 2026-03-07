@@ -82,6 +82,20 @@ def annotation_html_to_plain_text(html_text: Any) -> str:
     return text
 
 
+def _normalize_empty_field(value: Any) -> str:
+    """
+    Прочерки (—, –, -) и пустые значения не подставляем в поля — возвращаем пустую строку.
+    """
+    if value is None:
+        return ""
+    s = str(value).strip()
+    if not s:
+        return ""
+    if re.match(r"^[\s\-–—\u2013\u2014]+$", s):
+        return ""
+    return s
+
+
 def load_json_metadata(json_path: Path) -> Dict[str, Any]:
     """
     Загружает JSON файл с метаданными.
@@ -154,108 +168,123 @@ def form_data_to_json_structure(form_data: Dict[str, Any], existing_json: Option
     if "pages" not in result:
         result["pages"] = ""
     
-    # Маппинг полей формы на структуру JSON
+    # Маппинг полей формы на структуру JSON (прочерки — не сохраняем, оставляем поле пустым)
     # Названия
-    if "title" in form_data and form_data["title"]:
-        result["artTitles"]["RUS"] = str(form_data["title"]).strip()
-    if "title_en" in form_data and form_data["title_en"]:
-        result["artTitles"]["ENG"] = str(form_data["title_en"]).strip()
+    if "title" in form_data:
+        v = _normalize_empty_field(form_data["title"])
+        if v:
+            result["artTitles"]["RUS"] = v
+    if "title_en" in form_data:
+        v = _normalize_empty_field(form_data["title_en"])
+        if v:
+            result["artTitles"]["ENG"] = v
     
     # Аннотации
-    if "annotation" in form_data and form_data["annotation"]:
-        result["abstracts"]["RUS"] = str(form_data["annotation"]).strip()
-    if "annotation_en" in form_data and form_data["annotation_en"]:
-        result["abstracts"]["ENG"] = str(form_data["annotation_en"]).strip()
-    # Если пришел HTML из редактора, сохраняем его в существующие поля abstracts.
+    if "annotation" in form_data:
+        v = _normalize_empty_field(form_data["annotation"])
+        if v:
+            result["abstracts"]["RUS"] = v
+    if "annotation_en" in form_data:
+        v = _normalize_empty_field(form_data["annotation_en"])
+        if v:
+            result["abstracts"]["ENG"] = v
     if "annotation_html" in form_data:
         sanitized = sanitize_annotation_html(form_data.get("annotation_html"))
-        if sanitized:
+        if sanitized and _normalize_empty_field(sanitized):
             result["abstracts"]["RUS"] = sanitized
     if "annotation_en_html" in form_data:
         sanitized = sanitize_annotation_html(form_data.get("annotation_en_html"))
-        if sanitized:
+        if sanitized and _normalize_empty_field(sanitized):
             result["abstracts"]["ENG"] = sanitized
     # Удаляем legacy-ключ, если был создан ранее.
     if "abstractsHtml" in result:
         result.pop("abstractsHtml", None)
     
-    # Ключевые слова
+    # Ключевые слова (прочерки не сохраняем)
     if "keywords" in form_data:
         keywords_ru = form_data["keywords"]
         if isinstance(keywords_ru, str):
-            # Разбиваем по разделителям
             if ";" in keywords_ru:
-                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(";") if k.strip()]
+                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(";") if _normalize_empty_field(k)]
             elif "," in keywords_ru:
-                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(",") if k.strip()]
+                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(",") if _normalize_empty_field(k)]
             else:
-                result["keywords"]["RUS"] = [keywords_ru.strip()] if keywords_ru.strip() else []
+                result["keywords"]["RUS"] = [keywords_ru.strip()] if _normalize_empty_field(keywords_ru) else []
         elif isinstance(keywords_ru, list):
-            result["keywords"]["RUS"] = [str(k).strip() for k in keywords_ru if str(k).strip()]
-    
+            result["keywords"]["RUS"] = [str(k).strip() for k in keywords_ru if _normalize_empty_field(k)]
     if "keywords_en" in form_data:
         keywords_en = form_data["keywords_en"]
         if isinstance(keywords_en, str):
             if ";" in keywords_en:
-                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(";") if k.strip()]
+                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(";") if _normalize_empty_field(k)]
             elif "," in keywords_en:
-                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(",") if k.strip()]
+                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(",") if _normalize_empty_field(k)]
             else:
-                result["keywords"]["ENG"] = [keywords_en.strip()] if keywords_en.strip() else []
+                result["keywords"]["ENG"] = [keywords_en.strip()] if _normalize_empty_field(keywords_en) else []
         elif isinstance(keywords_en, list):
-            result["keywords"]["ENG"] = [str(k).strip() for k in keywords_en if str(k).strip()]
+            result["keywords"]["ENG"] = [str(k).strip() for k in keywords_en if _normalize_empty_field(k)]
     
-    # Список литературы
+    # Список литературы (строки только из прочерков не сохраняем)
     if "references_ru" in form_data:
         refs_ru = form_data["references_ru"]
         if isinstance(refs_ru, str):
-            refs_list = [r.strip() for r in refs_ru.split("\n") if r.strip()]
+            refs_list = [r.strip() for r in refs_ru.split("\n") if _normalize_empty_field(r)]
         elif isinstance(refs_ru, list):
-            refs_list = [str(r).strip() for r in refs_ru if str(r).strip()]
+            refs_list = [str(r).strip() for r in refs_ru if _normalize_empty_field(r)]
         else:
             refs_list = []
         result["references"]["RUS"] = merge_doi_url_with_references(refs_list)
-    
     if "references_en" in form_data:
         refs_en = form_data["references_en"]
         if isinstance(refs_en, str):
-            refs_list = [r.strip() for r in refs_en.split("\n") if r.strip()]
+            refs_list = [r.strip() for r in refs_en.split("\n") if _normalize_empty_field(r)]
         elif isinstance(refs_en, list):
-            refs_list = [str(r).strip() for r in refs_en if str(r).strip()]
+            refs_list = [str(r).strip() for r in refs_en if _normalize_empty_field(r)]
         else:
             refs_list = []
         result["references"]["ENG"] = merge_doi_url_with_references(refs_list)
     
     # Коды
-    if "udc" in form_data and form_data["udc"]:
-        result["codes"]["udk"] = str(form_data["udc"]).strip()
-    if "doi" in form_data and form_data["doi"]:
-        result["codes"]["doi"] = str(form_data["doi"]).strip()
-    if "bbk" in form_data and form_data["bbk"]:
-        result["codes"]["bbk"] = str(form_data["bbk"]).strip()
-    if "edn" in form_data and form_data["edn"]:
-        result["codes"]["edn"] = str(form_data["edn"]).strip()
+    if "udc" in form_data:
+        v = _normalize_empty_field(form_data["udc"])
+        if v:
+            result["codes"]["udk"] = v
+    if "doi" in form_data:
+        v = _normalize_empty_field(form_data["doi"])
+        if v:
+            result["codes"]["doi"] = v
+    if "bbk" in form_data:
+        v = _normalize_empty_field(form_data["bbk"])
+        if v:
+            result["codes"]["bbk"] = v
+    if "edn" in form_data:
+        v = _normalize_empty_field(form_data["edn"])
+        if v:
+            result["codes"]["edn"] = v
     
     # Даты
-    if "received_date" in form_data and form_data["received_date"]:
-        # Преобразуем формат даты в YYYY-MM-DD если нужно
-        date_str = str(form_data["received_date"]).strip()
-        result["dates"]["dateReceived"] = normalize_date(date_str)
-    
-    if "accepted_date" in form_data and form_data["accepted_date"]:
-        date_str = str(form_data["accepted_date"]).strip()
-        result["dates"]["dateAccepted"] = normalize_date(date_str)
-    
-    if "date_publication" in form_data and form_data["date_publication"]:
-        date_str = str(form_data["date_publication"]).strip()
-        result["dates"]["datePublication"] = normalize_date(date_str)
+    if "received_date" in form_data:
+        date_str = _normalize_empty_field(form_data["received_date"])
+        if date_str:
+            result["dates"]["dateReceived"] = normalize_date(date_str)
+    if "accepted_date" in form_data:
+        date_str = _normalize_empty_field(form_data["accepted_date"])
+        if date_str:
+            result["dates"]["dateAccepted"] = normalize_date(date_str)
+    if "date_publication" in form_data:
+        date_str = _normalize_empty_field(form_data["date_publication"])
+        if date_str:
+            result["dates"]["datePublication"] = normalize_date(date_str)
     
     # Тип статьи и язык публикации
-    if "art_type" in form_data and form_data["art_type"]:
-        result["artType"] = str(form_data["art_type"]).strip()
-    
-    if "publ_lang" in form_data and form_data["publ_lang"]:
-        result["PublLang"] = str(form_data["publ_lang"]).strip()
+    if "art_type" in form_data:
+        v = _normalize_empty_field(form_data["art_type"])
+        if v:
+            result["artType"] = v
+    if "publ_lang" in form_data:
+        v = _normalize_empty_field(form_data["publ_lang"])
+        if v:
+            result["PublLang"] = v
     
     # Авторы (обрабатываем данные из раскрывающегося меню)
     if "authors" in form_data and form_data["authors"]:
@@ -265,22 +294,30 @@ def form_data_to_json_structure(form_data: Dict[str, Any], existing_json: Option
     # Если авторов нет в форме, но есть в existing_json, оставляем их как есть
     
     # Страницы
-    if "pages" in form_data and form_data["pages"]:
-        result["pages"] = str(form_data["pages"]).strip()
+    if "pages" in form_data:
+        v = _normalize_empty_field(form_data["pages"])
+        if v:
+            result["pages"] = v
     
     # Финансирование
-    if "funding" in form_data and form_data["funding"]:
-        result["fundings"]["RUS"] = str(form_data["funding"]).strip()
-    
-    if "funding_en" in form_data and form_data["funding_en"]:
-        result["fundings"]["ENG"] = str(form_data["funding_en"]).strip()
+    if "funding" in form_data:
+        v = _normalize_empty_field(form_data["funding"])
+        if v:
+            result["fundings"]["RUS"] = v
+    if "funding_en" in form_data:
+        v = _normalize_empty_field(form_data["funding_en"])
+        if v:
+            result["fundings"]["ENG"] = v
     
     # Краткое сообщение
-    if "short_message" in form_data and form_data["short_message"]:
-        result["shortMessage"]["RUS"] = str(form_data["short_message"]).strip()
-    
-    if "short_message_en" in form_data and form_data["short_message_en"]:
-        result["shortMessage"]["ENG"] = str(form_data["short_message_en"]).strip()
+    if "short_message" in form_data:
+        v = _normalize_empty_field(form_data["short_message"])
+        if v:
+            result["shortMessage"]["RUS"] = v
+    if "short_message_en" in form_data:
+        v = _normalize_empty_field(form_data["short_message_en"])
+        if v:
+            result["shortMessage"]["ENG"] = v
     
     return result
 
@@ -303,66 +340,66 @@ def json_structure_to_form_data(json_data: Dict[str, Any]) -> Dict[str, Any]:
 
     form_data = {}
     
-    # Названия
-    form_data["title"] = json_data.get("artTitles", {}).get("RUS", "")
-    form_data["title_en"] = json_data.get("artTitles", {}).get("ENG", "")
+    # Названия (прочерки не подставляем — оставляем поле пустым)
+    form_data["title"] = _normalize_empty_field(json_data.get("artTitles", {}).get("RUS", ""))
+    form_data["title_en"] = _normalize_empty_field(json_data.get("artTitles", {}).get("ENG", ""))
     
     # Аннотации
     abstracts_ru = str(json_data.get("abstracts", {}).get("RUS", "") or "")
     abstracts_en = str(json_data.get("abstracts", {}).get("ENG", "") or "")
-    # Для textarea показываем читаемый текст, для редактора - sanitized HTML из тех же полей.
-    form_data["annotation"] = annotation_html_to_plain_text(abstracts_ru) if "<" in abstracts_ru else abstracts_ru
-    form_data["annotation_en"] = annotation_html_to_plain_text(abstracts_en) if "<" in abstracts_en else abstracts_en
+    if _normalize_empty_field(abstracts_ru) == "":
+        abstracts_ru = ""
+    if _normalize_empty_field(abstracts_en) == "":
+        abstracts_en = ""
+    form_data["annotation"] = annotation_html_to_plain_text(abstracts_ru) if "<" in abstracts_ru else _normalize_empty_field(abstracts_ru)
+    form_data["annotation_en"] = annotation_html_to_plain_text(abstracts_en) if "<" in abstracts_en else _normalize_empty_field(abstracts_en)
     form_data["annotation_html"] = sanitize_annotation_html(abstracts_ru)
     form_data["annotation_en_html"] = sanitize_annotation_html(abstracts_en)
     
     # Ключевые слова
     keywords_ru = json_data.get("keywords", {}).get("RUS", [])
-    form_data["keywords"] = "; ".join(keywords_ru) if isinstance(keywords_ru, list) else str(keywords_ru)
-    
+    form_data["keywords"] = _normalize_empty_field("; ".join(keywords_ru) if isinstance(keywords_ru, list) else str(keywords_ru))
     keywords_en = json_data.get("keywords", {}).get("ENG", [])
-    form_data["keywords_en"] = "; ".join(keywords_en) if isinstance(keywords_en, list) else str(keywords_en)
+    form_data["keywords_en"] = _normalize_empty_field("; ".join(keywords_en) if isinstance(keywords_en, list) else str(keywords_en))
     
     # Список литературы
     refs_ru = json_data.get("references", {}).get("RUS", [])
-    form_data["references_ru"] = "\n".join(refs_ru) if isinstance(refs_ru, list) else str(refs_ru)
-    
+    form_data["references_ru"] = "\n".join(r for r in (refs_ru if isinstance(refs_ru, list) else []) if _normalize_empty_field(r))
     refs_en = json_data.get("references", {}).get("ENG", [])
-    form_data["references_en"] = "\n".join(refs_en) if isinstance(refs_en, list) else str(refs_en)
+    form_data["references_en"] = "\n".join(r for r in (refs_en if isinstance(refs_en, list) else []) if _normalize_empty_field(r))
     
     # Коды
-    form_data["udc"] = json_data.get("codes", {}).get("udk", "")
-    form_data["doi"] = json_data.get("codes", {}).get("doi", "")
-    form_data["bbk"] = json_data.get("codes", {}).get("bbk", "")
-    form_data["edn"] = json_data.get("codes", {}).get("edn", "")
+    form_data["udc"] = _normalize_empty_field(json_data.get("codes", {}).get("udk", ""))
+    form_data["doi"] = _normalize_empty_field(json_data.get("codes", {}).get("doi", ""))
+    form_data["bbk"] = _normalize_empty_field(json_data.get("codes", {}).get("bbk", ""))
+    form_data["edn"] = _normalize_empty_field(json_data.get("codes", {}).get("edn", ""))
     
     # Даты
-    form_data["received_date"] = json_data.get("dates", {}).get("dateReceived", "")
-    form_data["accepted_date"] = json_data.get("dates", {}).get("dateAccepted", "")
-    form_data["date_publication"] = json_data.get("dates", {}).get("datePublication", "")
+    form_data["received_date"] = _normalize_empty_field(json_data.get("dates", {}).get("dateReceived", ""))
+    form_data["accepted_date"] = _normalize_empty_field(json_data.get("dates", {}).get("dateAccepted", ""))
+    form_data["date_publication"] = _normalize_empty_field(json_data.get("dates", {}).get("datePublication", ""))
     
     # Тип статьи и язык публикации
-    form_data["art_type"] = json_data.get("artType", "")
-    form_data["publ_lang"] = json_data.get("PublLang", "")
+    form_data["art_type"] = _normalize_empty_field(json_data.get("artType", ""))
+    form_data["publ_lang"] = _normalize_empty_field(json_data.get("PublLang", ""))
     
     # Авторы (передаем полную структуру для раскрывающегося меню)
     authors = json_data.get("authors", [])
     if authors and isinstance(authors, list):
-        # Передаем полную структуру авторов
         form_data["authors"] = authors
     else:
         form_data["authors"] = []
     
     # Страницы
-    form_data["pages"] = json_data.get("pages", "")
+    form_data["pages"] = _normalize_empty_field(json_data.get("pages", ""))
     
-    # Финансирование (раздельно для русского и английского)
-    form_data["funding"] = json_data.get("fundings", {}).get("RUS", "")
-    form_data["funding_en"] = json_data.get("fundings", {}).get("ENG", "")
+    # Финансирование
+    form_data["funding"] = _normalize_empty_field(json_data.get("fundings", {}).get("RUS", ""))
+    form_data["funding_en"] = _normalize_empty_field(json_data.get("fundings", {}).get("ENG", ""))
     
     # Краткое сообщение
-    form_data["short_message"] = json_data.get("shortMessage", {}).get("RUS", "")
-    form_data["short_message_en"] = json_data.get("shortMessage", {}).get("ENG", "")
+    form_data["short_message"] = _normalize_empty_field(json_data.get("shortMessage", {}).get("RUS", ""))
+    form_data["short_message_en"] = _normalize_empty_field(json_data.get("shortMessage", {}).get("ENG", ""))
     
     return form_data
 

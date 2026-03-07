@@ -104,9 +104,17 @@
     "base_url": "https://api.mistral.ai/v1",
     "temperature": 0.2
   },
+  "mtfr": {
+    "base_url": "https://metafora.rcsi.science",
+    "api_url": "",
+    "api_key": "",
+    "login": "",
+    "password": ""
+  },
   "_comment": {
     "gpt_extraction.api_key": "Рекомендуется использовать переменную окружения OPENAI_API_KEY вместо указания ключа здесь. Если ключ указан здесь, он будет использован только если переменная окружения не установлена.",
     "pdf_to_html.use_mistral": "Включить использование Mistral AI для улучшения конвертации PDF в HTML",
-    "llm": "Общие настройки для LLM провайдеров (Mistral, OpenAI и т.д.)"
+    "llm": "Общие настройки для LLM провайдеров (Mistral, OpenAI и т.д.)",
+    "mtfr": "Подтягивание из ИС Метафора: base_url, login, password (METAFORA_BASE_URL, METAFORA_LOGIN, METAFORA_PASSWORD). Либо внешний API: api_url, api_key (MTFR_API_URL, MTFR_API_KEY)."
   }
 }

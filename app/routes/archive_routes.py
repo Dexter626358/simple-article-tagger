@@ -477,17 +477,28 @@ def register_archive_routes(app, ctx):
                     },
                 )
             except Exception as e:
+                err_msg = str(e).strip()
+                if not err_msg:
+                    err_msg = repr(e)
+                if "connection" in err_msg.lower() or "connect" in err_msg.lower() or "ConnectionError" in type(e).__name__:
+                    friendly = (
+                        "Ошибка соединения с API LLM (OpenAI/Mistral). "
+                        "Проверьте: интернет, прокси/VPN, доступность api.openai.com или base_url в config (gpt_extraction/llm). "
+                        f"Детали: {err_msg}"
+                    )
+                else:
+                    friendly = f"Ошибка обработки: {err_msg}"
                 with progress_lock:
                     progress_state.update({
                         "status": "error",
-                        "message": f"Ошибка обработки: {e}"
+                        "message": friendly,
                     })
                 save_issue_state(
                     session_input_dir,
                     archive_name,
                     {
                         "status": "error",
-                        "message": f"Ошибка обработки: {e}",
+                        "message": friendly,
                         "archive": archive_name,
                     },
                 )

@@ -35,6 +35,74 @@ _RE_ENG_REFS_HEADER = re.compile(
     r"(?im)^\s*references\s*[:.]?\s*$"
 )
 
+_RE_INVISIBLE = re.compile(r"[\u00AD\u200B-\u200F\u2060\uFEFF]")
+
+
+def _normalize_text_for_doi(text: str) -> str:
+    s = str(text or "")
+    s = _RE_INVISIBLE.sub("", s)
+    s = re.sub(r"\s*([/-])\s*", r"\1", s)
+    return s
+
+
+def _extract_best_doi(article_text: str) -> str:
+    """
+    Extract DOI from text, gluing fragments split by spaces/newlines.
+    Continuation may be: "2-192", "-192", "2" (then later "-192"), etc.
+    """
+    s = _normalize_text_for_doi(article_text or "")
+    m = re.search(r"\b10\.\d{4,9}/[-._;()/:A-Za-z0-9]+", s, re.IGNORECASE)
+    if not m:
+        return ""
+    doi = m.group(0)
+    rest = s[m.end():]
+    # Allow fragment to start with optional separator so "-192" or "2-192" is matched
+    cont_re = re.compile(r"^[\s,.;:]*([-._;()/:]?[A-Za-z0-9]+(?:[-._;()/:][A-Za-z0-9]+)*)")
+    while True:
+        c = cont_re.match(rest)
+        if not c:
+            break
+        frag = c.group(1).replace("\u2013", "-").replace("\u2014", "-")
+        if not re.search(r"\d", frag):
+            break
+        if not re.search(r"[-._;()/:]", frag) and not re.search(r"[-._;()/:]$", doi):
+            break
+        doi += frag
+        rest = rest[c.end():]
+    return re.sub(r"[),.;:]+$", "", doi.strip())
+
+
+def _normalize_doi_value(doi_value: Any) -> str:
+    if not doi_value:
+        return ""
+    s = _normalize_text_for_doi(str(doi_value))
+    s = re.sub(r"^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)", "", s, flags=re.IGNORECASE).strip()
+    return s
+
+
+def _ensure_full_doi(metadata: Dict[str, Any], article_text: str) -> Dict[str, Any]:
+    if not isinstance(metadata, dict):
+        return metadata
+    codes = metadata.get("codes")
+    if not isinstance(codes, dict):
+        return metadata
+
+    doi_from_text = _extract_best_doi(article_text)
+    doi_current = _normalize_doi_value(codes.get("doi"))
+
+    if not doi_from_text:
+        if doi_current:
+            codes["doi"] = doi_current
+            metadata["codes"] = codes
+        return metadata
+
+    if (not doi_current) or (doi_from_text.startswith(doi_current) and len(doi_from_text) > len(doi_current)):
+        codes["doi"] = doi_from_text
+    else:
+        codes["doi"] = doi_current
+    metadata["codes"] = codes
+    return metadata
+
 
 def _as_reference_list(value: Any) -> list[str]:
     if isinstance(value, list):
@@ -248,6 +316,8 @@ def extract_metadata_with_gpt(
         if cache_file.exists():
             try:
                 cached_data = json.loads(cache_file.read_text(encoding='utf-8'))
+                cached_data = _normalize_references_by_section(cached_data, text if not raw_prompt else "")
+                cached_data = _ensure_full_doi(cached_data, text if not raw_prompt else "")
                 print(f"✅ Использован кэш для промпта (хэш: {prompt_hash[:16]}...)")
                 return cached_data
             except Exception as e:
@@ -338,16 +408,20 @@ def extract_metadata_with_gpt(
                 print(f"⚠️  Ошибка при сохранении в кэш: {e}")
         
         metadata = _normalize_references_by_section(metadata, text if not raw_prompt else "")
+        metadata = _ensure_full_doi(metadata, text if not raw_prompt else "")
         print(f"✅ Метаданные успешно извлечены")
         return metadata
         
     except Exception as e:
-        # Проверяем, является ли это ошибкой OpenAI API
         error_msg = str(e)
+        err_type = type(e).__name__
+        if "connection" in error_msg.lower() or "connect" in error_msg.lower() or "ConnectionError" in err_type:
+            raise GPTExtractionError(
+                f"Ошибка соединения с API LLM (нет доступа к серверу). "
+                f"Проверьте интернет, прокси и доступность API (OpenAI или base_url в config). Детали: {e}"
+            )
         if "OpenAI" in error_msg or "API" in error_msg or "rate limit" in error_msg.lower():
             raise GPTExtractionError(f"Ошибка API OpenAI: {e}")
-        raise
-    except Exception as e:
         raise GPTExtractionError(f"Неожиданная ошибка при извлечении метаданных: {e}")
 
 

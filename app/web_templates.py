@@ -1,4 +1,4 @@
-﻿# Auto-generated from app.py templates
+# Auto-generated from app.py templates
 
 ANNOTATION_EDITOR_SHARED_JS = r"""
 function annotationTextToHtml(text) {
@@ -4179,8 +4179,26 @@ function closeAnnotationModal() {
         
         // Вспомогательные функции для извлечения данных из текста
         window.extractDOI = function(text) {
-          const match = text.match(/10\.\d{4,}\/[^\s\)]+/);
-          return match ? match[0] : null;
+          // Remove invisible OCR artifacts and normalize spaces around DOI separators.
+          const normalized = String(text || "")
+            .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
+            .replace(/\s*([\/-])\s*/g, "$1");
+          const m = normalized.match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/i);
+          if (!m) return null;
+          let doi = m[0];
+          let rest = normalized.slice(m.index + doi.length);
+          // Цикл: подбираем все фрагменты (напр. " 2" затем " -192" -> 182-192)
+          const contRe = /^[\s,.;:]*([A-Za-z0-9]+(?:[-._;()/:][A-Za-z0-9]+)*)/;
+          for (;;) {
+            const continuation = rest.match(contRe);
+            if (!continuation) break;
+            const frag = continuation[1].replace(/[\u2013\u2014]/g, "-");
+            if (!/\d/.test(frag)) break;
+            if (!/[-._;()/:]/.test(frag) && !/[-._;()/:]$/.test(doi)) break;
+            doi = doi + frag;
+            rest = rest.slice(continuation[0].length);
+          }
+          return doi.replace(/[),.;:]+$/, "");
         };
         
         window.extractEmail = function(text) {
@@ -6773,6 +6791,8 @@ MARKUP_TEMPLATE = r"""
           <div class="selected-lines" id="doi-lines"></div>
           <button type="button" class="view-refs-btn" id="crossrefDoiBtn" style="margin-top: 5px;">↻ Подтянуть данные по Crossref DOI</button>
           <div class="selected-lines" id="crossrefStatus"></div>
+          <button type="button" class="view-refs-btn" id="mtfrDoiBtn" style="margin-top: 5px;">↻ Подтянуть данные из MTFR</button>
+          <div class="selected-lines" id="mtfrStatus"></div>
         </div>
 
         <div class="field-group">
@@ -10068,8 +10088,25 @@ function collectAuthorsData() {
   }
 
   function extractDOI(text) {
-    const m = text.match(/10\.\d{4,}\/[^\s\)]+/);
-    return m ? m[0] : null;
+    // Remove invisible OCR artifacts and normalize spaces around DOI separators.
+    const normalized = String(text || "")
+      .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
+      .replace(/\s*([\/-])\s*/g, "$1");
+    const m = normalized.match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/i);
+    if (!m) return null;
+    let doi = m[0];
+    let rest = normalized.slice(m.index + doi.length);
+    const contRe = /^[\s,.;:]*([A-Za-z0-9]+(?:[-._;()/:][A-Za-z0-9]+)*)/;
+    for (;;) {
+      const continuation = rest.match(contRe);
+      if (!continuation) break;
+      const frag = continuation[1].replace(/[\u2013\u2014]/g, "-");
+      if (!/\d/.test(frag)) break;
+      if (!/[-._;()/:]/.test(frag) && !/[-._;()/:]$/.test(doi)) break;
+      doi = doi + frag;
+      rest = rest.slice(continuation[0].length);
+    }
+    return doi.replace(/[),.;:]+$/, "");
   }
 
   function extractEmail(text) {
@@ -10650,8 +10687,24 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
       .replace(/\s*([,.;:])\s*/g, "$1 ")
       .trim();
     const extractDoi = (value) => {
-      const m = String(value || "").match(/\b(?:doi:\s*)?(10\.\d{4,9}\/[^\s,;]+)/i);
-      return m ? m[1].toLowerCase() : "";
+      const s = String(value || "")
+        .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
+        .replace(/\s*([\/-])\s*/g, "$1");
+      const m = s.match(/\b(?:doi:\s*)?(10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+)/i);
+      if (!m) return "";
+      let doi = m[1];
+      let rest = s.slice(m.index + m[0].length);
+      const contRe = /^[\s,.;:]*([A-Za-z0-9]+(?:[-._;()/:][A-Za-z0-9]+)*)/;
+      for (;;) {
+        const continuation = rest.match(contRe);
+        if (!continuation) break;
+        const frag = continuation[1].replace(/[\u2013\u2014]/g, "-");
+        if (!/\d/.test(frag)) break;
+        if (!/[-._;()/:]/.test(frag) && !/[-._;()/:]$/.test(doi)) break;
+        doi = doi + frag;
+        rest = rest.slice(continuation[0].length);
+      }
+      return doi.replace(/[),.;:]+$/, "").toLowerCase();
     };
     const extractUrl = (value) => {
       const m = String(value || "").match(/\bhttps?:\/\/[^\s)]+/i);
@@ -11330,6 +11383,8 @@ function applySelectionToField(fieldId) {
 
     const crossrefBtn = $("#crossrefDoiBtn");
     const crossrefStatus = $("#crossrefStatus");
+    const mtfrBtn = $("#mtfrDoiBtn");
+    const mtfrStatus = $("#mtfrStatus");
     const doiField = $("#doi");
     const crossrefTitleRuField = $("#title");
     const crossrefTitleEnField = $("#title_en");
@@ -11501,11 +11556,18 @@ function applySelectionToField(fieldId) {
       crossrefStatus.textContent = text || "";
       crossrefStatus.style.color = color || "#666";
     };
+    const setMtfrStatus = (text, color) => {
+      if (!mtfrStatus) return;
+      mtfrStatus.textContent = text || "";
+      mtfrStatus.style.color = color || "#666";
+    };
     if (crossrefBtn) {
       crossrefBtn.addEventListener("click", async () => {
         const doi = (doiField?.value || "").trim();
         if (!doi) {
-          setCrossrefStatus("Укажите DOI перед обновлением.", "#c62828");
+          const title = (crossrefTitleRuField?.value || crossrefTitleEnField?.value || "").trim();
+          const msg = title ? `Укажите DOI для статьи «${title.slice(0, 80)}${title.length > 80 ? "…" : ""}» перед обновлением.` : "Укажите DOI перед обновлением.";
+          setCrossrefStatus(msg, "#c62828");
           return;
         }
         crossrefBtn.disabled = true;
@@ -11669,7 +11731,236 @@ function applySelectionToField(fieldId) {
         }
       });
     }
-    
+
+    if (mtfrBtn) {
+      mtfrBtn.addEventListener("click", async () => {
+        const doi = (doiField?.value || "").trim();
+        const titleRu = (crossrefTitleRuField?.value || "").trim();
+        const titleEn = (crossrefTitleEnField?.value || "").trim();
+        const articleTitle = titleRu || titleEn || "";
+        if (!doi && !articleTitle) {
+          setMtfrStatus("Укажите DOI или название статьи перед обновлением.", "#c62828");
+          return;
+        }
+        mtfrBtn.disabled = true;
+        setMtfrStatus(doi ? "Запрос к MTFR..." : "Поиск по названию статьи...", "#555");
+        try {
+          const resp = await fetch("/mtfr-update", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ doi, title: articleTitle || undefined }),
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.success) {
+            setMtfrStatus(data.error || "Не удалось получить данные из MTFR.", "#c62828");
+            return;
+          }
+
+          const suggestions = [];
+          let unchangedCount = 0;
+          let blockedCount = 0;
+
+          const addSuggestion = (config) => {
+            const proposedValue = normalizeText(config.proposedValue);
+            if (!proposedValue) return;
+            const currentValue = normalizeText(config.currentValue);
+            if (currentValue === proposedValue) {
+              unchangedCount += 1;
+              return;
+            }
+            suggestions.push({
+              label: config.label,
+              currentValue,
+              proposedValue,
+              apply: (nextValue) => config.apply(nextValue),
+            });
+          };
+
+          addSuggestion({
+            label: "DOI",
+            currentValue: doiField?.value || "",
+            proposedValue: data.doi,
+            apply: (nextValue) => setFieldValue(doiField, nextValue, () => doiField?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const titleRuTarget = chooseTargetField(crossrefTitleRuField, crossrefTitleEnField);
+          addSuggestion({
+            label: "Заголовок (RU/original)",
+            currentValue: titleRuTarget?.value || "",
+            proposedValue: data.original_title,
+            apply: (nextValue) => setFieldValue(titleRuTarget, nextValue, () => titleRuTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const titleEnTarget = chooseTargetField(crossrefTitleEnField, crossrefTitleRuField);
+          addSuggestion({
+            label: "Заголовок (EN)",
+            currentValue: titleEnTarget?.value || "",
+            proposedValue: data.title,
+            apply: (nextValue) => setFieldValue(titleEnTarget, nextValue, () => titleEnTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+          });
+
+          const applyAnnotation = (field, fieldId, nextValue) => {
+            setFieldValue(field, nextValue, () => {
+              const htmlField = getAnnotationHtmlField(fieldId);
+              if (htmlField) {
+                htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(normalizeText(nextValue)));
+              }
+              field?.dispatchEvent(new Event("input", { bubbles: true }));
+            });
+          };
+          if (data.abstract_ru != null && normalizeText(data.abstract_ru)) {
+            addSuggestion({
+              label: "Аннотация (RU)",
+              currentValue: crossrefAnnotationRuField?.value || "",
+              proposedValue: data.abstract_ru,
+              apply: (nextValue) => applyAnnotation(crossrefAnnotationRuField, "annotation", nextValue),
+            });
+          }
+          if (data.abstract_en != null && normalizeText(data.abstract_en)) {
+            addSuggestion({
+              label: "Аннотация (EN)",
+              currentValue: crossrefAnnotationEnField?.value || "",
+              proposedValue: data.abstract_en,
+              apply: (nextValue) => applyAnnotation(crossrefAnnotationEnField, "annotation_en", nextValue),
+            });
+          }
+          if ((data.abstract_ru == null || !normalizeText(data.abstract_ru)) && (data.abstract_en == null || !normalizeText(data.abstract_en)) && data.abstract != null && normalizeText(data.abstract)) {
+            const annotationTarget = chooseTargetField(crossrefAnnotationEnField, crossrefAnnotationRuField);
+            addSuggestion({
+              label: "Аннотация / Abstract",
+              currentValue: annotationTarget?.value || "",
+              proposedValue: data.abstract,
+              apply: (nextValue) => applyAnnotation(annotationTarget, annotationTarget?.id === "annotation" ? "annotation" : "annotation_en", nextValue),
+            });
+          }
+
+          const refsRu = Array.isArray(data.references_ru) ? data.references_ru.map((s) => String(s || "").trim()).filter(Boolean) : [];
+          const refsEn = Array.isArray(data.references_en) ? data.references_en.map((s) => String(s || "").trim()).filter(Boolean) : [];
+          const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
+          if (refsRu.length > 0 || refsEn.length > 0) {
+            if (refsRu.length > 0) {
+              addSuggestion({
+                label: "Список литературы (RU)",
+                currentValue: crossrefReferencesRuField?.value || "",
+                proposedValue: refsRu.join("\n"),
+                apply: (nextValue) => {
+                  setFieldValue(crossrefReferencesRuField, nextValue, () => {
+                    crossrefReferencesRuField?.dispatchEvent(new Event("input", { bubbles: true }));
+                    if (window.updateReferencesCount && crossrefReferencesRuField?.id) {
+                      window.updateReferencesCount(crossrefReferencesRuField.id);
+                    }
+                  });
+                },
+              });
+            }
+            if (refsEn.length > 0) {
+              addSuggestion({
+                label: "Список литературы (EN)",
+                currentValue: crossrefReferencesEnField?.value || "",
+                proposedValue: refsEn.join("\n"),
+                apply: (nextValue) => {
+                  setFieldValue(crossrefReferencesEnField, nextValue, () => {
+                    crossrefReferencesEnField?.dispatchEvent(new Event("input", { bubbles: true }));
+                    if (window.updateReferencesCount && crossrefReferencesEnField?.id) {
+                      window.updateReferencesCount(crossrefReferencesEnField.id);
+                    }
+                  });
+                },
+              });
+            }
+          } else if (refs.length > 0) {
+            const publLangField = document.getElementById("publ_lang");
+            const publLang = String(publLangField?.value || "").toUpperCase();
+            let refsTarget = crossrefReferencesRuField || crossrefReferencesEnField;
+            if (publLang === "ENG" && crossrefReferencesEnField) {
+              refsTarget = crossrefReferencesEnField;
+            } else if (crossrefReferencesRuField && !normalizeText(crossrefReferencesRuField.value) && crossrefReferencesEnField) {
+              if (normalizeText(crossrefReferencesEnField.value)) refsTarget = crossrefReferencesEnField;
+            }
+            addSuggestion({
+              label: "Список литературы / References",
+              currentValue: refsTarget?.value || "",
+              proposedValue: refs.join("\n"),
+              apply: (nextValue) => {
+                setFieldValue(refsTarget, nextValue, () => {
+                  refsTarget?.dispatchEvent(new Event("input", { bubbles: true }));
+                  if (window.updateReferencesCount && refsTarget?.id) {
+                    window.updateReferencesCount(refsTarget.id);
+                  }
+                });
+              },
+            });
+          }
+
+          const incomingAuthors = Array.isArray(data.authors) ? data.authors : [];
+          if (incomingAuthors.length) {
+            const formatAuthorLine = (author, idx) => {
+              const family = normalizeText(author?.family);
+              const given = normalizeText(author?.given);
+              const name = normalizeText(author?.name);
+              const aff = normalizeText(author?.affiliation);
+              const left = name || [family, given].filter(Boolean).join(" ");
+              return `${idx + 1}. ${left || "(без имени)"}${aff ? ` — ${aff}` : ""}`;
+            };
+            if (!hasAuthorContent()) {
+              const proposedAuthors = incomingAuthors.map(formatAuthorLine).join("\n");
+              suggestions.push({
+                label: "Авторы",
+                currentValue: "(пусто)",
+                proposedValue: proposedAuthors,
+                apply: () => fillAuthorsFromCrossref(incomingAuthors),
+              });
+            } else {
+              blockedCount += 1;
+            }
+          }
+
+          if (!suggestions.length) {
+            setMtfrStatus(
+              `Данные получены, но новых отличающихся значений нет.${unchangedCount ? ` Совпадающих полей: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}`,
+              "#2e7d32"
+            );
+            return;
+          }
+
+          let acceptedCount = 0;
+          let rejectedCount = 0;
+          for (const suggestion of suggestions) {
+            const decision = await askCrossrefSuggestion(suggestion);
+            if (!decision || decision.action !== "accept") {
+              rejectedCount += 1;
+              continue;
+            }
+            const valueToApply = normalizeText(decision.value || suggestion.proposedValue);
+            if (!valueToApply) {
+              rejectedCount += 1;
+              continue;
+            }
+            try {
+              const applied = suggestion.apply(valueToApply);
+              if (applied === false) {
+                rejectedCount += 1;
+              } else {
+                acceptedCount += 1;
+              }
+            } catch (applyErr) {
+              rejectedCount += 1;
+              console.error("MTFR apply error:", applyErr);
+            }
+          }
+
+          setMtfrStatus(
+            `Проверка MTFR завершена. Принято: ${acceptedCount}, отклонено: ${rejectedCount}.${unchangedCount ? ` Совпадений: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}`,
+            acceptedCount ? "#2e7d32" : "#666"
+          );
+        } catch (err) {
+          setMtfrStatus(`Ошибка MTFR: ${err.message || err}`, "#c62828");
+        } finally {
+          mtfrBtn.disabled = false;
+        }
+      });
+    }
+
     // Инициализация счетчиков литературы при загрузке
     const referencesRuField = $("#references_ru");
     const referencesEnField = $("#references_en");
@@ -11786,3 +12077,4 @@ function applySelectionToField(fieldId) {
 """
 HTML_TEMPLATE = HTML_TEMPLATE.replace("/*__ANNOTATION_EDITOR_SHARED__*/", ANNOTATION_EDITOR_SHARED_JS)
 MARKUP_TEMPLATE = MARKUP_TEMPLATE.replace("/*__ANNOTATION_EDITOR_SHARED__*/", ANNOTATION_EDITOR_SHARED_JS)
+

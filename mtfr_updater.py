@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -26,6 +27,17 @@ from typing import Any, Dict, List, Optional
 import requests
 
 LOGGER = logging.getLogger(__name__)
+
+# Нормализация названия для поиска: убираем лишние пробелы, типы кавычек/тире для лучшего совпадения на сайте
+def _normalize_search_title(title: str) -> str:
+    if not title or not isinstance(title, str):
+        return ""
+    s = title.strip()
+    s = re.sub(r"[\u00ad\u200b-\u200f\u2060\ufeff]", "", s)  # невидимые символы
+    s = re.sub(r"\s+", " ", s)  # склеить пробелы
+    s = s.replace("\u201c", '"').replace("\u201d", '"').replace("\u2018", "'").replace("\u2019", "'")
+    s = s.replace("\u2013", "-").replace("\u2014", "-")  # en-dash, em-dash → дефис
+    return s.strip()
 RETRY_COUNT = 2
 RETRY_DELAY_SECONDS = 1
 
@@ -124,7 +136,7 @@ def _fetch_via_metafora_site(
         )
 
     filter_doi = (doi or "").strip()
-    filter_title = (title or "").strip()
+    filter_title = _normalize_search_title(title or "")
     if not filter_doi and not filter_title:
         return _error_result(
             "no_identifier",
@@ -140,11 +152,34 @@ def _fetch_via_metafora_site(
             f"Ошибка при запросе к Метафоре: {e}. Проверьте доступность сайта и DOI/название.",
         )
 
+    # Если по полному названию не нашли — пробуем по началу названия (первые слова), часто опечатки в конце
+    if not links and filter_title and not filter_doi:
+        short_title = " ".join(filter_title.split()[:12]).strip()  # первые 12 слов
+        if len(short_title) > 20 and short_title != filter_title:
+            try:
+                html2 = search_publications_page(client, filter_doi="", filter_title=short_title)
+                links = parse_publication_links(html2, base_url)
+                if links:
+                    LOGGER.info("Публикация найдена по укороченному названию (первые слова)")
+            except Exception:
+                pass
+    if not links and filter_title and not filter_doi:
+        # Ещё попытка: по первым 70 символам (на случай обрезанного заголовка в форме)
+        short_title = filter_title[:70].strip()
+        if len(short_title) > 25 and short_title != filter_title:
+            try:
+                html2 = search_publications_page(client, filter_doi="", filter_title=short_title)
+                links = parse_publication_links(html2, base_url)
+                if links:
+                    LOGGER.info("Публикация найдена по началу названия (70 символов)")
+            except Exception:
+                pass
+
     if not links:
         LOGGER.info("Публикация по DOI=%s title=%s не найдена в Метафоре", filter_doi, filter_title[:50] if filter_title else "")
         return _error_result(
             "not_found",
-            "Публикация не найдена в Метафоре. Проверьте DOI или название и наличие публикации на сайте.",
+            "Публикация не найдена в Метафоре. Проверьте DOI или название (попробуйте скопировать точное название со страницы Метафоры).",
         )
 
     pub = links[0]

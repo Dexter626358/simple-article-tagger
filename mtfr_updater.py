@@ -143,8 +143,25 @@ def _fetch_via_metafora_site(
             "Укажите DOI или название статьи для поиска в Метафоре.",
         )
     try:
-        html = search_publications_page(client, filter_doi=filter_doi, filter_title=filter_title)
-        links = parse_publication_links(html, base_url)
+        # Важно: фильтры на странице /publications комбинируются.
+        # Если DOI в Метафоре отсутствует/отличается от ожидаемого, поиск по (DOI + title)
+        # может дать пустой результат даже при наличии публикации. Поэтому делаем fallback.
+        links: List[Dict[str, str]] = []
+
+        # 1) Пробуем самый строгий вариант, если заданы оба параметра.
+        if filter_doi or filter_title:
+            html = search_publications_page(client, filter_doi=filter_doi, filter_title=filter_title)
+            links = parse_publication_links(html, base_url)
+
+        # 2) Если не нашли по (DOI + title), пробуем только DOI (частый случай: title в форме обрезан).
+        if not links and filter_doi and filter_title:
+            html = search_publications_page(client, filter_doi=filter_doi, filter_title="")
+            links = parse_publication_links(html, base_url)
+
+        # 3) Если не нашли по DOI, пробуем только title (частый случай: DOI в Метафоре отсутствует/иной).
+        if not links and filter_title and filter_doi:
+            html = search_publications_page(client, filter_doi="", filter_title=filter_title)
+            links = parse_publication_links(html, base_url)
     except Exception as e:
         LOGGER.warning("Ошибка поиска по DOI=%s title=%s: %s", filter_doi, filter_title[:50] if filter_title else "", e)
         return _error_result(
@@ -153,7 +170,7 @@ def _fetch_via_metafora_site(
         )
 
     # Если по полному названию не нашли — пробуем по началу названия (первые слова), часто опечатки в конце
-    if not links and filter_title and not filter_doi:
+    if not links and filter_title:
         short_title = " ".join(filter_title.split()[:12]).strip()  # первые 12 слов
         if len(short_title) > 20 and short_title != filter_title:
             try:
@@ -163,7 +180,7 @@ def _fetch_via_metafora_site(
                     LOGGER.info("Публикация найдена по укороченному названию (первые слова)")
             except Exception:
                 pass
-    if not links and filter_title and not filter_doi:
+    if not links and filter_title:
         # Ещё попытка: по первым 70 символам (на случай обрезанного заголовка в форме)
         short_title = filter_title[:70].strip()
         if len(short_title) > 25 and short_title != filter_title:

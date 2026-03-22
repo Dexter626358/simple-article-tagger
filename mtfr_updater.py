@@ -211,6 +211,8 @@ def _fetch_via_metafora_site(
             f"Ошибка при загрузке страницы публикации: {e}.",
         )
 
+    pages_raw = detail.get("pages")
+    pages_str = (pages_raw if isinstance(pages_raw, str) else "") or ""
     return {
         "title_ru": detail.get("title_ru") or "",
         "title_en": detail.get("title_en") or "",
@@ -218,6 +220,9 @@ def _fetch_via_metafora_site(
         "abstract_en": detail.get("abstract_en") or "",
         "references_ru": detail.get("references_ru") or "",
         "references_en": detail.get("references_en") or "",
+        "first_page": detail.get("first_page"),
+        "last_page": detail.get("last_page"),
+        "pages": pages_str.strip(),
         "title_from_list": title_from_list,  # подстановка, если парсер карточки ничего не нашёл
     }
 
@@ -420,6 +425,9 @@ def update_article_by_doi(
         references = refs_ru if refs_ru else refs_en
         authors = []
         raw_for_state = data
+        pages_meta = (data.get("pages") or "").strip() or None
+        first_page_meta = data.get("first_page")
+        last_page_meta = data.get("last_page")
     else:
         # Ответ от внешнего API (JSON)
         title = (data.get("title") or data.get("title_en") or "").strip() or None
@@ -434,6 +442,9 @@ def update_article_by_doi(
                 authors.append(_normalize_author(a))
         references = _extract_references_list(data)
         raw_for_state = data
+        pages_meta = (data.get("pages") or "").strip() or None
+        first_page_meta = data.get("first_page")
+        last_page_meta = data.get("last_page")
 
     return {
         "doi": data.get("doi") if isinstance(data.get("doi"), str) else doi,
@@ -450,4 +461,7 @@ def update_article_by_doi(
         "abstract_en": abstract_en,
         "references_ru": references_ru_list,
         "references_en": references_en_list,
+        "pages": pages_meta,
+        "first_page": first_page_meta if isinstance(first_page_meta, int) else None,
+        "last_page": last_page_meta if isinstance(last_page_meta, int) else None,
     }

@@ -11392,6 +11392,7 @@ function applySelectionToField(fieldId) {
     const crossrefAnnotationEnField = $("#annotation_en");
     const crossrefReferencesRuField = $("#references_ru");
     const crossrefReferencesEnField = $("#references_en");
+    const crossrefPagesField = $("#pages");
     const normalizeText = (value) => String(value || "").trim();
     const setFieldValue = (field, value, onApplied) => {
       if (!field) return false;
@@ -11406,6 +11407,12 @@ function applySelectionToField(fieldId) {
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+    /** Убирает ведущую нумерацию вида «1. », «12. » в начале строк (список литературы). */
+    const stripReferenceLineNumbers = (text) =>
+      String(text || "")
+        .split(/\r?\n/)
+        .map((line) => line.replace(/^\s*\d+\.\s*/, ""))
+        .join("\n");
     const ensureCrossrefSuggestionModal = () => {
       let modal = document.getElementById("crossrefSuggestionModal");
       if (modal) return modal;
@@ -11429,7 +11436,10 @@ function applySelectionToField(fieldId) {
             </div>
           </div>
           <div style="margin-top:10px;">
-            <div style="font-size:12px;color:#666;margin-bottom:4px;">Редактировать перед вставкой (опционально)</div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:4px;">
+              <span style="font-size:12px;color:#666;">Редактировать перед вставкой (опционально)</span>
+              <button type="button" id="crossrefStripRefNumbersBtn" style="border:1px solid #ccc;background:#f5f5f5;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:12px;color:#444;">Убрать нумерацию</button>
+            </div>
             <textarea id="crossrefSuggestionEdit" style="width:100%;min-height:130px;resize:vertical;border:1px solid #ddd;border-radius:6px;padding:10px;font-size:13px;"></textarea>
           </div>
           <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
@@ -11440,6 +11450,15 @@ function applySelectionToField(fieldId) {
         </div>
       `;
       document.body.appendChild(modal);
+      const stripBtn = document.getElementById("crossrefStripRefNumbersBtn");
+      if (stripBtn && stripBtn.dataset.bound !== "1") {
+        stripBtn.dataset.bound = "1";
+        stripBtn.addEventListener("click", () => {
+          const ta = document.getElementById("crossrefSuggestionEdit");
+          if (!ta) return;
+          ta.value = stripReferenceLineNumbers(ta.value);
+        });
+      }
       return modal;
     };
     const askCrossrefSuggestion = (payload) => new Promise((resolve) => {
@@ -11798,6 +11817,18 @@ function applySelectionToField(fieldId) {
             proposedValue: data.title,
             apply: (nextValue) => setFieldValue(titleEnTarget, nextValue, () => titleEnTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
           });
+
+          if (data.pages != null && normalizeText(data.pages)) {
+            addSuggestion({
+              label: "Страницы",
+              currentValue: crossrefPagesField?.value || "",
+              proposedValue: data.pages,
+              apply: (nextValue) =>
+                setFieldValue(crossrefPagesField, nextValue, () =>
+                  crossrefPagesField?.dispatchEvent(new Event("input", { bubbles: true })),
+                ),
+            });
+          }
 
           const applyAnnotation = (field, fieldId, nextValue) => {
             setFieldValue(field, nextValue, () => {

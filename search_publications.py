@@ -1,7 +1,7 @@
 """
 Поиск публикаций в ИС «Метафора» по DOI или названию и извлечение аннотаций и списка литературы.
 Используется в mtfr_updater для кнопки «Подтянуть данные из MTFR».
-Отдельно: чтение списка из input_files/publications_to_find.xlsx и сохранение в output_files/publications_result.csv.
+Отдельно: чтение списка из input_files/publications_to_find.xlsx и сохранение в output_files/publications_result.csv (в т.ч. колонка «Страницы» из #dataTable_pubdata).
 """
 
 import argparse
@@ -197,6 +197,62 @@ def _parse_all_multilang(soup: BeautifulSoup) -> list[tuple[str, str]]:
     return result
 
 
+def _pubdata_row_cell_text(tr) -> str:
+    """Текст ячеек данных в строке таблицы сведений о публикации (без заголовка <th>)."""
+    tds = tr.find_all("td")
+    if not tds:
+        return ""
+    parts: list[str] = []
+    for td in tds:
+        parts.append(td.get_text(separator=" ", strip=True))
+    return " ".join(p for p in parts if p).strip()
+
+
+def _parse_optional_positive_int(raw: str) -> int | None:
+    s = (raw or "").strip()
+    if not s or s in ("—", "–", "-"):
+        return None
+    if re.fullmatch(r"\d+", s):
+        return int(s)
+    return None
+
+
+def _format_pages_field(first_page: int | None, last_page: int | None) -> str:
+    if first_page is not None and last_page is not None:
+        if first_page == last_page:
+            return str(first_page)
+        return f"{first_page}-{last_page}"
+    if first_page is not None:
+        return str(first_page)
+    if last_page is not None:
+        return str(last_page)
+    return ""
+
+
+def _parse_pubdata_pages(soup: BeautifulSoup) -> tuple[int | None, int | None, str]:
+    """
+    Извлекает первую/последнюю страницу из таблицы #dataTable_pubdata
+    (блок «Данные публикации» на карточке в ИС Метафора).
+    """
+    table = soup.find("table", id="dataTable_pubdata")
+    if not table:
+        return None, None, ""
+    first_page: int | None = None
+    last_page: int | None = None
+    for tr in table.find_all("tr"):
+        th = tr.find("th")
+        if not th:
+            continue
+        label = (th.get_text() or "").strip()
+        cell = _pubdata_row_cell_text(tr)
+        if label == "Первая страница":
+            first_page = _parse_optional_positive_int(cell)
+        elif label == "Последняя страница":
+            last_page = _parse_optional_positive_int(cell)
+    pages = _format_pages_field(first_page, last_page)
+    return first_page, last_page, pages
+
+
 def _parse_references_from_table(soup: BeautifulSoup) -> tuple[str, str]:
     """
     Извлекает списки литературы (RU/EN) из таблицы #dataTable_refs.
@@ -234,9 +290,11 @@ def _parse_references_from_table(soup: BeautifulSoup) -> tuple[str, str]:
 
 def parse_publication_detail(html: str) -> dict:
     """
-    Парсит страницу публикации: название (RU/EN), аннотация (RU), аннотация (EN), список литературы.
+    Парсит страницу публикации: название (RU/EN), аннотация (RU), аннотация (EN), список литературы,
+    номера страниц из таблицы #dataTable_pubdata (поле pages для формы — диапазон «478-492»).
     """
     soup = BeautifulSoup(html, "html.parser")
+    first_page, last_page, pages = _parse_pubdata_pages(soup)
     multilang = _parse_all_multilang(soup)
     ru_texts = [t for lang, t in multilang if lang == "ru"]
     en_texts = [t for lang, t in multilang if lang == "en"]
@@ -259,6 +317,9 @@ def parse_publication_detail(html: str) -> dict:
         "abstract_en": abstract_en,
         "references_ru": references_ru,
         "references_en": references_en,
+        "first_page": first_page,
+        "last_page": last_page,
+        "pages": pages,
     }
 
 
@@ -313,6 +374,7 @@ def main() -> None:
         "Название (EN)",
         "Аннотация (RU)",
         "Аннотация (EN)",
+        "Страницы",
         "Список литературы (RU)",
         "Список литературы (EN)",
     )
@@ -363,6 +425,7 @@ def main() -> None:
                 detail["title_en"],
                 detail["abstract_ru"],
                 detail["abstract_en"],
+                detail.get("pages") or "",
                 detail["references_ru"],
                 detail["references_en"],
             ])

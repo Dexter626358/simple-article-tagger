@@ -1001,6 +1001,8 @@ HTML_TEMPLATE = """
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
+    .author-input.author-code-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .correspondence-toggle{margin-top:5px;}
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -1017,6 +1019,9 @@ HTML_TEMPLATE = """
     .annotation-modal-content{height:80vh;min-height:0;}
     .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
+    .refs-modal-header-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;min-width:0;}
+    .refs-strip-numbers-btn{border:1px solid #ccc;background:#f5f5f5;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:#444;white-space:nowrap;}
+    .refs-strip-numbers-btn:hover{background:#eee;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
     .modal-resize-handle{position:absolute;z-index:15;user-select:none;touch-action:none;}
@@ -2133,7 +2138,10 @@ HTML_TEMPLATE = """
         <div id="refsModal" class="modal">
           <div class="modal-content resizable refs-modal-content" id="refsModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
             <div class="modal-header">
-              <h2 id="modalTitle">Список литературы</h2>
+              <div class="refs-modal-header-left">
+                <h2 id="modalTitle">Список литературы</h2>
+                <button type="button" class="refs-strip-numbers-btn" onclick="stripReferenceItemsNumbers()" title="Удалить ведущую нумерацию (1., 2) или [1] в тексте каждого источника">Убрать нумерацию</button>
+              </div>
               <div class="modal-header-actions">
                 <button class="modal-expand-btn" id="refsModalExpandBtn" onclick="toggleRefsModalSize()" title="Увеличить/уменьшить окно">⛶</button>
                 <button class="modal-close" onclick="closeRefsModal()">&times;</button>
@@ -6614,6 +6622,9 @@ MARKUP_TEMPLATE = r"""
     .annotation-modal-content{height:80vh;min-height:0;}
     .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;border-bottom:2px solid #e0e0e0;padding-bottom:15px;cursor:move;}
     .modal-header h2{margin:0;color:#333;font-size:20px;}
+    .refs-modal-header-left{display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex:1;min-width:0;}
+    .refs-strip-numbers-btn{border:1px solid #ccc;background:#f5f5f5;border-radius:6px;padding:4px 10px;cursor:pointer;font-size:12px;color:#444;white-space:nowrap;}
+    .refs-strip-numbers-btn:hover{background:#eee;}
     .modal-close{background:none;border:none;font-size:28px;cursor:pointer;color:#999;padding:0;width:30px;height:30px;line-height:30px;text-align:center;}
     .modal-close:hover{color:#333;}
     .modal-resize-handle{position:absolute;z-index:15;user-select:none;touch-action:none;}
@@ -6669,6 +6680,8 @@ MARKUP_TEMPLATE = r"""
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
+    .author-input.author-code-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
     .author-org-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
     .author-org-list{display:flex;flex-direction:column;gap:10px;}
@@ -7110,7 +7123,10 @@ MARKUP_TEMPLATE = r"""
 <div id="refsModal" class="modal">
   <div class="modal-content resizable refs-modal-content" id="refsModalContent" style="resize:both;overflow:auto;min-width:360px;min-height:240px;">
     <div class="modal-header">
-      <h2 id="modalTitle">Список литературы</h2>
+      <div class="refs-modal-header-left">
+        <h2 id="modalTitle">Список литературы</h2>
+        <button type="button" class="refs-strip-numbers-btn" onclick="stripReferenceItemsNumbers()" title="Удалить ведущую нумерацию (1., 2) или [1] в тексте каждого источника">Убрать нумерацию</button>
+      </div>
       <div class="modal-header-actions">
         <button class="modal-expand-btn" id="refsModalExpandBtn" onclick="toggleRefsModalSize()" title="Увеличить/уменьшить окно">⛶</button>
         <button class="modal-close" onclick="closeRefsModal()">&times;</button>
@@ -8406,6 +8422,28 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 let currentRefsFieldId = null;
+
+/** Убирает в начале текста источника маркеры «1. », «2) », «[3] » (нумерация внутри поля, не слева в интерфейсе). */
+function stripLeadingReferenceItemNumber(text) {
+  let s = String(text || "");
+  s = s.replace(/^\s*\d+\s*[.)]\s+/, "");
+  s = s.replace(/^\s*\[\d{1,3}\]\s+/, "");
+  return s.replace(/^\s+/, "");
+}
+
+function stripReferenceItemsNumbers() {
+  const refItems = document.querySelectorAll("#refsList .ref-item");
+  if (!refItems.length) return;
+  refItems.forEach((item) => {
+    const span = item.querySelector(".ref-text");
+    if (!span) return;
+    const before = span.textContent;
+    const after = stripLeadingReferenceItemNumber(before);
+    if (after !== before) {
+      span.textContent = after;
+    }
+  });
+}
 
 function viewReferences(fieldId, title) {
   const field = document.getElementById(fieldId);
@@ -9861,6 +9899,42 @@ function moveOrganizationCard(index, rowIndex, direction) {
   renderOrganizationRows(index, rows);
 }
 
+/** Проверка формата кода автора (только подсказка в UI, не блокирует сохранение). Пустое значение — ок. */
+function isValidAuthorCodeField(field, raw) {
+  const v = String(raw || "").trim();
+  if (!v) return true;
+  switch (field) {
+    case "spin": {
+      // Стандартное отображение СПИН-РЦНИ: четыре цифры, дефис, четыре цифры (например 1234-5678).
+      return /^\d{4}-\d{4}$/.test(v);
+    }
+    case "orcid": {
+      let n = v.replace(/^https?:\/\/(www\.)?orcid\.org\//i, "").trim().replace(/\s/g, "");
+      if (/^\d{4}-\d{4}-\d{4}-\d{3}[\dXx]$/.test(n)) return true;
+      if (/^\d{15}[\dXx]$/.test(n)) return true;
+      return false;
+    }
+    case "scopusid": {
+      const d = v.replace(/\s/g, "");
+      return /^\d{8,15}$/.test(d);
+    }
+    case "researcherid": {
+      const t = v.replace(/\s/g, "");
+      return /^[A-Za-z]-\d{4}-\d{4}$/.test(t) || /^\d{8,15}$/.test(t);
+    }
+    default:
+      return true;
+  }
+}
+
+function updateAuthorCodeFieldHighlight(input) {
+  if (!input || input.dataset.lang !== "CODES") return;
+  const field = input.dataset.field;
+  if (!field || !["spin", "orcid", "scopusid", "researcherid"].includes(field)) return;
+  const ok = isValidAuthorCodeField(field, input.value);
+  input.classList.toggle("author-code-invalid", !ok);
+}
+
 function attachAuthorNameListeners(index) {
   const authorItem = document.querySelector(`.author-item[data-author-index="${index}"]`);
   if (!authorItem) return;
@@ -9906,6 +9980,17 @@ function attachAuthorNameListeners(index) {
       }
     }, 100);
   }
+
+  ["spin", "orcid", "scopusid", "researcherid"].forEach((codeField) => {
+    const codeInput = authorItem.querySelector(
+      `.author-input[data-field="${codeField}"][data-lang="CODES"][data-index="${index}"]`,
+    );
+    if (!codeInput) return;
+    const run = () => updateAuthorCodeFieldHighlight(codeInput);
+    codeInput.addEventListener("input", run);
+    codeInput.addEventListener("change", run);
+    run();
+  });
 }
 
 // Сбор данных авторов из формы
@@ -10468,11 +10553,10 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
   function countKeywords(text) {
     if (!text || !text.trim()) return 0;
     const cleaned = text.trim();
-    // Подсчитываем количество ключевых слов, разделенных точкой с запятой или запятой
+    // Разделитель ключевых слов в форме — только точка с запятой
     if (cleaned.includes(";")) {
       return cleaned.split(";").map(s => s.trim()).filter(Boolean).length;
     }
-    // Если нет разделителей, считаем как одно слово
     return cleaned ? 1 : 0;
   }
 
@@ -11393,6 +11477,8 @@ function applySelectionToField(fieldId) {
     const crossrefReferencesRuField = $("#references_ru");
     const crossrefReferencesEnField = $("#references_en");
     const crossrefPagesField = $("#pages");
+    const crossrefKeywordsField = $("#keywords");
+    const crossrefKeywordsEnField = $("#keywords_en");
     const normalizeText = (value) => String(value || "").trim();
     const setFieldValue = (field, value, onApplied) => {
       if (!field) return false;
@@ -11413,6 +11499,59 @@ function applySelectionToField(fieldId) {
         .split(/\r?\n/)
         .map((line) => line.replace(/^\s*\d+\.\s*/, ""))
         .join("\n");
+    const resetCrossrefSuggestionPanelPosition = (panel) => {
+      if (!panel) return;
+      const w = Math.min(1100, Math.max(320, window.innerWidth - 48));
+      panel.style.transform = "translate(-50%, -50%)";
+      panel.style.left = "50%";
+      panel.style.top = "50%";
+      panel.style.right = "auto";
+      panel.style.bottom = "auto";
+      panel.style.width = `${w}px`;
+      panel.style.height = "";
+      panel.style.maxWidth = "1100px";
+      panel.style.maxHeight = "90vh";
+    };
+    const initCrossrefSuggestionPanelDrag = (panel) => {
+      const handle = document.getElementById("crossrefSuggestionDragHandle");
+      if (!handle || !panel) return;
+      handle.addEventListener("dblclick", (e) => {
+        e.preventDefault();
+        if (e.target.closest("button")) return;
+        resetCrossrefSuggestionPanelPosition(panel);
+      });
+      handle.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        if (e.target.closest("button")) return;
+        e.preventDefault();
+        const rect = panel.getBoundingClientRect();
+        if (panel.style.transform && panel.style.transform !== "none") {
+          panel.style.transform = "none";
+          panel.style.left = `${rect.left}px`;
+          panel.style.top = `${rect.top}px`;
+          panel.style.width = `${rect.width}px`;
+          panel.style.height = `${rect.height}px`;
+        }
+        const startX = e.clientX;
+        const startY = e.clientY;
+        const startLeft = rect.left;
+        const startTop = rect.top;
+        handle.style.cursor = "grabbing";
+        document.body.style.userSelect = "none";
+        const onMove = (ev) => {
+          panel.style.left = `${startLeft + (ev.clientX - startX)}px`;
+          panel.style.top = `${startTop + (ev.clientY - startY)}px`;
+        };
+        const onUp = () => {
+          document.removeEventListener("mousemove", onMove);
+          document.removeEventListener("mouseup", onUp);
+          handle.style.cursor = "grab";
+          document.body.style.userSelect = "";
+        };
+        document.addEventListener("mousemove", onMove);
+        document.addEventListener("mouseup", onUp);
+      });
+    };
     const ensureCrossrefSuggestionModal = () => {
       let modal = document.getElementById("crossrefSuggestionModal");
       if (modal) return modal;
@@ -11420,10 +11559,13 @@ function applySelectionToField(fieldId) {
       modal.id = "crossrefSuggestionModal";
       modal.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:none;align-items:center;justify-content:center;padding:24px;";
       modal.innerHTML = `
-        <div style="background:#fff;max-width:1100px;width:min(1100px,96vw);max-height:90vh;overflow:auto;border-radius:10px;padding:16px 16px 12px 16px;box-shadow:0 12px 38px rgba(0,0,0,.28);">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
-            <div id="crossrefSuggestionTitle" style="font-size:17px;font-weight:700;color:#222;">Предложение обновления</div>
-            <button type="button" id="crossrefSuggestionClose" style="border:1px solid #ddd;background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;">Закрыть</button>
+        <div id="crossrefSuggestionPanel" style="position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:10000;box-sizing:border-box;background:#fff;max-width:1100px;width:min(1100px,calc(100vw - 48px));max-height:90vh;min-width:320px;min-height:220px;resize:both;overflow:auto;border-radius:10px;padding:16px 16px 12px 16px;box-shadow:0 12px 38px rgba(0,0,0,.28);">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:10px;">
+            <div id="crossrefSuggestionDragHandle" title="Потяните за заголовок, чтобы сдвинуть окно. Двойной щелчок — по центру. Угол окна — изменение размера." style="flex:1;min-width:0;cursor:grab;user-select:none;padding:2px 0;border-radius:6px;">
+              <div id="crossrefSuggestionTitle" style="font-size:17px;font-weight:700;color:#222;line-height:1.35;">Предложение обновления</div>
+              <div style="font-size:11px;color:#888;margin-top:4px;font-weight:400;">Перетащите за заголовок · Потяните за угол для размера</div>
+            </div>
+            <button type="button" id="crossrefSuggestionClose" style="border:1px solid #ddd;background:#fff;border-radius:6px;padding:4px 10px;cursor:pointer;flex-shrink:0;">Закрыть</button>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
             <div>
@@ -11450,6 +11592,11 @@ function applySelectionToField(fieldId) {
         </div>
       `;
       document.body.appendChild(modal);
+      const panel = document.getElementById("crossrefSuggestionPanel");
+      if (panel && panel.dataset.dragInit !== "1") {
+        panel.dataset.dragInit = "1";
+        initCrossrefSuggestionPanelDrag(panel);
+      }
       const stripBtn = document.getElementById("crossrefStripRefNumbersBtn");
       if (stripBtn && stripBtn.dataset.bound !== "1") {
         stripBtn.dataset.bound = "1";
@@ -11463,6 +11610,7 @@ function applySelectionToField(fieldId) {
     };
     const askCrossrefSuggestion = (payload) => new Promise((resolve) => {
       const modal = ensureCrossrefSuggestionModal();
+      const panel = document.getElementById("crossrefSuggestionPanel");
       const titleNode = document.getElementById("crossrefSuggestionTitle");
       const currentNode = document.getElementById("crossrefSuggestionCurrent");
       const proposedNode = document.getElementById("crossrefSuggestionProposed");
@@ -11496,6 +11644,9 @@ function applySelectionToField(fieldId) {
       };
 
       modal.style.display = "flex";
+      if (panel) {
+        requestAnimationFrame(() => resetCrossrefSuggestionPanelPosition(panel));
+      }
     });
     const hasAuthorContent = () => {
       const authorItems = $$(".author-item");
@@ -11853,6 +12004,38 @@ function applySelectionToField(fieldId) {
               currentValue: crossrefAnnotationEnField?.value || "",
               proposedValue: data.abstract_en,
               apply: (nextValue) => applyAnnotation(crossrefAnnotationEnField, "annotation_en", nextValue),
+            });
+          }
+          if (data.keywords != null && normalizeText(data.keywords)) {
+            addSuggestion({
+              label: "Ключевые слова (RU)",
+              currentValue: crossrefKeywordsField?.value || "",
+              proposedValue: data.keywords,
+              apply: (nextValue) => {
+                setFieldValue(crossrefKeywordsField, nextValue, () => {
+                  crossrefKeywordsField?.dispatchEvent(new Event("input", { bubbles: true }));
+                  try {
+                    updateKeywordsCount("keywords");
+                    autoResizeKeywordsField("keywords");
+                  } catch (e) { /* нет в этой сборке страницы */ }
+                });
+              },
+            });
+          }
+          if (data.keywords_en != null && normalizeText(data.keywords_en)) {
+            addSuggestion({
+              label: "Ключевые слова (EN)",
+              currentValue: crossrefKeywordsEnField?.value || "",
+              proposedValue: data.keywords_en,
+              apply: (nextValue) => {
+                setFieldValue(crossrefKeywordsEnField, nextValue, () => {
+                  crossrefKeywordsEnField?.dispatchEvent(new Event("input", { bubbles: true }));
+                  try {
+                    updateKeywordsCount("keywords_en");
+                    autoResizeKeywordsField("keywords_en");
+                  } catch (e) { /* нет в этой сборке страницы */ }
+                });
+              },
             });
           }
           if ((data.abstract_ru == null || !normalizeText(data.abstract_ru)) && (data.abstract_en == null || !normalizeText(data.abstract_en)) && data.abstract != null && normalizeText(data.abstract)) {

@@ -1367,6 +1367,8 @@ def register_markup_routes(app, ctx):
             abstract_ru = _norm_empty(payload.get("abstract_ru"))
             abstract_en = _norm_empty(payload.get("abstract_en"))
             pages_val = _norm_empty(payload.get("pages"))
+            keywords_val = _norm_empty(payload.get("keywords"))
+            keywords_en_val = _norm_empty(payload.get("keywords_en"))
             authors_list = payload.get("authors") or []
             authors_list = [
                 {k: _norm_empty(v) if isinstance(v, str) else v for k, v in (a if isinstance(a, dict) else {}).items()}
@@ -1375,7 +1377,7 @@ def register_markup_routes(app, ctx):
             has_any = bool(
                 title or original_title or abstract or abstract_ru or abstract_en
                 or references or references_ru or references_en or authors_list
-                or pages_val
+                or pages_val or keywords_val or keywords_en_val
             )
             if not has_any:
                 return jsonify(
@@ -1397,6 +1399,8 @@ def register_markup_routes(app, ctx):
                 pages=pages_val or None,
                 first_page=payload.get("first_page"),
                 last_page=payload.get("last_page"),
+                keywords=keywords_val or None,
+                keywords_en=keywords_en_val or None,
             )
         except Exception as e:
             current_app.logger.exception("SYSTEM mtfr update error: %s", e)

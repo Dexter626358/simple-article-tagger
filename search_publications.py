@@ -1,5 +1,5 @@
 """
-Поиск публикаций в ИС «Метафора» по DOI или названию и извлечение аннотаций и списка литературы.
+Поиск публикаций в ИС «Метафора» по DOI или названию и извлечение аннотаций, ключевых слов и списка литературы.
 Используется в mtfr_updater для кнопки «Подтянуть данные из MTFR».
 Отдельно: чтение списка из input_files/publications_to_find.xlsx и сохранение в output_files/publications_result.csv (в т.ч. колонка «Страницы» из #dataTable_pubdata).
 """
@@ -253,6 +253,81 @@ def _parse_pubdata_pages(soup: BeautifulSoup) -> tuple[int | None, int | None, s
     return first_page, last_page, pages
 
 
+_KEYWORDS_TH = re.compile(
+    r"ключев(ые\s+слова|ое\s+слово)|keywords?|key\s+words|index\s+terms?",
+    re.I,
+)
+
+
+def normalize_keywords_separators(raw: str) -> str:
+    """
+    В форме ключевые слова разделяются точкой с запятой.
+    Запятые из Метафоры и других источников заменяем на «; » (в т.ч. внутри сегментов после «;»).
+    Завершающие точки в конце всей строки убираем (лишняя пунктуация после списка).
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    parts: list[str] = []
+    for seg in re.split(r"\s*;\s*", s):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if "," in seg:
+            parts.extend(p.strip() for p in seg.split(",") if p.strip())
+        else:
+            parts.append(seg)
+    out = "; ".join(parts).rstrip()
+    while out.endswith("."):
+        out = out[:-1].rstrip()
+    return out
+
+
+def _parse_keywords_from_tables(soup: BeautifulSoup) -> tuple[str, str]:
+    """
+    Ключевые слова RU/EN: строка таблицы с заголовком «Ключевые слова» / Keywords
+    (в т.ч. ячейки .multilang с подписями РУС/ENG), как на карточке в ИС Метафора.
+    """
+    keywords_ru = ""
+    keywords_en = ""
+    for table in soup.find_all("table"):
+        for tr in table.find_all("tr"):
+            th = tr.find("th")
+            if not th:
+                continue
+            th_text = (th.get_text() or "").strip()
+            if not _KEYWORDS_TH.search(th_text):
+                continue
+            multilang_tds = tr.find_all("td", class_=lambda c: c and "multilang" in c)
+            if multilang_tds:
+                for td in multilang_tds:
+                    cap_el = td.find(class_="lang_caption")
+                    if not cap_el:
+                        continue
+                    cap = cap_el.get_text(strip=True).upper()
+                    full = td.get_text(separator=" ", strip=True)
+                    cap_clean = cap_el.get_text(strip=True)
+                    value = (
+                        full[len(cap_clean) :].strip()
+                        if full.upper().startswith(cap_clean.upper())
+                        else full
+                    )
+                    if "ENG" in cap or cap == "EN":
+                        keywords_en = value
+                    elif "РУС" in cap or "RUS" in cap or cap == "RU":
+                        keywords_ru = value
+            else:
+                cell = _pubdata_row_cell_text(tr).strip()
+                if cell and cell not in ("—", "–", "-"):
+                    if re.search(r"[а-яёА-ЯЁ]", cell):
+                        keywords_ru = cell
+                    else:
+                        keywords_en = cell
+            if keywords_ru or keywords_en:
+                return keywords_ru, keywords_en
+    return "", ""
+
+
 def _parse_references_from_table(soup: BeautifulSoup) -> tuple[str, str]:
     """
     Извлекает списки литературы (RU/EN) из таблицы #dataTable_refs.
@@ -290,8 +365,8 @@ def _parse_references_from_table(soup: BeautifulSoup) -> tuple[str, str]:
 
 def parse_publication_detail(html: str) -> dict:
     """
-    Парсит страницу публикации: название (RU/EN), аннотация (RU), аннотация (EN), список литературы,
-    номера страниц из таблицы #dataTable_pubdata (поле pages для формы — диапазон «478-492»).
+    Парсит страницу публикации: название (RU/EN), аннотация (RU), аннотация (EN), ключевые слова (RU/EN),
+    список литературы, номера страниц из таблицы #dataTable_pubdata (поле pages — диапазон «478-492»).
     """
     soup = BeautifulSoup(html, "html.parser")
     first_page, last_page, pages = _parse_pubdata_pages(soup)
@@ -310,11 +385,41 @@ def parse_publication_detail(html: str) -> dict:
         )
         if not references_ru:
             references_ru = _section_text(soup, ["Список литературы", "Литература", "References"])
+    keywords_ru, keywords_en = _parse_keywords_from_tables(soup)
+    if not keywords_ru:
+        keywords_ru = _section_text(
+            soup,
+            [
+                "Ключевые слова",
+                "Ключевые слова (рус)",
+                "Ключевые слова (русский)",
+                "Ключевые слова (RU)",
+            ],
+        )
+    if not keywords_en:
+        keywords_en = _section_text(
+            soup,
+            [
+                "Keywords",
+                "Keyword",
+                "Key words",
+                "Ключевые слова (англ)",
+                "Ключевые слова (английский)",
+                "Ключевые слова (EN)",
+                "Index terms",
+            ],
+        )
+    if keywords_ru:
+        keywords_ru = normalize_keywords_separators(keywords_ru)
+    if keywords_en:
+        keywords_en = normalize_keywords_separators(keywords_en)
     return {
         "title_ru": title_ru,
         "title_en": title_en,
         "abstract_ru": abstract_ru,
         "abstract_en": abstract_en,
+        "keywords_ru": keywords_ru,
+        "keywords_en": keywords_en,
         "references_ru": references_ru,
         "references_en": references_en,
         "first_page": first_page,

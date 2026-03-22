@@ -20,6 +20,12 @@ except ImportError:
     def merge_doi_url_with_references(references: List[str]) -> List[str]:
         return references
 
+try:
+    from search_publications import normalize_keywords_separators
+except ImportError:
+    def normalize_keywords_separators(raw: str) -> str:
+        return (raw or "").strip()
+
 
 ALLOWED_ANNOTATION_TAGS = {"b", "i", "em", "strong", "sup", "sub", "br"}
 
@@ -204,23 +210,15 @@ def form_data_to_json_structure(form_data: Dict[str, Any], existing_json: Option
     if "keywords" in form_data:
         keywords_ru = form_data["keywords"]
         if isinstance(keywords_ru, str):
-            if ";" in keywords_ru:
-                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(";") if _normalize_empty_field(k)]
-            elif "," in keywords_ru:
-                result["keywords"]["RUS"] = [k.strip() for k in keywords_ru.split(",") if _normalize_empty_field(k)]
-            else:
-                result["keywords"]["RUS"] = [keywords_ru.strip()] if _normalize_empty_field(keywords_ru) else []
+            norm = normalize_keywords_separators(keywords_ru)
+            result["keywords"]["RUS"] = [k.strip() for k in norm.split(";") if _normalize_empty_field(k)] if norm else []
         elif isinstance(keywords_ru, list):
             result["keywords"]["RUS"] = [str(k).strip() for k in keywords_ru if _normalize_empty_field(k)]
     if "keywords_en" in form_data:
         keywords_en = form_data["keywords_en"]
         if isinstance(keywords_en, str):
-            if ";" in keywords_en:
-                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(";") if _normalize_empty_field(k)]
-            elif "," in keywords_en:
-                result["keywords"]["ENG"] = [k.strip() for k in keywords_en.split(",") if _normalize_empty_field(k)]
-            else:
-                result["keywords"]["ENG"] = [keywords_en.strip()] if _normalize_empty_field(keywords_en) else []
+            norm = normalize_keywords_separators(keywords_en)
+            result["keywords"]["ENG"] = [k.strip() for k in norm.split(";") if _normalize_empty_field(k)] if norm else []
         elif isinstance(keywords_en, list):
             result["keywords"]["ENG"] = [str(k).strip() for k in keywords_en if _normalize_empty_field(k)]
     

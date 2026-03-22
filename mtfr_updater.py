@@ -26,6 +26,13 @@ from typing import Any, Dict, List, Optional
 
 import requests
 
+try:
+    from search_publications import normalize_keywords_separators
+except ImportError:  # pragma: no cover - тесты без полного пакета
+
+    def normalize_keywords_separators(raw: str) -> str:
+        return (raw or "").strip()
+
 LOGGER = logging.getLogger(__name__)
 
 # Нормализация названия для поиска: убираем лишние пробелы, типы кавычек/тире для лучшего совпадения на сайте
@@ -218,6 +225,8 @@ def _fetch_via_metafora_site(
         "title_en": detail.get("title_en") or "",
         "abstract_ru": detail.get("abstract_ru") or "",
         "abstract_en": detail.get("abstract_en") or "",
+        "keywords_ru": detail.get("keywords_ru") or "",
+        "keywords_en": detail.get("keywords_en") or "",
         "references_ru": detail.get("references_ru") or "",
         "references_en": detail.get("references_en") or "",
         "first_page": detail.get("first_page"),
@@ -404,14 +413,18 @@ def update_article_by_doi(
     # Ответ от сайта Метафоры (parse_publication_detail) — сохраняем RU/EN раздельно для полей формы
     abstract_ru: Optional[str] = None
     abstract_en: Optional[str] = None
+    keywords_ru: Optional[str] = None
+    keywords_en: Optional[str] = None
     references_ru_list: Optional[List[str]] = None
     references_en_list: Optional[List[str]] = None
 
-    if "title_ru" in data or "title_en" in data or "abstract_ru" in data or "references_ru" in data:
+    if "title_ru" in data or "title_en" in data or "abstract_ru" in data or "references_ru" in data or "keywords_ru" in data:
         title_ru = (data.get("title_ru") or "").strip()
         title_en = (data.get("title_en") or "").strip()
         abstract_ru = (data.get("abstract_ru") or "").strip() or None
         abstract_en = (data.get("abstract_en") or "").strip() or None
+        keywords_ru = (data.get("keywords_ru") or "").strip() or None
+        keywords_en = (data.get("keywords_en") or "").strip() or None
         refs_ru = _references_text_to_list(data.get("references_ru") or "")
         refs_en = _references_text_to_list(data.get("references_en") or "")
         references_ru_list = refs_ru if refs_ru else None
@@ -435,6 +448,16 @@ def update_article_by_doi(
         if isinstance(original_title, str):
             original_title = original_title.strip() or None
         abstract = (data.get("abstract") or data.get("annotation") or data.get("description") or "").strip() or None
+        kw_r = data.get("keywords_ru") or data.get("keywords")
+        if isinstance(kw_r, list):
+            keywords_ru = "; ".join(str(x).strip() for x in kw_r if str(x).strip()) or None
+        else:
+            keywords_ru = (str(kw_r).strip() if kw_r else "") or None
+        kw_e = data.get("keywords_en")
+        if isinstance(kw_e, list):
+            keywords_en = "; ".join(str(x).strip() for x in kw_e if str(x).strip()) or None
+        else:
+            keywords_en = (str(kw_e).strip() if kw_e else "") or None
         authors = []
         raw_authors = data.get("authors") or data.get("author") or []
         if isinstance(raw_authors, list):
@@ -445,6 +468,11 @@ def update_article_by_doi(
         pages_meta = (data.get("pages") or "").strip() or None
         first_page_meta = data.get("first_page")
         last_page_meta = data.get("last_page")
+
+    if keywords_ru:
+        keywords_ru = normalize_keywords_separators(keywords_ru) or None
+    if keywords_en:
+        keywords_en = normalize_keywords_separators(keywords_en) or None
 
     return {
         "doi": data.get("doi") if isinstance(data.get("doi"), str) else doi,
@@ -459,6 +487,8 @@ def update_article_by_doi(
         "raw": raw_for_state,
         "abstract_ru": abstract_ru,
         "abstract_en": abstract_en,
+        "keywords": keywords_ru,
+        "keywords_en": keywords_en,
         "references_ru": references_ru_list,
         "references_en": references_en_list,
         "pages": pages_meta,

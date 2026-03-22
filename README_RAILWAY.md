@@ -9,6 +9,10 @@
 
 Railway will use `requirements.txt` and install `gunicorn`.
 
+## Python version (Railpack / mise)
+
+The repo pins **Python 3.12.8** via `.python-version` and `runtime.txt`. Without this, Railpack may default to a very new Python (for example 3.13.x); if the corresponding prebuilt binary is missing from [python-build-standalone](https://github.com/astral-sh/python-build-standalone/releases), the build fails with HTTP 404 during `mise install`. You can override with the Railway variable `RAILPACK_PYTHON_VERSION` (for example `3.12`).
+
 ## Optional env vars
 - `JSON_INPUT_DIR`
 - `WORDS_INPUT_DIR`

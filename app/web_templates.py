@@ -827,6 +827,19 @@ HTML_TEMPLATE = """
       text-decoration: none;
       color: var(--text);
       display: block;
+      position: relative;
+      padding-right: 26px;
+    }
+    .file-open-link {
+      position: absolute;
+      inset: 0;
+      z-index: 1;
+      border-radius: 4px;
+    }
+    .file-item-content {
+      position: relative;
+      z-index: 2;
+      pointer-events: none;
     }
     .file-item.active {
       border-color: var(--accent);
@@ -875,6 +888,43 @@ HTML_TEMPLATE = """
       font-size: 9px;
       color: var(--text-muted);
       line-height: 1.3;
+    }
+    .file-delete-btn {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 18px;
+      height: 18px;
+      border-radius: 6px;
+      border: 1px solid rgba(248, 113, 113, 0.35);
+      background: rgba(248, 113, 113, 0.12);
+      color: #fecaca;
+      font-size: 14px;
+      line-height: 16px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      opacity: 0.75;
+      transition: opacity 0.15s ease, transform 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+      z-index: 3;
+    }
+    .file-item:hover .file-delete-btn {
+      opacity: 1;
+    }
+    .file-delete-btn:hover {
+      background: rgba(248, 113, 113, 0.18);
+      border-color: rgba(248, 113, 113, 0.55);
+      transform: translateY(-1px);
+    }
+    .file-delete-btn:active {
+      transform: translateY(0);
+    }
+    .file-delete-btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+      transform: none;
     }
     .form-field-group {
       margin-bottom: 20px;
@@ -1699,7 +1749,15 @@ HTML_TEMPLATE = """
           {% set processed_files = files|selectattr('is_processed')|list|length %}
           {% set progress_pct = (processed_files * 100 // total_files) if total_files else 0 %}
           <div style="display:flex; flex-direction:column; gap:6px; align-items:flex-start; max-width:320px;">
-            <button id="generateXmlBtn" data-progress-pct="{{ progress_pct }}" class="btn btn-primary" style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"{% if progress_pct < 100 %} disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}>
+            <button
+              type="button"
+              id="generateXmlBtn"
+              data-progress-pct="{{ progress_pct }}"
+              class="btn btn-primary"
+              style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"
+              {% if progress_pct < 100 %}disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}
+              onclick="event.preventDefault();event.stopImmediatePropagation();(async()=>{const btn=this;if(btn.dataset.busy==='1'){return;}const allow=document.getElementById('allowPartialXml');const allowXml=!!(allow&&allow.checked);const progressPct=parseInt(btn.dataset.progressPct||'0',10)||0;if(progressPct<100&&!allowXml){alert('XML доступен после обработки 100% файлов. Включите чек-бокс, если хотите сгенерировать XML раньше.');return;}const originalText=btn.textContent;btn.dataset.busy='1';btn.disabled=true;btn.textContent='⏳ Генерация XML...';btn.style.background='#999';try{const response=await fetch('/generate-xml',{method:'POST',headers:{'Content-Type':'application/json'}});const data=await response.json().catch(()=>({}));if(!response.ok||!data.success){throw new Error(data.error||'Неизвестная ошибка');}btn.textContent='✅ '+String(data.message||'XML сгенерирован');btn.style.background='#4caf50';if(Array.isArray(data.files)){for(const file of data.files){if(file&&file.url){const a=document.createElement('a');a.href=file.url;a.download=file.name||'file.xml';a.style.display='none';document.body.appendChild(a);a.click();document.body.removeChild(a);await new Promise(r=>setTimeout(r,250));}}}window.location.reload();}catch(e){alert('Ошибка при генерации XML: '+(e&&e.message?e.message:String(e)));btn.dataset.busy='0';btn.disabled=false;btn.textContent=originalText;btn.style.background='';}})();return false;"
+            >
               🚀 Сгенерировать XML
             </button>
             <label class="checkbox-inline" style="margin:0; display:flex; align-items:flex-start; flex-wrap:wrap; row-gap:2px;">
@@ -1889,37 +1947,6 @@ HTML_TEMPLATE = """
             setTimeout(() => window.location.reload(), 1200);
           });
         }
-              let restoreData = await restore(false);
-              if (!restoreData.success && restoreData.code === "dest_exists") {
-                const confirmOverwrite = window.confirm("Папка выпуска уже существует. Перезаписать?");
-                if (!confirmOverwrite) {
-                  if (status) {
-                    status.textContent = "Восстановление отменено.";
-                    status.style.color = "#555";
-                  }
-                  return;
-                }
-                restoreData = await restore(true);
-              }
-              if (!restoreData.success) {
-                if (status) {
-                  status.textContent = restoreData.error || "Ошибка восстановления.";
-                  status.style.color = "#c62828";
-                }
-                return;
-              }
-              if (status) {
-                status.textContent = "Проект восстановлен: " + target.issue;
-                status.style.color = "#2e7d32";
-              }
-              setTimeout(() => window.location.reload(), 1200);
-            } catch (_) {
-              if (status) {
-                status.textContent = "Ошибка восстановления.";
-                status.style.color = "#c62828";
-              }
-            }
-          };
         </script>
       </div>
       {% if files %}
@@ -1940,26 +1967,73 @@ HTML_TEMPLATE = """
         </div>
         <div class="file-list">
           {% for file in files %}
-            <a href="/markup/{{ file.name }}" style="text-decoration: none; color: inherit;">
-              <div class="file-item {% if file.is_processed %}processed{% endif %}" data-filename="{{ file.name }}">
-                <div class="file-name {% if file.is_processed %}processed{% endif %}">
-                  <span class="status-icon {% if file.is_processed %}processed{% endif %}">
-                    {% if file.is_processed %}✓{% else %}○{% endif %}
-                  </span>
-                  <span style="word-break: break-word;">{{ file.display_name }}</span>
-                </div>
-                <div class="file-info">
-                  {{ file.size_kb }} KB • {{ file.modified }}
-                  {% if file.is_processed %}
-                  <br><span style="color: #4caf50; font-weight: 600;">✓</span>
-                  {% endif %}
+            <div
+              class="file-item {% if file.is_processed %}processed{% endif %}"
+              data-filename="{{ file.name }}"
+            >
+                <a class="file-open-link" href="/markup/{{ file.name }}" aria-label="Открыть статью"></a>
+                <button
+                  type="button"
+                  class="file-delete-btn"
+                  title="Удалить JSON и связанные файлы (PDF/DOCX и т.д.)"
+                  aria-label="Удалить файл"
+                  data-json-filename="{{ file.name }}"
+                  onclick="event.preventDefault();event.stopPropagation();(async()=>{const btn=this;const name=String(btn.getAttribute('data-json-filename')||'').trim();if(!name){return;}const ok=window.confirm('Удалить файл разметки и все связанные файлы (PDF/DOCX/RTF и т.д.)?\\n\\n'+name);if(!ok){return;}btn.disabled=true;try{const resp=await fetch('/delete-json-file',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({json_filename:name})});const data=await resp.json().catch(()=>({}));if(!resp.ok||!data.success){throw new Error(data.error||'Не удалось удалить файлы.');}window.location.reload();}catch(e){btn.disabled=false;alert('Ошибка удаления: '+(e&&e.message?e.message:String(e)));}})();return false;"
+                >&times;</button>
+                <div class="file-item-content">
+                  <div class="file-name {% if file.is_processed %}processed{% endif %}">
+                    <span class="status-icon {% if file.is_processed %}processed{% endif %}">
+                      {% if file.is_processed %}✓{% else %}○{% endif %}
+                    </span>
+                    <span style="word-break: break-word;">{{ file.display_name }}</span>
+                  </div>
+                  <div class="file-info">
+                    {{ file.size_kb }} KB • {{ file.modified }}
+                    {% if file.is_processed %}
+                    <br><span style="color: #4caf50; font-weight: 600;">✓</span>
+                    {% endif %}
+                  </div>
                 </div>
               </div>
-            </a>
           {% endfor %}
         </div>
         
         <script>
+          async function deleteJsonFileBundle(jsonFilename, btn) {
+            const name = String(jsonFilename || "").trim();
+            if (!name) return;
+            const confirmText =
+              "Удалить файл разметки и все связанные файлы (PDF/DOCX/RTF и т.д.)?\n\n" +
+              name;
+            if (!window.confirm(confirmText)) return;
+
+            if (btn) btn.disabled = true;
+            try {
+              const resp = await fetch("/delete-json-file", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ json_filename: name }),
+              });
+              const data = await resp.json().catch(() => ({}));
+              if (!resp.ok || !data.success) {
+                throw new Error(data.error || "Не удалось удалить файлы.");
+              }
+              const deletedCount = Array.isArray(data.deleted) ? data.deleted.length : 0;
+              if (typeof toast === "function") {
+                toast("Удалено файлов: " + deletedCount, "success");
+              }
+              // Пересчитываем прогресс/счётчики самым надёжным способом.
+              window.location.reload();
+            } catch (e) {
+              if (typeof toast === "function") {
+                toast("Ошибка удаления: " + (e && e.message ? e.message : String(e)), "error");
+              } else {
+                alert("Ошибка удаления: " + (e && e.message ? e.message : String(e)));
+              }
+              if (btn) btn.disabled = false;
+            }
+          }
+
           // Обработчик кнопки генерации XML
           const generateXmlBtn = document.getElementById("generateXmlBtn");
           if (generateXmlBtn) {

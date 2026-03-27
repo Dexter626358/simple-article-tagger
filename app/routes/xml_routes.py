@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import threading
 
@@ -61,12 +62,21 @@ def register_xml_routes(app, ctx):
     def generate_xml():
         """Генерация XML файла для текущего выпуска."""
         try:
-            from services.xml_generator_helper import generate_xml_for_archive_dir
+            from services.xml_generator_helper import (
+                create_config_from_folder_and_journal,
+                generate_xml_for_archive_dir,
+            )
 
             if not list_of_journals_path.exists():
                 return jsonify({
                     "success": False,
-                    "error": f"Файл data/list_of_journals.json не найден: {list_of_journals_path}"
+                    "error": f"Файл data/list_of_journals.json не найден: {list_of_journals_path}",
+                    "error_code": "journals_list_missing",
+                    "details": {
+                        "stage": "preflight",
+                        "path": str(list_of_journals_path),
+                        "hint": "Проверьте наличие файла data/list_of_journals.json и его доступность на запись/чтение.",
+                    },
                 }), 400
 
             session_id = get_session_id()
@@ -77,10 +87,94 @@ def register_xml_routes(app, ctx):
             if not archive_name:
                 return jsonify({
                     "success": False,
-                    "error": "Не выбран текущий выпуск."
+                    "error": "Не выбран текущий выпуск.",
+                    "error_code": "archive_not_selected",
+                    "details": {
+                        "stage": "preflight",
+                        "hint": "Загрузите/выберите выпуск и повторите генерацию XML.",
+                    },
                 }), 400
 
             archive_dir = (session_input_dir / archive_name).resolve()
+            if not archive_dir.exists() or not archive_dir.is_dir():
+                return jsonify({
+                    "success": False,
+                    "error": f"Папка выпуска не найдена: {archive_name}",
+                    "error_code": "archive_dir_missing",
+                    "details": {
+                        "stage": "preflight",
+                        "archive": archive_name,
+                        "path": str(archive_dir),
+                        "hint": "Выпуск мог быть удалён или перемещён. Обновите страницу и загрузите проект заново.",
+                    },
+                }), 400
+
+            json_dir = archive_dir / "json"
+            if not json_dir.exists() or not json_dir.is_dir():
+                return jsonify({
+                    "success": False,
+                    "error": f"Папка JSON не найдена: {json_dir}",
+                    "error_code": "json_dir_missing",
+                    "details": {
+                        "stage": "preflight",
+                        "archive": archive_name,
+                        "path": str(json_dir),
+                        "hint": "Проверьте структуру проекта: в выпуске должна быть папка json/ с файлами статей.",
+                    },
+                }), 400
+
+            json_files = sorted(json_dir.glob("*.json"))
+            if not json_files:
+                return jsonify({
+                    "success": False,
+                    "error": f"В папке выпуска нет JSON файлов: {json_dir}",
+                    "error_code": "json_files_missing",
+                    "details": {
+                        "stage": "preflight",
+                        "archive": archive_name,
+                        "path": str(json_dir),
+                        "hint": "Добавьте JSON статьи в папку json/ и повторите генерацию XML.",
+                    },
+                }), 400
+
+            invalid_json_files: list[dict] = []
+            for file_path in json_files:
+                try:
+                    _ = json.loads(file_path.read_text(encoding="utf-8"))
+                except Exception as exc:
+                    invalid_json_files.append({
+                        "name": file_path.name,
+                        "error": str(exc),
+                    })
+
+            if invalid_json_files:
+                return jsonify({
+                    "success": False,
+                    "error": "Обнаружены некорректные JSON файлы в выпуске.",
+                    "error_code": "invalid_json_files",
+                    "details": {
+                        "stage": "preflight",
+                        "archive": archive_name,
+                        "invalid_json_files": invalid_json_files,
+                        "hint": "Исправьте синтаксис JSON-файлов и повторите генерацию XML.",
+                    },
+                }), 400
+
+            config_preview = create_config_from_folder_and_journal(archive_name, list_of_journals_path)
+            if not config_preview:
+                issn_guess = archive_name.split("_", 1)[0] if "_" in archive_name else archive_name
+                return jsonify({
+                    "success": False,
+                    "error": f"Не удалось собрать конфигурацию выпуска для {archive_name}.",
+                    "error_code": "journal_config_not_found",
+                    "details": {
+                        "stage": "preflight",
+                        "archive": archive_name,
+                        "issn": issn_guess,
+                        "hint": "Проверьте ISSN в названии папки выпуска и наличие этого ISSN в data/list_of_journals.json.",
+                    },
+                }), 400
+
             xml_path = generate_xml_for_archive_dir(
                 archive_dir=archive_dir,
                 list_of_journals_path=list_of_journals_path,
@@ -89,7 +183,14 @@ def register_xml_routes(app, ctx):
             if not xml_path:
                 return jsonify({
                     "success": False,
-                    "error": "Не удалось сгенерировать XML файлы. Проверьте наличие JSON файлов и конфигурацию."
+                    "error": "Не удалось сгенерировать XML файлы.",
+                    "error_code": "xml_generation_failed",
+                    "details": {
+                        "stage": "xml_build",
+                        "archive": archive_name,
+                        "json_count": len(json_files),
+                        "hint": "Проверьте поля статей (обязательные данные, DOI, авторов, ссылки) и повторите генерацию.",
+                    },
                 }), 400
 
             files_info = []
@@ -148,12 +249,22 @@ def register_xml_routes(app, ctx):
         except ImportError as e:
             return jsonify({
                 "success": False,
-                "error": f"Модуль xml_generator_helper недоступен: {e}"
+                "error": f"Модуль xml_generator_helper недоступен: {e}",
+                "error_code": "xml_helper_import_error",
+                "details": {
+                    "stage": "server",
+                    "hint": "Проверьте установку зависимостей и доступность services/xml_generator_helper.py.",
+                },
             }), 500
         except Exception as e:
             return jsonify({
                 "success": False,
-                "error": f"Ошибка при генерации XML: {str(e)}"
+                "error": f"Ошибка при генерации XML: {str(e)}",
+                "error_code": "xml_generation_exception",
+                "details": {
+                    "stage": "server",
+                    "exception": str(e),
+                },
             }), 500
 
     @app.route("/download-xml/<path:xml_filename>")

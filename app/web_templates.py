@@ -1051,8 +1051,8 @@ HTML_TEMPLATE = """
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
-    .author-input.author-code-invalid{border-color:#e57373!important;background-color:#fff8f8;}
-    .author-input.author-code-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
+    .author-input.author-code-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .correspondence-toggle{margin-top:5px;}
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -1754,12 +1754,13 @@ HTML_TEMPLATE = """
               id="generateXmlBtn"
               data-progress-pct="{{ progress_pct }}"
               class="btn btn-primary"
-              style="{% if progress_pct < 100 %} opacity: 0.6; cursor: not-allowed;{% endif %}"
-              {% if progress_pct < 100 %}disabled title="Кнопка доступна после обработки 100% файлов"{% endif %}
-              onclick="event.preventDefault();event.stopImmediatePropagation();(async()=>{const btn=this;if(btn.dataset.busy==='1'){return;}const allow=document.getElementById('allowPartialXml');const allowXml=!!(allow&&allow.checked);const progressPct=parseInt(btn.dataset.progressPct||'0',10)||0;if(progressPct<100&&!allowXml){alert('XML доступен после обработки 100% файлов. Включите чек-бокс, если хотите сгенерировать XML раньше.');return;}const originalText=btn.textContent;btn.dataset.busy='1';btn.disabled=true;btn.textContent='⏳ Генерация XML...';btn.style.background='#999';try{const response=await fetch('/generate-xml',{method:'POST',headers:{'Content-Type':'application/json'}});const data=await response.json().catch(()=>({}));if(!response.ok||!data.success){const details=(data&&data.details)||{};let extra='';if(details.stage){extra+='\nЭтап: '+details.stage;}if(details.archive){extra+='\nВыпуск: '+details.archive;}if(details.issn){extra+='\nISSN: '+details.issn;}if(Array.isArray(details.invalid_json_files)&&details.invalid_json_files.length){const maxItems=details.invalid_json_files.slice(0,5).map((x)=>'- '+(x.name||'unknown')+': '+(x.error||'ошибка')).join('\n');extra+='\nПроблемные JSON:\n'+maxItems;if(details.invalid_json_files.length>5){extra+='\n... и ещё '+(details.invalid_json_files.length-5);} }if(details.hint){extra+='\nПодсказка: '+details.hint;}throw new Error((data&&data.error?data.error:'Неизвестная ошибка')+extra);}btn.textContent='✅ '+String(data.message||'XML сгенерирован');btn.style.background='#4caf50';if(Array.isArray(data.files)){for(const file of data.files){if(file&&file.url){const a=document.createElement('a');a.href=file.url;a.download=file.name||'file.xml';a.style.display='none';document.body.appendChild(a);a.click();document.body.removeChild(a);await new Promise(r=>setTimeout(r,250));}}}window.location.reload();}catch(e){alert('Ошибка при генерации XML:\n'+(e&&e.message?e.message:String(e)));btn.dataset.busy='0';btn.disabled=false;btn.textContent=originalText;btn.style.background='';}})();return false;"
+              style="{% if progress_pct < 100 %} opacity: 0.75; cursor: help;{% endif %}"
+              title="{% if progress_pct < 100 %}Нужна полная разметка (100%) или включите чек-бокс ниже{% else %}Сформировать XML выпуска{% endif %}"
+              onclick="event.preventDefault();event.stopImmediatePropagation();if(window.handleGenerateXmlClick){return window.handleGenerateXmlClick(event);} (async()=>{const btn=this;if(btn.dataset.busy==='1'){return false;}const allow=document.getElementById('allowPartialXml');const allowXml=!!(allow&&allow.checked);const progressPct=parseInt(btn.dataset.progressPct||'0',10)||0;if(progressPct<100&&!allowXml){window.alert('Сначала завершите разметку всех статей (100%) или отметьте «Генерировать XML даже при ошибках».');return false;}const originalText=btn.textContent;btn.dataset.busy='1';btn.disabled=true;btn.textContent='⏳ Генерация XML...';btn.style.background='#999';try{const response=await fetch('/generate-xml',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin'});const text=await response.text();let data={};try{data=text?JSON.parse(text):{};}catch(_){data={success:false,error:'Ответ сервера не JSON'};}if(!response.ok||!data.success){throw new Error((data&&data.error)||('Ошибка HTTP '+response.status));}const files=Array.isArray(data.files)?data.files:[];for(const file of files){if(file&&file.url){const a=document.createElement('a');a.href=file.url;a.download=file.name||'issue.xml';a.style.display='none';document.body.appendChild(a);a.click();document.body.removeChild(a);await new Promise(r=>setTimeout(r,350));}}try{await fetch('/finalize-archive',{method:'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({folders:data.folders||[]})});}catch(_){ }window.location.reload();}catch(e){window.alert('Ошибка при генерации XML:\\n'+(e&&e.message?e.message:String(e)));btn.dataset.busy='0';btn.disabled=false;btn.textContent=originalText;btn.style.background='';}return false;})();return false;"
             >
               🚀 Сгенерировать XML
             </button>
+            <div id="xmlGenerateStatus" role="status" aria-live="polite" style="font-size:12px;max-width:520px;white-space:pre-wrap;line-height:1.35;min-height:1.2em;"></div>
             <label class="checkbox-inline" style="margin:0; display:flex; align-items:flex-start; flex-wrap:wrap; row-gap:2px;">
               <input type="checkbox" id="allowPartialXml" style="transform: translateY(1px); margin-top:2px;">
               <span>Генерировать XML даже при ошибках</span>
@@ -1778,6 +1779,162 @@ HTML_TEMPLATE = """
           <span id="projectStatus" class="upload-status muted-text" style="flex-basis:100%;"></span>
         </div>
         <small>Внимание! После генерации xml проект удаляется</small>
+        <script>
+        (function initGenerateXmlButton() {
+          var btn = document.getElementById("generateXmlBtn");
+          var allowPartial = document.getElementById("allowPartialXml");
+          var statusEl = document.getElementById("xmlGenerateStatus");
+          if (!btn) return;
+
+          function showStatus(msg, isError) {
+            if (!statusEl) return;
+            statusEl.textContent = msg || "";
+            statusEl.style.color = isError ? "#f87171" : "#4ade80";
+          }
+
+          function progressPct() {
+            return parseInt(btn.getAttribute("data-progress-pct") || "0", 10) || 0;
+          }
+
+          function canRun() {
+            var pct = progressPct();
+            var allow = !!(allowPartial && allowPartial.checked);
+            return pct >= 100 || allow;
+          }
+
+          function updateVisual() {
+            var ok = canRun();
+            btn.style.opacity = ok ? "1" : "0.75";
+            btn.style.cursor = ok ? "pointer" : "help";
+            btn.title = ok
+              ? "Сформировать XML выпуска"
+              : "Нужна полная разметка (100%) или включите «Генерировать XML даже при ошибках».";
+          }
+
+          function formatServerError(data, rawText, httpStatus) {
+            var lines = [];
+            if (data && data.error) lines.push(String(data.error));
+            if (data && data.error_code) lines.push("Код: " + data.error_code);
+            var d = (data && data.details) || {};
+            if (d.stage) lines.push("Этап: " + d.stage);
+            if (d.archive) lines.push("Выпуск: " + d.archive);
+            if (d.issn) lines.push("ISSN: " + d.issn);
+            if (d.path) lines.push("Путь: " + d.path);
+            if (Array.isArray(d.invalid_json_files) && d.invalid_json_files.length) {
+              lines.push("Проблемные JSON:");
+              for (var i = 0; i < Math.min(8, d.invalid_json_files.length); i++) {
+                var x = d.invalid_json_files[i];
+                lines.push("  • " + (x.name || "?") + ": " + (x.error || ""));
+              }
+              if (d.invalid_json_files.length > 8) {
+                lines.push("  … и ещё " + (d.invalid_json_files.length - 8));
+              }
+            }
+            if (d.hint) lines.push("Подсказка: " + d.hint);
+            if (!lines.length && rawText) {
+              lines.push("Ответ сервера (статус " + httpStatus + "), не JSON:");
+              lines.push(rawText.slice(0, 900));
+            }
+            return lines.length ? lines.join("\n") : ("Ошибка HTTP " + httpStatus);
+          }
+
+          window.handleGenerateXmlClick = async function (event) {
+            if (event) {
+              event.preventDefault();
+              event.stopImmediatePropagation();
+            }
+            showStatus("", false);
+            if (!canRun()) {
+              showStatus(
+                "Сначала завершите разметку всех статей (100%) или отметьте «Генерировать XML даже при ошибках».",
+                true
+              );
+              return false;
+            }
+            if (btn.getAttribute("data-busy") === "1") return false;
+            var originalText = btn.textContent;
+            btn.setAttribute("data-busy", "1");
+            btn.disabled = true;
+            btn.textContent = "⏳ Генерация XML...";
+            btn.style.background = "#999";
+            try {
+              var response = await fetch("/generate-xml", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+              });
+              var text = await response.text();
+              var data = {};
+              try {
+                data = text ? JSON.parse(text) : {};
+              } catch (e) {
+                data = { success: false, error: "Ответ сервера не JSON" };
+              }
+              if (!response.ok || !data.success) {
+                throw new Error(formatServerError(data, text, response.status));
+              }
+
+              showStatus(data.message || "XML сформирован. Идёт загрузка…", false);
+              var files = Array.isArray(data.files) ? data.files : [];
+              for (var i = 0; i < files.length; i++) {
+                var file = files[i];
+                if (file && file.url) {
+                  var a = document.createElement("a");
+                  a.href = file.url;
+                  a.download = file.name || "issue.xml";
+                  a.style.display = "none";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  await new Promise(function (resolve) { setTimeout(resolve, 350); });
+                }
+              }
+
+              var currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
+              if (currentArchive) {
+                sessionStorage.setItem("xml_done_" + currentArchive, "1");
+              }
+
+              try {
+                await fetch("/finalize-archive", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  credentials: "same-origin",
+                  body: JSON.stringify({ folders: data.folders || [] })
+                });
+              } catch (_) {
+                // Finalization is best-effort; the XML file has already been created.
+              }
+
+              if (currentArchive) {
+                sessionStorage.removeItem("xml_done_" + currentArchive);
+              }
+              sessionStorage.removeItem("lastArchiveName");
+              sessionStorage.removeItem("archive_done_reloaded");
+              window.currentArchive = null;
+              setTimeout(function () { window.location.reload(); }, 300);
+              return false;
+            } catch (err) {
+              var message = err && err.message ? err.message : String(err);
+              if (statusEl && !String(statusEl.textContent || "").trim()) {
+                showStatus("Запрос не выполнен: " + message, true);
+              }
+              window.alert("Ошибка при генерации XML:\n" + message);
+              btn.setAttribute("data-busy", "0");
+              btn.disabled = false;
+              btn.textContent = originalText;
+              btn.style.background = "";
+              updateVisual();
+              return false;
+            }
+          };
+
+          if (allowPartial) {
+            allowPartial.addEventListener("change", updateVisual);
+          }
+          updateVisual();
+        })();
+        </script>
         
         <script>
           window.saveProject = async () => {
@@ -2034,135 +2191,6 @@ HTML_TEMPLATE = """
             }
           }
 
-          // Обработчик кнопки генерации XML
-          const generateXmlBtn = document.getElementById("generateXmlBtn");
-          if (generateXmlBtn) {
-            const allowPartialXml = document.getElementById("allowPartialXml");
-            const progressPct = parseInt(generateXmlBtn.dataset.progressPct || "0", 10);
-            const canGenerateXml = progressPct >= 100;
-
-            const updateXmlButtonState = () => {
-              const allow = allowPartialXml && allowPartialXml.checked;
-              if (canGenerateXml || allow) {
-                generateXmlBtn.disabled = false;
-                generateXmlBtn.style.opacity = "1";
-                generateXmlBtn.style.cursor = "pointer";
-                generateXmlBtn.title = allow && !canGenerateXml
-                  ? "XML будет сгенерирован даже при неполной обработке"
-                  : "";
-              } else {
-                generateXmlBtn.disabled = true;
-                generateXmlBtn.style.opacity = "0.6";
-                generateXmlBtn.style.cursor = "not-allowed";
-                generateXmlBtn.title = "Кнопка доступна после обработки 100% файлов";
-              }
-            };
-
-            updateXmlButtonState();
-            if (allowPartialXml) {
-              allowPartialXml.addEventListener("change", updateXmlButtonState);
-            }
-
-            generateXmlBtn.addEventListener("click", async function() {
-            const btn = this;
-            const originalText = btn.textContent;
-
-            if (!canGenerateXml && !(allowPartialXml && allowPartialXml.checked)) {
-              alert("XML доступен после обработки 100% файлов. Включите чек-бокс, если хотите сгенерировать XML раньше.");
-              return;
-            }
-            
-            // Блокируем кнопку и показываем процесс
-            btn.disabled = true;
-            btn.textContent = "⏳ Генерация XML...";
-            btn.style.background = "#999";
-            
-            try {
-              const response = await fetch("/generate-xml", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json"
-                }
-              });
-              
-              const data = await response.json();
-              
-              if (data.success) {
-                btn.textContent = "✅ " + data.message;
-                btn.style.background = "#4caf50";
-                
-                // Скачиваем все XML файлы по очереди
-                if (data.files && data.files.length > 0) {
-                  // Функция для скачивания файла
-                  const downloadFile = (url, filename) => {
-                    return new Promise((resolve) => {
-                      const a = document.createElement("a");
-                      a.href = url;
-                      a.download = filename;
-                      a.style.display = "none";
-                      document.body.appendChild(a);
-                      a.click();
-                      document.body.removeChild(a);
-                      // Небольшая задержка между скачиваниями
-                      setTimeout(resolve, 300);
-                    });
-                  };
-                  
-                  // Скачиваем все файлы последовательно
-                  for (const file of data.files) {
-                    await downloadFile(file.url, file.name);
-                  }
-                  
-                  const currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
-                  if (currentArchive) {
-                    sessionStorage.setItem(`xml_done_${currentArchive}`, "1");
-                  }
-                }
-                
-                // Показываем уведомление
-                const notification = document.createElement("div");
-                notification.style.cssText = "position:fixed;top:20px;right:20px;background:#4caf50;color:#fff;padding:15px 20px;border-radius:4px;box-shadow:0 4px 12px rgba(0,0,0,0.2);z-index:3000;font-size:14px;max-width:400px;";
-                notification.innerHTML = "<strong>Успешно!</strong><br>" + data.message + "<br><small>Скачано файлов: " + ((data.files && data.files.length) ? data.files.length : 0) + "</small>";
-                document.body.appendChild(notification);
-                
-                setTimeout(() => {
-                  notification.remove();
-                }, 1000);
-                // Сбрасываем состояние выпуска, чтобы можно было загрузить новый архив
-                const currentArchive = window.currentArchive || sessionStorage.getItem("lastArchiveName");
-                if (currentArchive) {
-                  sessionStorage.removeItem(`xml_done_${currentArchive}`);
-                }
-                sessionStorage.removeItem("lastArchiveName");
-                sessionStorage.removeItem("archive_done_reloaded");
-                window.currentArchive = null;
-                window.location.reload();
-              } else {
-                btn.textContent = "❌ Ошибка";
-                btn.style.background = "#f44336";
-                
-                alert("Ошибка при генерации XML: " + (data.error || "Неизвестная ошибка"));
-                
-                setTimeout(() => {
-                  btn.textContent = originalText;
-                  btn.style.background = "#4caf50";
-                  btn.disabled = false;
-                }, 3000);
-              }
-            } catch (error) {
-              btn.textContent = "❌ Ошибка";
-              btn.style.background = "#f44336";
-              alert("Ошибка при генерации XML: " + error.message);
-              
-              setTimeout(() => {
-                btn.textContent = originalText;
-                btn.style.background = "#4caf50";
-                btn.disabled = false;
-              }, 3000);
-            }
-          });
-          }
-          
           // Теперь используем прямые ссылки на /markup/<filename> вместо AJAX загрузки
           
           // Проверяем localStorage для файлов, которые были только что сохранены
@@ -6754,8 +6782,8 @@ MARKUP_TEMPLATE = r"""
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
-    .author-input.author-code-invalid{border-color:#e57373!important;background-color:#fff8f8;}
-    .author-input.author-code-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
+    .author-input.author-code-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
     .author-org-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
     .author-org-list{display:flex;flex-direction:column;gap:10px;}
@@ -10009,6 +10037,35 @@ function updateAuthorCodeFieldHighlight(input) {
   input.classList.toggle("author-code-invalid", !ok);
 }
 
+function isValidEdnValue(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return true;
+  return /^[A-Za-z0-9]{6}$/.test(v);
+}
+
+function updateEdnFieldHighlight(input) {
+  if (!input) return;
+  input.classList.toggle("soft-invalid", !isValidEdnValue(input.value));
+}
+
+function normalizeCorrespondenceSelection(preferredIndex = null) {
+  const checkboxes = Array.from(document.querySelectorAll(".author-correspondence"));
+  if (!checkboxes.length) return;
+
+  let keeper = null;
+  if (preferredIndex !== null && preferredIndex !== undefined) {
+    keeper = checkboxes.find((cb) => String(cb.dataset.index) === String(preferredIndex) && cb.checked) || null;
+  }
+  if (!keeper) {
+    keeper = checkboxes.find((cb) => cb.checked) || null;
+  }
+  if (!keeper) return;
+
+  checkboxes.forEach((checkbox) => {
+    if (checkbox !== keeper) checkbox.checked = false;
+  });
+}
+
 function attachAuthorNameListeners(index) {
   const authorItem = document.querySelector(`.author-item[data-author-index="${index}"]`);
   if (!authorItem) return;
@@ -10016,12 +10073,21 @@ function attachAuthorNameListeners(index) {
   // Добавляем обработчики для полей фамилии и инициалов
   const surnameInput = authorItem.querySelector(`.author-input[data-field="surname"][data-lang="RUS"][data-index="${index}"]`);
   const initialsInput = authorItem.querySelector(`.author-input[data-field="initials"][data-lang="RUS"][data-index="${index}"]`);
+  const correspondenceCheckbox = authorItem.querySelector(`.author-correspondence[data-index="${index}"]`);
   
   if (surnameInput) {
     surnameInput.addEventListener("input", () => updateAuthorName(index));
   }
   if (initialsInput) {
     initialsInput.addEventListener("input", () => updateAuthorName(index));
+  }
+  if (correspondenceCheckbox && !correspondenceCheckbox.dataset.singleBound) {
+    correspondenceCheckbox.dataset.singleBound = "1";
+    correspondenceCheckbox.addEventListener("change", () => {
+      if (correspondenceCheckbox.checked) {
+        normalizeCorrespondenceSelection(index);
+      }
+    });
   }
   
   // Добавляем обработчики для полей организации
@@ -10071,6 +10137,8 @@ function attachAuthorNameListeners(index) {
 function collectAuthorsData() {
   const authors = [];
   const authorItems = document.querySelectorAll(".author-item");
+  normalizeCorrespondenceSelection();
+  let hasCorrespondenceAuthor = false;
   
   authorItems.forEach((item, index) => {
     const parsedIndex = parseInt(item.dataset.authorIndex, 10);
@@ -10080,7 +10148,16 @@ function collectAuthorsData() {
     
     // Получаем значение чекбокса "ответственный за переписку"
     const correspondenceCheckbox = item.querySelector(`.author-correspondence[data-index="${authorIndex}"]`);
-    const correspondence = correspondenceCheckbox ? correspondenceCheckbox.checked : false;
+    let correspondence = correspondenceCheckbox ? correspondenceCheckbox.checked : false;
+    if (correspondence && hasCorrespondenceAuthor) {
+      correspondence = false;
+      if (correspondenceCheckbox) {
+        correspondenceCheckbox.checked = false;
+      }
+    }
+    if (correspondence) {
+      hasCorrespondenceAuthor = true;
+    }
     
     const author = {
       num: String(authorIndex + 1),
@@ -11788,6 +11865,7 @@ function applySelectionToField(fieldId) {
         const correspondenceCheckbox = authorItem.querySelector(`.author-correspondence[data-index="${index}"]`);
         if (correspondenceCheckbox && idx === 0) {
           correspondenceCheckbox.checked = true;
+          normalizeCorrespondenceSelection(index);
         }
 
         updateAuthorName(index);
@@ -12270,6 +12348,13 @@ function applySelectionToField(fieldId) {
         });
       }
     }
+    const ednField = document.getElementById("edn");
+    if (ednField) {
+      const runEdnValidation = () => updateEdnFieldHighlight(ednField);
+      ednField.addEventListener("input", runEdnValidation);
+      ednField.addEventListener("change", runEdnValidation);
+      runEdnValidation();
+    }
     
     // Инициализация обработчиков для обновления имен авторов
     const existingAuthors = $$(".author-item");
@@ -12280,6 +12365,7 @@ function applySelectionToField(fieldId) {
         initOrganizationCards(index);
       }
     });
+    normalizeCorrespondenceSelection();
 
     const form = $("#metadataForm");
     if (form) {

@@ -43,7 +43,8 @@ artType: RAR (default), REV, BRV, SCO, REP, CNF, EDI, COR, ABS, RPR, MIS, PER, U
 - **Organizations**: If author is affiliated with multiple organizations, list them separated by semicolons.
 - **Shared affiliation rule**: If multiple authors share the same organization, and it is provided once for the group, apply this organization to ALL those authors. Copy both organization names (RUS/ENG) and addresses (RUS/ENG) for each author.
 - **Affiliation markers**: Superscript/inline numbers next to author names (e.g., "Юрова1,2", "Kordys 1") indicate the affiliation numbers listed below. Use these numbers to map each author to the correct organization(s). If an author has multiple numbers, include all corresponding organizations and addresses.
-- **Addresses**: Do not include organization name in address. For multiple organizations, separate addresses with semicolons. Address maybe just city.
+- **Addresses**: STRICTLY do not include organization name, faculty, department, laboratory, institute title, or any other affiliation name in address. Address must contain only the postal/location part (for example: city, region, country, street if explicitly given). For multiple organizations, separate addresses with semicolons.
+- **Address uncertainty rule**: If the address is not explicitly stated or cannot be confidently separated from the organization name, leave the address field empty (""). It is better to return an empty address than to guess or to copy the organization name into address.
 - **Important**: Do NOT include address information in the main author data fields (surname, initials, orgName). Address should be placed in the separate "address" field only.
 - **Email**:
   - Use each author's individual email if explicitly stated
@@ -81,6 +82,7 @@ artType: RAR (default), REV, BRV, SCO, REP, CNF, EDI, COR, ABS, RPR, MIS, PER, U
 ### Metadata
 - **Pages**: Format "start-end" (e.g., "7-26")
 - **Codes**: UDC (УДК), BBK (ББК), DOI, EDN
+- **DOI/EDN strict rule**: Fill DOI and EDN ONLY if they are explicitly present in the article metadata/header/front matter for this article. Do NOT infer them from references, footnotes, external knowledge, database patterns, neighboring articles, or partial hints. If DOI or EDN is absent in the article metadata, leave it as an empty string.
 - **Dates**: Format YYYY-MM-DD (e.g., "2023-05-15")
 - **Funding**: Information about grants and funding sources
 - **Publication Language (PublLang)**: Determine the main language of the article publication:
@@ -397,6 +399,12 @@ If INPUT is empty or contains no recognizable references, return:
     # Fallback prompt for metadata extraction (note: schema differs from SCIENTIFIC_BASE_TEMPLATE)
     SCIENTIFIC_FALLBACK_TEMPLATE = """Извлеки метаданные из следующего текста научной статьи и верни результат в формате JSON.
 
+STRICT RULES:
+- Do NOT generate DOI or EDN if they are not explicitly present in the metadata/header of this exact article.
+- Do NOT take DOI or EDN from references, footnotes, neighboring articles, or external knowledge.
+- Do NOT include organization name in address.
+- If address is not explicitly and clearly separable from the organization name, leave address empty.
+
 Текст статьи:
 {article_text}
 
@@ -405,10 +413,10 @@ If INPUT is empty or contains no recognizable references, return:
 - title_en (название статьи на английском языке, если есть)
 - IMPORTANT: Extract full information for all authors listed in the article. Do not omit any author under any circumstances.
 - authors (список авторов, каждый автор как объект с полями: surname, initials, organization, address, email, otherInfo - для русского и английского языков)
-- doi (DOI статьи, если есть)
+- doi (DOI статьи, только если он явно указан в метаданных/шапке именно этой статьи)
 - udc (УДК, если есть)
 - bbk (ББК, если есть)
-- edn (EDN, если есть)
+- edn (EDN, только если он явно указан в метаданных/шапке именно этой статьи)
 - annotation (аннотация на русском языке){annotation_suffix}
 - annotation_en (аннотация на английском языке, если есть){annotation_suffix}
 - keywords (ключевые слова на русском языке, список)
@@ -426,6 +434,8 @@ If INPUT is empty or contains no recognizable references, return:
 - references_en (список литературы на английском языке, если есть){references_suffix}
 
 Верни только валидный JSON объект без дополнительных комментариев и форматирования.
+Если DOI или EDN не указаны явно в метаданных этой статьи, верни пустую строку.
+Если адрес автора неочевиден или смешан с названием организации, оставь поле address пустым.
 Если какое-то поле отсутствует в тексте, верни null для этого поля.
 """
 
@@ -549,4 +559,3 @@ HTML:"""
             "references_formatting_eng",
             "pdf_to_html",
         ]
-

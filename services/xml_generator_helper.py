@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+import builtins
 import json
 import re
+import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -45,6 +47,23 @@ except ImportError:
     except ImportError:
         XSD_VALIDATION_AVAILABLE = False
         XSD_VALIDATION_LIBRARY = None
+
+
+def print(*args, **kwargs) -> None:  # type: ignore[no-redef]
+    """
+    Print safely on Windows consoles that cannot encode emoji/status symbols.
+    """
+    sep = kwargs.pop("sep", " ")
+    end = kwargs.pop("end", "\n")
+    flush = kwargs.pop("flush", False)
+    file = kwargs.pop("file", sys.stdout)
+    text = sep.join(str(arg) for arg in args)
+    try:
+        builtins.print(text, end=end, flush=flush, file=file, **kwargs)
+    except UnicodeEncodeError:
+        encoding = getattr(file, "encoding", None) or "utf-8"
+        safe_text = text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+        builtins.print(safe_text, end=end, flush=flush, file=file, **kwargs)
 
 
 def validate_xml_against_schema(xml_file: Path, schema_file: Optional[Path] = None) -> tuple[bool, list[str]]:
@@ -819,4 +838,3 @@ def main() -> int:
 if __name__ == "__main__":
     import sys
     sys.exit(main())
-

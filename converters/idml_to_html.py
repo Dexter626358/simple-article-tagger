@@ -56,6 +56,50 @@ class IDMLParseResult:
         }
 
 
+@dataclass
+class IDMLParagraph:
+    style: str
+    text: str
+    numbering_level: str = ""
+
+
+SECTION_MARKERS: dict[str, tuple[str, ...]] = {
+    "abstract": ("аннотация", "резюме", "summary"),
+    "abstract_en": ("abstract",),
+    "keywords": ("ключевые слова", "ключевые слова и словосочетания"),
+    "keywords_en": ("keywords", "key words"),
+    "references": ("литература", "список литературы", "библиографический список", "references", "bibliography"),
+}
+
+LIST_BULLET_PATTERN = re.compile(r"^\s*[•*\-\u2013\u2014]\s+")
+LIST_NUMBER_PATTERN = re.compile(r"^\s*(?:\(?\d{1,3}[.)]|(?:\[\d{1,3}\]))\s+")
+HTML_TAG_PATTERN = re.compile(r"<[^>]+>")
+BR_SPLIT_PATTERN = re.compile(r"(?:\s*<br/>\s*)+")
+
+CITATION_MARKERS = ("для цитирования", "for citation", "how to cite")
+AUTHOR_INFO_MARKERS = (
+    "информация об автор",
+    "information about the author",
+    "information about authors",
+    "об авторах",
+)
+BODY_HEADING_MARKERS = (
+    "введение",
+    "заключение",
+    "выводы",
+    "основная часть",
+    "обсуждение",
+    "результаты",
+    "материалы и методы",
+    "introduction",
+    "conclusion",
+    "results",
+    "discussion",
+    "materials and methods",
+)
+RUNNING_HEADER_STYLE_MARKERS = ("колонтитул", "рубрика")
+
+
 def _extract_hyperlinks(zf: zipfile.ZipFile) -> dict[str, str]:
     """
     Извлечь словарь {source_id: url} для гиперссылок из IDML.
@@ -306,6 +350,144 @@ def _normalize_text(value: str) -> str:
     return cleaned.strip()
 
 
+def _strip_html_markup(text: str) -> str:
+    plain = text.replace("<br/>", "\n").replace("<br>", "\n")
+    plain = HTML_TAG_PATTERN.sub("", plain)
+    return html.unescape(plain).strip()
+
+
+def _normalize_marker_text(text: str) -> str:
+    normalized = _strip_html_markup(text).lower().replace("ё", "е")
+    normalized = re.sub(r"\s+", " ", normalized)
+    return normalized.strip(" .:;-–—")
+
+
+def _detect_section_marker(text: str) -> tuple[str | None, str, bool]:
+    plain = _strip_html_markup(text).strip()
+    normalized = _normalize_marker_text(text)
+    if not normalized:
+        return None, text, False
+
+    for section, markers in SECTION_MARKERS.items():
+        for marker in markers:
+            if normalized == marker:
+                return section, "", True
+            raw_match = re.match(
+                rf"^\s*{re.escape(marker)}\s*[:.\-—–]\s*(.+?)\s*$",
+                plain,
+                flags=re.IGNORECASE,
+            )
+            if raw_match:
+                return section, raw_match.group(1), False
+    return None, text, False
+
+
+def _infer_list_type(text: str, numbering_level: str, css_class: str | None, list_type: str | None) -> str | None:
+    if list_type:
+        return list_type
+    if css_class == "references":
+        return None
+
+    plain = _strip_html_markup(text)
+    if numbering_level and str(numbering_level).strip() not in {"", "0", "None"}:
+        return "ol"
+    if LIST_BULLET_PATTERN.match(plain):
+        return "ul"
+    if LIST_NUMBER_PATTERN.match(plain):
+        return "ol"
+    return None
+
+
+def _strip_list_marker(text: str, list_type: str | None) -> str:
+    if not list_type:
+        return text
+    if list_type == "ul":
+        return LIST_BULLET_PATTERN.sub("", text, count=1).strip()
+    if list_type == "ol":
+        return LIST_NUMBER_PATTERN.sub("", text, count=1).strip()
+    return text
+
+
+def _can_continue_section(section_type: str | None, text: str) -> bool:
+    if section_type not in {"abstract", "abstract_en", "keywords", "keywords_en", "references"}:
+        return False
+
+    plain = _normalize_marker_text(text)
+    if not plain:
+        return False
+    if any(plain == marker for markers in SECTION_MARKERS.values() for marker in markers):
+        return False
+
+    if section_type in {"abstract", "abstract_en", "references"}:
+        return True
+
+    word_count = len(plain.split())
+    return word_count <= 25 or any(sep in plain for sep in (",", ";"))
+
+
+def _is_citation_text(text: str) -> bool:
+    plain = _normalize_marker_text(text)
+    return any(plain.startswith(marker) for marker in CITATION_MARKERS)
+
+
+def _is_author_info_text(text: str) -> bool:
+    plain = _normalize_marker_text(text)
+    return any(marker in plain for marker in AUTHOR_INFO_MARKERS)
+
+
+def _is_body_heading_text(text: str) -> bool:
+    plain = _normalize_marker_text(text)
+    return plain in BODY_HEADING_MARKERS
+
+
+def _is_running_header_or_footer(style_name: str, text: str) -> bool:
+    normalized_style = (style_name or "").lower().replace("ё", "е")
+    if any(marker in normalized_style for marker in RUNNING_HEADER_STYLE_MARKERS):
+        return True
+
+    plain = _normalize_marker_text(text)
+    if plain.startswith("2.5.4") or plain.startswith("2.5.5") or plain.startswith("2.5.6") or plain.startswith("2.5.7"):
+        return True
+    if "роботы, мехатроника и робототехнические системы" in plain:
+        return True
+    if plain.startswith("вестник мгту") and (" 2025 " in f" {plain} " or " 2026 " in f" {plain} "):
+        return True
+    return False
+
+
+def _should_split_paragraph(style_name: str, text: str) -> bool:
+    if "<br/>" not in text.lower():
+        return False
+
+    upper = style_name.upper()
+    if any(token in upper for token in ("АННО", "ABSTRACT", "SUMMARY", "РЕЗЮМЕ", "КЛЮЧ", "KEYWORD", "ЛИТЕРАТУР", "REFERENCE", "BIBLIO", "AUTHOR", "ИНФОРМАЦ")):
+        return True
+
+    parts = [segment.strip() for segment in BR_SPLIT_PATTERN.split(text) if _strip_html_markup(segment)]
+    return any(
+        _detect_section_marker(part)[0] or _is_citation_text(part) or _is_author_info_text(part) or _is_body_heading_text(part)
+        for part in parts
+    )
+
+
+def _expand_paragraph(paragraph: IDMLParagraph) -> list[IDMLParagraph]:
+    style_name = ""
+    if paragraph.style:
+        style_name = unquote(paragraph.style.split("/")[-1])
+
+    if not _should_split_paragraph(style_name, paragraph.text):
+        return [paragraph]
+
+    parts = [segment.strip() for segment in BR_SPLIT_PATTERN.split(paragraph.text) if _strip_html_markup(segment)]
+    if len(parts) <= 1:
+        return [paragraph]
+
+    return [
+        IDMLParagraph(style=paragraph.style, text=part, numbering_level=paragraph.numbering_level)
+        for part in parts
+    ]
+
+
 def _parse_table(table_elem: ET.Element, hyperlinks: dict[str, str] | None = None) -> str:
     """
     Парсит таблицу из IDML в HTML.
@@ -377,7 +559,7 @@ def _iter_paragraphs(
     story_xml: bytes, 
     hyperlinks: dict[str, str] | None = None,
     footnote_counter: list[int] | None = None
-) -> tuple[list[tuple[str, str]], list[str], list[str]]:
+) -> tuple[list[IDMLParagraph], list[str], list[str]]:
     """
     Итерирует по абзацам в Story XML.
     
@@ -391,7 +573,7 @@ def _iter_paragraphs(
         где список_абзацев = [(style, text), ...]
     """
     root = ET.fromstring(story_xml)
-    paragraphs: list[tuple[str, str]] = []
+    paragraphs: list[IDMLParagraph] = []
     all_footnotes: list[str] = []
     all_tables: list[str] = []
     
@@ -404,7 +586,7 @@ def _iter_paragraphs(
             if table_html:
                 all_tables.append(table_html)
                 # Добавляем placeholder в поток абзацев
-                paragraphs.append(("__TABLE__", table_html))
+                paragraphs.append(IDMLParagraph(style="__TABLE__", text=table_html))
             continue
         
         if tag != "ParagraphStyleRange":
@@ -439,7 +621,7 @@ def _iter_paragraphs(
         
         text = _normalize_text("".join(parts))
         if text:
-            paragraphs.append((style, text))
+            paragraphs.append(IDMLParagraph(style=style, text=text, numbering_level=numbering_level))
         
         all_footnotes.extend(para_footnotes)
     
@@ -519,7 +701,11 @@ def _merge_numbered_references(lines: list[str]) -> list[str]:
     
     Обрабатывает форматы: "1. ", "1) ", "[1] "
     """
-    cleaned = "\n".join(line.strip() for line in lines if line.strip())
+    cleaned = "\n".join(
+        line.replace("<br/>", "\n").replace("<br>", "\n").strip()
+        for line in lines
+        if line and line.strip()
+    )
     if not cleaned:
         return []
     
@@ -603,6 +789,7 @@ def convert_idml_to_html(idml_path: Path, structured: bool = False) -> str | IDM
         )
 
         open_list: str | None = None
+        active_section: str | None = None
         ref_lines: list[str] = []
         all_footnotes: list[str] = []
         all_tables: list[str] = []
@@ -630,13 +817,20 @@ def convert_idml_to_html(idml_path: Path, structured: bool = False) -> str | IDM
             all_footnotes.extend(footnotes)
             all_tables.extend(tables)
             
-            for style_raw, text in paragraphs:
+            expanded_paragraphs: list[IDMLParagraph] = []
+            for paragraph in paragraphs:
+                expanded_paragraphs.extend(_expand_paragraph(paragraph))
+
+            for paragraph in expanded_paragraphs:
+                style_raw = paragraph.style
+                text = paragraph.text
                 # Обрабатываем таблицы как есть
                 if style_raw == "__TABLE__":
                     flush_references()
                     if open_list:
                         html_parts.append(f"</{open_list}>")
                         open_list = None
+                    active_section = None
                     html_parts.append(text)
                     continue
                 
@@ -644,8 +838,87 @@ def convert_idml_to_html(idml_path: Path, structured: bool = False) -> str | IDM
                 if style_raw:
                     style_name = style_raw.split("/")[-1]
                     style_name = unquote(style_name)
-                
+
+                if _is_running_header_or_footer(style_name, text):
+                    flush_references()
+                    if open_list:
+                        html_parts.append(f"</{open_list}>")
+                        open_list = None
+                    active_section = None
+                    continue
+
+                if _is_citation_text(text):
+                    flush_references()
+                    if open_list:
+                        html_parts.append(f"</{open_list}>")
+                        open_list = None
+                    active_section = None
+                    html_parts.append(f'<p class="citation">{text}</p>')
+                    continue
+
+                if _is_author_info_text(text):
+                    flush_references()
+                    if open_list:
+                        html_parts.append(f"</{open_list}>")
+                        open_list = None
+                    active_section = None
+
+                if _is_body_heading_text(text):
+                    flush_references()
+                    if open_list:
+                        html_parts.append(f"</{open_list}>")
+                        open_list = None
+                    active_section = None
+                    html_parts.append(f'<h2 class="body-heading">{text}</h2>')
+                    continue
+
                 tag, css_class, list_type, section_type = _classify_style(style_name)
+                marker_section, marker_text, marker_only = _detect_section_marker(text)
+                if marker_section:
+                    active_section = marker_section
+                    if marker_only:
+                        flush_references()
+                        if open_list:
+                            html_parts.append(f"</{open_list}>")
+                            open_list = None
+                        heading_text = html.escape(_strip_html_markup(text), quote=False)
+                        html_parts.append(
+                            f'<h2 class="section-heading section-{marker_section.replace("_", "-")}">{heading_text}</h2>'
+                        )
+                        continue
+                    text = html.escape(marker_text, quote=False)
+                    if marker_section == "abstract":
+                        tag, css_class, list_type, section_type = "p", "abstract", None, "abstract"
+                    elif marker_section == "abstract_en":
+                        tag, css_class, list_type, section_type = "p", "abstract-en", None, "abstract_en"
+                    elif marker_section == "keywords":
+                        tag, css_class, list_type, section_type = "p", "keywords", None, "keywords"
+                    elif marker_section == "keywords_en":
+                        tag, css_class, list_type, section_type = "p", "keywords-en", None, "keywords_en"
+                    elif marker_section == "references":
+                        tag, css_class, list_type, section_type = "p", "references", None, "references"
+                elif section_type in {"abstract", "abstract_en", "keywords", "keywords_en", "references"}:
+                    active_section = section_type
+                elif section_type == "body" and _can_continue_section(active_section, text):
+                    if active_section == "abstract":
+                        tag, css_class, list_type, section_type = "p", "abstract", None, "abstract"
+                    elif active_section == "abstract_en":
+                        tag, css_class, list_type, section_type = "p", "abstract-en", None, "abstract_en"
+                    elif active_section == "keywords":
+                        tag, css_class, list_type, section_type = "p", "keywords", None, "keywords"
+                    elif active_section == "keywords_en":
+                        tag, css_class, list_type, section_type = "p", "keywords-en", None, "keywords_en"
+                    elif active_section == "references":
+                        tag, css_class, list_type, section_type = "p", "references", None, "references"
+                else:
+                    active_section = None
+
+                inferred_list_type = _infer_list_type(text, paragraph.numbering_level, css_class, list_type)
+                if inferred_list_type:
+                    list_type = inferred_list_type
+                    css_class = css_class or "list-item"
+                    text = _strip_list_marker(text, list_type)
+
                 class_attr = f' class="{css_class}"' if css_class else ""
 
                 # Собираем секции для структурированного вывода

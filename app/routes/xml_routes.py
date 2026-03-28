@@ -196,7 +196,7 @@ def register_xml_routes(app, ctx):
             files_info = []
             if xml_path.exists() and xml_path.is_file():
                 try:
-                    relative_path = xml_path.relative_to(session_input_dir)
+                    relative_path = xml_path.resolve().relative_to(session_input_dir.resolve())
                     url_path = str(relative_path).replace("\\", "/")
                     files_info.append({
                         "name": xml_path.name,
@@ -295,4 +295,3 @@ def register_xml_routes(app, ctx):
         except Exception:
             abort(404)
     
-

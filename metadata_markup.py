@@ -52,6 +52,22 @@ METADATA_FIELDS: Sequence[str] = (
 LIST_FIELDS = {"references_ru", "references_en"}  # список строк
 INT_FIELDS = {"year"}  # целые числа
 
+REFERENCE_HEADING_MARKERS = {
+    "references",
+    "литература",
+    "список литературы",
+    "библиографический список",
+}
+REFERENCE_END_MARKERS = {
+    "информация об авторе",
+    "информация об авторах",
+    "information about the author",
+    "information about the authors",
+    "авторы сделали эквивалентный вклад в подготовку публикации и заявляют об отсутствии конфликта интересов",
+    "the authors made equivalent contributions to the publication and declare no conflict of interest",
+}
+NUMBERED_REFERENCE_PATTERN = re.compile(r"^\s*(?:\[\d{1,3}\]|\d{1,3}[.)])\s*")
+
 
 # ----------------------------
 # Функции для работы с метаданными
@@ -267,11 +283,94 @@ def extract_text_from_html(html_content: str) -> List[Dict[str, Any]]:
                 "id": idx,
                 "text": text_clean,
                 "line_number": idx,
-                "html": content  # Сохраняем оригинальный HTML для точного выделения
+                "html": content,  # Сохраняем оригинальный HTML для точного выделения
+                "block_type": elem.get("type"),
             })
             idx += 1
-    
-    return lines
+
+    def _norm_marker(text: str) -> str:
+        value = html.unescape(str(text or "")).replace("\xa0", " ").lower().replace("ё", "е")
+        value = re.sub(r"\s+", " ", value).strip(" .:;-–—")
+        return value
+
+    def _is_reference_heading(text: str) -> bool:
+        return _norm_marker(text) in REFERENCE_HEADING_MARKERS
+
+    def _is_reference_end(text: str) -> bool:
+        marker = _norm_marker(text)
+        if marker in REFERENCE_END_MARKERS:
+            return True
+        return marker.startswith("информация об автор") or marker.startswith("information about the author")
+
+    def _is_running_header_footer(text: str) -> bool:
+        marker = _norm_marker(text)
+        if marker.startswith(("2.5.4", "2.5.5", "2.5.6", "2.5.7")):
+            return True
+        if "роботы, мехатроника и робототехнические системы" in marker:
+            return True
+        if marker.startswith("вестник мгту") and ("2025" in marker or "2026" in marker):
+            return True
+        return False
+
+    merged_lines: List[Dict[str, Any]] = []
+    in_references = False
+    pending_ref: Optional[Dict[str, Any]] = None
+
+    def _flush_pending() -> None:
+        nonlocal pending_ref
+        if pending_ref:
+            merged_lines.append(pending_ref)
+            pending_ref = None
+
+    for line in lines:
+        text = str(line.get("text") or "").strip()
+        block_type = str(line.get("block_type") or "")
+
+        if _is_running_header_footer(text):
+            _flush_pending()
+            continue
+
+        if _is_reference_heading(text):
+            _flush_pending()
+            in_references = True
+            merged_lines.append(line)
+            continue
+
+        if in_references and _is_reference_end(text):
+            _flush_pending()
+            in_references = False
+            merged_lines.append(line)
+            continue
+
+        if not in_references:
+            merged_lines.append(line)
+            continue
+
+        if block_type == "li":
+            _flush_pending()
+            merged_lines.append(line)
+            continue
+
+        starts_new_reference = bool(NUMBERED_REFERENCE_PATTERN.match(text))
+        if pending_ref is None:
+            pending_ref = dict(line)
+            continue
+
+        if starts_new_reference:
+            _flush_pending()
+            pending_ref = dict(line)
+            continue
+
+        pending_ref["text"] = f'{pending_ref["text"].rstrip()} {text.lstrip()}'.strip()
+        pending_ref["html"] = f'{pending_ref.get("html", "")}<br/>{line.get("html", "")}'
+
+    _flush_pending()
+
+    for idx, line in enumerate(merged_lines, start=1):
+        line["id"] = idx
+        line["line_number"] = idx
+
+    return merged_lines
 
 
 def extract_text_from_pdf(pdf_path: Path, include_bbox: bool = False) -> List[Dict[str, Any]]:

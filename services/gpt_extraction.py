@@ -90,13 +90,13 @@ def _ensure_full_doi(metadata: Dict[str, Any], article_text: str) -> Dict[str, A
     doi_from_text = _extract_best_doi(article_text)
     doi_current = _normalize_doi_value(codes.get("doi"))
 
-    if not doi_from_text:
-        if doi_current:
-            codes["doi"] = doi_current
-            metadata["codes"] = codes
+    # Never invent a DOI from arbitrary article text. We only normalize an
+    # already extracted DOI and optionally extend it if the model returned a
+    # truncated prefix that clearly matches the DOI in the source text.
+    if not doi_current:
         return metadata
 
-    if (not doi_current) or (doi_from_text.startswith(doi_current) and len(doi_from_text) > len(doi_current)):
+    if doi_from_text and doi_from_text.startswith(doi_current) and len(doi_from_text) > len(doi_current):
         codes["doi"] = doi_from_text
     else:
         codes["doi"] = doi_current

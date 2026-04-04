@@ -6908,6 +6908,10 @@ MARKUP_TEMPLATE = r"""
           <div class="selected-lines" id="crossrefStatus"></div>
           <button type="button" class="view-refs-btn" id="mtfrDoiBtn" style="margin-top: 5px;">↻ Подтянуть данные из MTFR</button>
           <div class="selected-lines" id="mtfrStatus"></div>
+          {% if journal_is_ras %}
+          <button type="button" class="view-refs-btn" id="rasSiteBtn" style="margin-top: 5px;">↻ Подтянуть данные с сайта РАН</button>
+          <div class="selected-lines" id="rasSiteStatus"></div>
+          {% endif %}
         </div>
 
         <div class="field-group">
@@ -11778,10 +11782,16 @@ function applySelectionToField(fieldId) {
       });
     }
 
+    const journalIssn = {{ journal_issn|tojson }};
+    const journalName = {{ journal_name|tojson }};
+    const journalIsRas = {{ journal_is_ras|tojson }};
+    const journalSiteUrl = {{ journal_site_url|tojson }};
     const crossrefBtn = $("#crossrefDoiBtn");
     const crossrefStatus = $("#crossrefStatus");
     const mtfrBtn = $("#mtfrDoiBtn");
     const mtfrStatus = $("#mtfrStatus");
+    const rasSiteBtn = $("#rasSiteBtn");
+    const rasSiteStatus = $("#rasSiteStatus");
     const doiField = $("#doi");
     const crossrefTitleRuField = $("#title");
     const crossrefTitleEnField = $("#title_en");
@@ -12044,6 +12054,11 @@ function applySelectionToField(fieldId) {
       if (!mtfrStatus) return;
       mtfrStatus.textContent = text || "";
       mtfrStatus.style.color = color || "#666";
+    };
+    const setRasSiteStatus = (text, color) => {
+      if (!rasSiteStatus) return;
+      rasSiteStatus.textContent = text || "";
+      rasSiteStatus.style.color = color || "#666";
     };
     if (crossrefBtn) {
       crossrefBtn.addEventListener("click", async () => {
@@ -12490,6 +12505,223 @@ function applySelectionToField(fieldId) {
     }
 
     // Инициализация счетчиков литературы при загрузке
+    if (rasSiteBtn) {
+      if (!journalIsRas) {
+        rasSiteBtn.style.display = "none";
+      } else if (!journalSiteUrl) {
+        rasSiteBtn.disabled = true;
+        setRasSiteStatus("Для журнала РАН не задан адрес сайта.", "#c62828");
+      } else if (!journalIssn) {
+        rasSiteBtn.disabled = true;
+        setRasSiteStatus("Не удалось определить ISSN текущего журнала.", "#c62828");
+      } else {
+        rasSiteBtn.addEventListener("click", async () => {
+          const doi = (doiField?.value || "").trim();
+          const titleRu = (crossrefTitleRuField?.value || "").trim();
+          const titleEn = (crossrefTitleEnField?.value || "").trim();
+          const articleTitle = titleRu || titleEn || "";
+          if (!doi && !articleTitle) {
+            setRasSiteStatus("Укажите DOI или название статьи перед обновлением.", "#c62828");
+            return;
+          }
+          rasSiteBtn.disabled = true;
+          setRasSiteStatus(doi ? `Поиск статьи на сайте РАН по DOI (${journalName || journalIssn})...` : `Поиск статьи на сайте РАН по заголовку (${journalName || journalIssn})...`, "#555");
+          try {
+            const resp = await fetch("/ras-site-update", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ doi, title: articleTitle || undefined, journal_issn: journalIssn }),
+            });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.success) {
+              setRasSiteStatus(data.error || "Не удалось получить данные с сайта журнала РАН.", "#c62828");
+              return;
+            }
+
+            const suggestions = [];
+            let unchangedCount = 0;
+            let blockedCount = 0;
+
+            const addSuggestion = (config) => {
+              const proposedValue = normalizeText(config.proposedValue);
+              if (!proposedValue) return;
+              const currentValue = normalizeText(config.currentValue);
+              if (currentValue === proposedValue) {
+                unchangedCount += 1;
+                return;
+              }
+              suggestions.push({
+                label: config.label,
+                currentValue,
+                proposedValue,
+                apply: (nextValue) => config.apply(nextValue),
+              });
+            };
+
+            addSuggestion({
+              label: "DOI",
+              currentValue: doiField?.value || "",
+              proposedValue: data.doi,
+              apply: (nextValue) => setFieldValue(doiField, nextValue, () => doiField?.dispatchEvent(new Event("input", { bubbles: true }))),
+            });
+
+            const titleRuTarget = chooseTargetField(crossrefTitleRuField, crossrefTitleEnField);
+            addSuggestion({
+              label: "Заголовок (RU/original)",
+              currentValue: titleRuTarget?.value || "",
+              proposedValue: data.original_title,
+              apply: (nextValue) => setFieldValue(titleRuTarget, nextValue, () => titleRuTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+            });
+
+            const titleEnTarget = chooseTargetField(crossrefTitleEnField, crossrefTitleRuField);
+            addSuggestion({
+              label: "Заголовок (EN)",
+              currentValue: titleEnTarget?.value || "",
+              proposedValue: data.title,
+              apply: (nextValue) => setFieldValue(titleEnTarget, nextValue, () => titleEnTarget?.dispatchEvent(new Event("input", { bubbles: true }))),
+            });
+
+            const applyAnnotation = (field, fieldId, nextValue) => {
+              setFieldValue(field, nextValue, () => {
+                const htmlField = getAnnotationHtmlField(fieldId);
+                if (htmlField) {
+                  htmlField.value = sanitizeAnnotationHtml(annotationTextToHtml(normalizeText(nextValue)));
+                }
+                field?.dispatchEvent(new Event("input", { bubbles: true }));
+              });
+            };
+            if (data.abstract_ru != null && normalizeText(data.abstract_ru)) {
+              addSuggestion({
+                label: "Аннотация (RU)",
+                currentValue: crossrefAnnotationRuField?.value || "",
+                proposedValue: data.abstract_ru,
+                apply: (nextValue) => applyAnnotation(crossrefAnnotationRuField, "annotation", nextValue),
+              });
+            }
+            if (data.abstract_en != null && normalizeText(data.abstract_en)) {
+              addSuggestion({
+                label: "Аннотация (EN)",
+                currentValue: crossrefAnnotationEnField?.value || "",
+                proposedValue: data.abstract_en,
+                apply: (nextValue) => applyAnnotation(crossrefAnnotationEnField, "annotation_en", nextValue),
+              });
+            }
+            if ((data.abstract_ru == null || !normalizeText(data.abstract_ru)) && (data.abstract_en == null || !normalizeText(data.abstract_en)) && data.abstract != null && normalizeText(data.abstract)) {
+              const annotationTarget = chooseTargetField(crossrefAnnotationEnField, crossrefAnnotationRuField);
+              addSuggestion({
+                label: "Аннотация / Abstract",
+                currentValue: annotationTarget?.value || "",
+                proposedValue: data.abstract,
+                apply: (nextValue) => applyAnnotation(annotationTarget, annotationTarget?.id === "annotation" ? "annotation" : "annotation_en", nextValue),
+              });
+            }
+
+            const refsRu = Array.isArray(data.references_ru) ? data.references_ru.map((s) => String(s || "").trim()).filter(Boolean) : [];
+            const refsEn = Array.isArray(data.references_en) ? data.references_en.map((s) => String(s || "").trim()).filter(Boolean) : [];
+            const refs = Array.isArray(data.references) ? data.references.map((s) => String(s || "").trim()).filter(Boolean) : [];
+            if (refsRu.length > 0 || refsEn.length > 0) {
+              if (refsRu.length > 0) {
+                addSuggestion({
+                  label: "Список литературы (RU)",
+                  currentValue: crossrefReferencesRuField?.value || "",
+                  proposedValue: refsRu.join("\n"),
+                  apply: (nextValue) => {
+                    setFieldValue(crossrefReferencesRuField, nextValue, () => {
+                      crossrefReferencesRuField?.dispatchEvent(new Event("input", { bubbles: true }));
+                      if (window.updateReferencesCount && crossrefReferencesRuField?.id) {
+                        window.updateReferencesCount(crossrefReferencesRuField.id);
+                      }
+                    });
+                  },
+                });
+              }
+              if (refsEn.length > 0) {
+                addSuggestion({
+                  label: "Список литературы (EN)",
+                  currentValue: crossrefReferencesEnField?.value || "",
+                  proposedValue: refsEn.join("\n"),
+                  apply: (nextValue) => {
+                    setFieldValue(crossrefReferencesEnField, nextValue, () => {
+                      crossrefReferencesEnField?.dispatchEvent(new Event("input", { bubbles: true }));
+                      if (window.updateReferencesCount && crossrefReferencesEnField?.id) {
+                        window.updateReferencesCount(crossrefReferencesEnField.id);
+                      }
+                    });
+                  },
+                });
+              }
+            } else if (refs.length > 0) {
+              const publLangField = document.getElementById("publ_lang");
+              const publLang = String(publLangField?.value || "").toUpperCase();
+              let refsTarget = crossrefReferencesRuField || crossrefReferencesEnField;
+              if (publLang === "ENG" && crossrefReferencesEnField) {
+                refsTarget = crossrefReferencesEnField;
+              } else if (crossrefReferencesRuField && !normalizeText(crossrefReferencesRuField.value) && crossrefReferencesEnField) {
+                if (normalizeText(crossrefReferencesEnField.value)) refsTarget = crossrefReferencesEnField;
+              }
+              addSuggestion({
+                label: "Список литературы / References",
+                currentValue: refsTarget?.value || "",
+                proposedValue: refs.join("\n"),
+                apply: (nextValue) => {
+                  setFieldValue(refsTarget, nextValue, () => {
+                    refsTarget?.dispatchEvent(new Event("input", { bubbles: true }));
+                    if (window.updateReferencesCount && refsTarget?.id) {
+                      window.updateReferencesCount(refsTarget.id);
+                    }
+                  });
+                },
+              });
+            }
+
+            if (!suggestions.length) {
+              setRasSiteStatus(
+                `Данные с сайта РАН получены, но новых отличающихся значений нет.${unchangedCount ? ` Совпадающих полей: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}`,
+                "#2e7d32"
+              );
+              return;
+            }
+
+            let acceptedCount = 0;
+            let rejectedCount = 0;
+            for (const suggestion of suggestions) {
+              const decision = await askCrossrefSuggestion(suggestion);
+              if (!decision || decision.action !== "accept") {
+                rejectedCount += 1;
+                continue;
+              }
+              const valueToApply = normalizeText(decision.value || suggestion.proposedValue);
+              if (!valueToApply) {
+                rejectedCount += 1;
+                continue;
+              }
+              try {
+                const applied = suggestion.apply(valueToApply);
+                if (applied === false) {
+                  rejectedCount += 1;
+                } else {
+                  acceptedCount += 1;
+                }
+              } catch (applyErr) {
+                rejectedCount += 1;
+                console.error("RAS site apply error:", applyErr);
+              }
+            }
+
+            const sourceSuffix = normalizeText(data.source_url) ? ` Источник: ${data.source_url}` : "";
+            setRasSiteStatus(
+              `Проверка сайта РАН завершена. Принято: ${acceptedCount}, отклонено: ${rejectedCount}.${unchangedCount ? ` Совпадений: ${unchangedCount}.` : ""}${blockedCount ? ` Полей с авторами, требующих ручной правки: ${blockedCount}.` : ""}${sourceSuffix}`,
+              acceptedCount ? "#2e7d32" : "#666"
+            );
+          } catch (err) {
+            setRasSiteStatus(`Ошибка сайта РАН: ${err.message || err}`, "#c62828");
+          } finally {
+            rasSiteBtn.disabled = false;
+          }
+        });
+      }
+    }
+
     const referencesRuField = $("#references_ru");
     const referencesEnField = $("#references_en");
     if (referencesRuField) {

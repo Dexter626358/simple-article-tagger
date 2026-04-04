@@ -256,6 +256,134 @@ def _is_strict_standalone_metadata(line: str) -> bool:
     )
 
 
+def _is_editorial_date_line(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s:
+        return False
+    return bool(
+        re.match(
+            r"^(Поступила|Поступил|После доработки|Принята к публикации|Received|Revised|Accepted)\b",
+            s,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _is_author_line(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s or PATTERNS.email.search(s) or PATTERNS.url.search(s):
+        return False
+
+    initials_count = len(re.findall(r"[A-ZА-ЯЁ]\.", s))
+    surname_count = len(re.findall(r"\b[A-ZА-ЯЁ][a-zа-яё-]{2,}\b", s))
+    has_separator = "," in s or ";" in s or " и " in s.lower() or " and " in s.lower()
+
+    if initials_count >= 2 and surname_count >= 2 and has_separator:
+        return True
+    if initials_count >= 4 and surname_count >= 2:
+        return True
+    return False
+
+
+def _is_affiliation_line(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s:
+        return False
+
+    lower = s.lower()
+    affiliation_keywords = (
+        "институт",
+        "универс",
+        "академ",
+        "лаборатор",
+        "центр",
+        "музей",
+        "факульт",
+        "кафедр",
+        "отдел",
+        "department",
+        "faculty",
+        "institute",
+        "university",
+        "academy",
+        "laborator",
+        "centre",
+        "center",
+        "school",
+        "museum",
+        "research",
+    )
+
+    if not any(keyword in lower for keyword in affiliation_keywords):
+        return False
+    if len(s.split()) > 28:
+        return False
+    if re.match(r"^[\d*#,\.\s]+", s):
+        return True
+    return "," in s or PATTERNS.meta_any.search(s) is None
+
+
+def _is_front_matter_standalone(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s:
+        return False
+    if _is_strict_standalone_metadata(s):
+        return True
+    if _is_editorial_date_line(s):
+        return True
+    if _is_author_line(s):
+        return True
+    if _is_affiliation_line(s):
+        return True
+    if re.match(r"^\*?\s*e-?mail\s*[:\-]?\s*", s, re.IGNORECASE):
+        return True
+    return False
+
+
+def _is_reference_heading(line: str) -> bool:
+    return bool(REFERENCE_BLOCK_REGEX["RE_REF_HEADER"].match(_normalize_spaces(line)))
+
+
+def _is_reference_end_marker(line: str) -> bool:
+    return bool(REFERENCE_BLOCK_REGEX["RE_REF_END"].match(_normalize_spaces(line)))
+
+
+def _is_reference_entry_start(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s:
+        return False
+    if REFERENCE_BLOCK_REGEX["RE_BIB_NUM"].match(s):
+        return True
+    if (
+        REFERENCE_BLOCK_REGEX["RE_RU_AUTHOR_START"].match(s)
+        or REFERENCE_BLOCK_REGEX["RE_EN_AUTHOR_START"].match(s)
+    ) and (
+        REFERENCE_BLOCK_REGEX["RE_YEAR"].search(s)
+        or REFERENCE_BLOCK_REGEX["RE_DOI"].search(s)
+        or REFERENCE_BLOCK_REGEX["RE_VOL_ISS"].search(s)
+        or REFERENCE_BLOCK_REGEX["RE_PAGES"].search(s)
+    ):
+        return True
+    return False
+
+
+def _is_safe_header_footer_candidate(line: str) -> bool:
+    s = _normalize_spaces(line)
+    if not s:
+        return False
+    if len(s) > 80:
+        return False
+    if _is_front_matter_standalone(s):
+        return False
+    if _is_reference_heading(s) or _is_reference_end_marker(s):
+        return False
+    if PATTERNS.doi.search(s) or PATTERNS.email.search(s) or PATTERNS.url.search(s):
+        return False
+    if len(s.split()) >= 8 and _upper_ratio(s) < 0.55:
+        return False
+    return True
+
+
 # ----------------------------
 # Интеллектуальная сегментация
 # ----------------------------
@@ -517,6 +645,7 @@ def _merge_lines_into_paragraphs(lines: List[str]) -> List[str]:
 
     paragraphs: List[str] = []
     current: List[str] = []
+    in_references = False
 
     def flush_current() -> None:
         nonlocal current
@@ -541,6 +670,34 @@ def _merge_lines_into_paragraphs(lines: List[str]) -> List[str]:
         for part in parts:
             part = part.strip()
             if not part:
+                continue
+
+            if _is_reference_heading(part):
+                flush_current()
+                paragraphs.append(_normalize_spaces(part))
+                current = []
+                in_references = True
+                continue
+
+            if in_references:
+                if _is_reference_end_marker(part):
+                    flush_current()
+                    in_references = False
+                elif _is_reference_entry_start(part):
+                    flush_current()
+                    current = [part]
+                    continue
+                else:
+                    if not current:
+                        current = [part]
+                    else:
+                        current.append(part)
+                    continue
+
+            if _is_front_matter_standalone(part):
+                flush_current()
+                paragraphs.append(_normalize_spaces(part))
+                current = []
                 continue
 
             # Перенос слова: "обрезаем" дефис и не флашим, ждём следующую часть/строку
@@ -693,7 +850,7 @@ def _remove_headers_footers(lines_by_page: List[List[str]]) -> List[str]:
             continue
         
         # Проверяем частоту
-        if freq >= min_pages_for_header:
+        if freq >= min_pages_for_header and _is_safe_header_footer_candidate(normalized_line):
             # Проверяем позицию на странице (первые 2 или последние 2 строки)
             for page_idx, line_idx in line_positions[normalized_line]:
                 page_lines = lines_by_page[page_idx]
@@ -704,7 +861,7 @@ def _remove_headers_footers(lines_by_page: List[List[str]]) -> List[str]:
         
         # Проверяем паттерны других колонтитулов (не номера страниц) - удаляем все
         for pattern in other_header_footer_patterns:
-            if pattern.match(normalized_line):
+            if pattern.match(normalized_line) and _is_safe_header_footer_candidate(normalized_line):
                 for page_idx, line_idx in line_positions[normalized_line]:
                     lines_to_remove.add((page_idx, line_idx))
     
@@ -730,12 +887,29 @@ def _detect_columns_pdfplumber_page(
     """Detect whether the page uses one or two text columns."""
     words = _extract_words_pdfplumber(page)
 
-    if not words:
+    width = float(getattr(page, "width", 0) or 0)
+    if not words or width <= 0:
+        return 1
+    return _detect_columns_pdfplumber_words(
+        words,
+        width,
+        min_words_per_column=min_words_per_column,
+        gutter_ratio=gutter_ratio,
+    )
+
+
+def _detect_columns_pdfplumber_words(
+    words: List[Dict[str, object]],
+    width: float,
+    min_words_per_column: int = 10,
+    gutter_ratio: float = 0.1,
+) -> int:
+    if not words or width <= 0:
         return 1
 
-    width = float(getattr(page, "width", 0) or 0)
-    if width <= 0:
-        return 1
+    effective_min_words = min_words_per_column
+    if len(words) < (min_words_per_column * 2):
+        effective_min_words = max(3, len(words) // 4)
 
     center = width / 2.0
     gutter = max(0.0, min(0.4, float(gutter_ratio)))
@@ -752,7 +926,7 @@ def _detect_columns_pdfplumber_page(
 
     left_words = [w for w in words if float(w.get("x1", 0)) <= left_border]
     right_words = [w for w in words if float(w.get("x0", width)) >= right_border]
-    if len(left_words) >= int(min_words_per_column) and len(right_words) >= int(min_words_per_column):
+    if len(left_words) >= int(effective_min_words) and len(right_words) >= int(effective_min_words):
         return 2
     return 1
 
@@ -787,9 +961,24 @@ def _extract_page_lines_pdfplumber_smart(page) -> List[str]:
                 lines.append(text)
         return lines
 
-    columns = _detect_columns_pdfplumber_page(page)
+    all_words = _extract_words_pdfplumber(page)
+    width = float(getattr(page, "width", 0) or 0)
+    height = float(getattr(page, "height", 0) or 0)
+
+    if width <= 0 or height <= 0:
+        text = page.extract_text() or ""
+        return [ln.strip() for ln in text.split("\n") if ln.strip()]
+
+    header_height = _find_header_boundary(all_words, height)
+    body_top = min(height, header_height + PDFPLUMBER_Y_TOLERANCE)
+    body_words = [
+        word for word in all_words
+        if float(word.get("top", 0) or 0) > body_top
+    ]
+    columns = _detect_columns_pdfplumber_words(body_words or all_words, width)
+
     if columns != 2:
-        words = _extract_words_pdfplumber(page)
+        words = all_words
         lines = _lines_from_words(words)
         if lines:
             return lines
@@ -801,14 +990,6 @@ def _extract_page_lines_pdfplumber_smart(page) -> List[str]:
                 out_lines.append(fixed)
         return out_lines
 
-    width = float(getattr(page, "width", 0) or 0)
-    height = float(getattr(page, "height", 0) or 0)
-    if width <= 0 or height <= 0:
-        text = page.extract_text() or ""
-        return [ln.strip() for ln in text.split("\n") if ln.strip()]
-
-    all_words = _extract_words_pdfplumber(page)
-    header_height = _find_header_boundary(all_words, height)
     header_zone = page.crop((0, 0, width, header_height))
 
     header_words = _extract_words_pdfplumber(header_zone)
@@ -824,8 +1005,8 @@ def _extract_page_lines_pdfplumber_smart(page) -> List[str]:
         header_lines = tmp_lines
 
     center = width / 2.0
-    left_col = page.crop((0, header_height, center, height))
-    right_col = page.crop((center, header_height, width, height))
+    left_col = page.crop((0, body_top, center, height))
+    right_col = page.crop((center, body_top, width, height))
     left_words = _extract_words_pdfplumber(left_col)
     right_words = _extract_words_pdfplumber(right_col)
 

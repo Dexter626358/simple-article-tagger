@@ -37,6 +37,13 @@ def _norm_empty(val):
     return s
 
 
+def _normalize_issn_value(value: str | None) -> str:
+    raw = re.sub(r"[^0-9Xx]", "", str(value or "")).upper()
+    if len(raw) != 8:
+        return ""
+    return f"{raw[:4]}-{raw[4:]}"
+
+
 def register_markup_routes(app, ctx):
     json_input_dir = ctx.get("json_input_dir")
     words_input_dir = ctx.get("words_input_dir")
@@ -52,6 +59,38 @@ def register_markup_routes(app, ctx):
     find_files_for_json = ctx.get("find_files_for_json")
     SUPPORTED_EXTENSIONS = ctx.get("SUPPORTED_EXTENSIONS")
     SUPPORTED_JSON_EXTENSIONS = ctx.get("SUPPORTED_JSON_EXTENSIONS")
+    journals_cache: dict[str, list[dict] | None] = {"items": None}
+
+    def _load_journals() -> list[dict]:
+        if journals_cache["items"] is not None:
+            return journals_cache["items"] or []
+        if not list_of_journals_path or not Path(list_of_journals_path).exists():
+            journals_cache["items"] = []
+            return []
+        try:
+            with Path(list_of_journals_path).open("r", encoding="utf-8") as handle:
+                loaded = json.load(handle)
+            journals_cache["items"] = loaded if isinstance(loaded, list) else []
+        except Exception:
+            current_app.logger.exception("SYSTEM journals list load error: %s", list_of_journals_path)
+            journals_cache["items"] = []
+        return journals_cache["items"] or []
+
+    def _find_journal_by_issn(issn: str) -> dict | None:
+        normalized = _normalize_issn_value(issn)
+        if not normalized:
+            return None
+        for journal in _load_journals():
+            if not isinstance(journal, dict):
+                continue
+            candidates = {
+                _normalize_issn_value(journal.get("ISSN")),
+                _normalize_issn_value(journal.get("ISSN_Print")),
+                _normalize_issn_value(journal.get("ISSN_Online")),
+            }
+            if normalized in candidates:
+                return journal
+        return None
 
     @app.route("/view/<path:filename>")
     def view_file(filename: str):
@@ -446,6 +485,8 @@ def register_markup_routes(app, ctx):
             # Извлекаем ISSN из имени папки (формат: issn_год_том_номер или issn_год_номер)
             journal_issn = ""
             journal_name = ""
+            journal_is_ras = False
+            journal_site_url = ""
             try:
                 relative_path = json_path.relative_to(session_json_input_dir)
                 if len(relative_path.parts) > 1:
@@ -463,6 +504,12 @@ def register_markup_routes(app, ctx):
             except ValueError:
                 pass
 
+            journal_info = _find_journal_by_issn(journal_issn)
+            if journal_info:
+                journal_name = str(journal_info.get("Title") or journal_info.get("TitleEn") or "").strip()
+                journal_is_ras = str(journal_info.get("RAS") or "").strip().upper() == "Y"
+                journal_site_url = str(journal_info.get("Url") or "").strip()
+
             print(f"DEBUG: is_pdf_for_html={is_pdf_for_html}, show_pdf_viewer={show_pdf_viewer}, show_text_panel={show_text_panel}, view_mode={view_mode}, issn={journal_issn}")
 
             return render_template_string(
@@ -478,7 +525,9 @@ def register_markup_routes(app, ctx):
                 show_text_panel=show_text_panel,
                 view_mode=view_mode,
                 journal_issn=journal_issn,
-                journal_name=journal_name
+                journal_name=journal_name,
+                journal_is_ras=journal_is_ras,
+                journal_site_url=journal_site_url
             )
         except Exception as e:
             error_msg = f"Ошибка при подготовке разметки: {e}"
@@ -1404,6 +1453,121 @@ def register_markup_routes(app, ctx):
             )
         except Exception as e:
             current_app.logger.exception("SYSTEM mtfr update error: %s", e)
+            return jsonify(success=False, error=str(e)), 500
+
+    @app.route("/ras-site-update", methods=["POST"])
+    def ras_site_update():
+        data = request.get_json(silent=True) or {}
+        doi = (data.get("doi") or "").strip()
+        title = (data.get("title") or "").strip()
+        journal_issn = (data.get("journal_issn") or "").strip()
+        if not doi and not title:
+            return jsonify(success=False, error="Укажите DOI или название статьи."), 400
+        if not journal_issn:
+            return jsonify(success=False, error="Не удалось определить ISSN журнала."), 400
+
+        journal_info = _find_journal_by_issn(journal_issn)
+        if not journal_info:
+            return jsonify(success=False, error="Журнал не найден в data/list_of_journals.json."), 404
+        if str(journal_info.get("RAS") or "").strip().upper() != "Y":
+            return jsonify(success=False, error="Кнопка доступна только для журналов РАН."), 400
+
+        journal_url = str(journal_info.get("Url") or "").strip()
+        if not journal_url:
+            return jsonify(success=False, error="Для журнала не задан URL сайта."), 400
+
+        try:
+            from ras_site_updater import update_article_from_ras_site
+        except Exception as e:
+            current_app.logger.exception("SYSTEM ras-site import error: %s", e)
+            return jsonify(success=False, error="Модуль RAS site updater недоступен."), 500
+
+        try:
+            payload = update_article_from_ras_site(
+                doi=doi,
+                journal_url=journal_url,
+                title=title,
+                journal_issn=journal_issn,
+                journal_name=str(journal_info.get("Title") or journal_info.get("TitleEn") or "").strip(),
+            )
+            if payload.get("error"):
+                return jsonify(
+                    success=False,
+                    error=payload.get("error_message") or "Не удалось получить данные с сайта журнала РАН.",
+                ), 200
+
+            raw_payload = payload.get("raw")
+            if raw_payload is None:
+                return jsonify(
+                    success=False,
+                    error="Сайт журнала ответил, но извлечь метаданные не удалось.",
+                ), 200
+
+            session_input_dir = get_session_input_dir(_input_files_dir)
+            state_dir = session_input_dir / "state" / "ras_site"
+            state_dir.mkdir(parents=True, exist_ok=True)
+            safe_key = re.sub(r"[^A-Za-z0-9._-]+", "_", doi) if doi else re.sub(r"[^A-Za-z0-9._-]+", "_", title[:50]) or "no_doi"
+            timestamp = int(time.time())
+            raw_path = state_dir / f"ras_site_{safe_key}_{timestamp}.json"
+            with raw_path.open("w", encoding="utf-8") as handle:
+                json.dump(raw_payload, handle, ensure_ascii=False, indent=2)
+
+            def _refs_to_list(refs):
+                if not isinstance(refs, list):
+                    return []
+                out = []
+                for ref in refs:
+                    cleaned = _norm_empty(ref)
+                    if cleaned:
+                        out.append(cleaned)
+                return out
+
+            title_val = _norm_empty(payload.get("title"))
+            original_title_val = _norm_empty(payload.get("original_title"))
+            abstract_val = _norm_empty(payload.get("abstract"))
+            abstract_ru_val = _norm_empty(payload.get("abstract_ru"))
+            abstract_en_val = _norm_empty(payload.get("abstract_en"))
+            pages_val = _norm_empty(payload.get("pages"))
+            keywords_val = _norm_empty(payload.get("keywords"))
+            keywords_en_val = _norm_empty(payload.get("keywords_en"))
+            references = _refs_to_list(payload.get("references"))
+            references_ru = _refs_to_list(payload.get("references_ru"))
+            references_en = _refs_to_list(payload.get("references_en"))
+            authors_list = payload.get("authors") or []
+            authors_list = [
+                {k: _norm_empty(v) if isinstance(v, str) else v for k, v in (a if isinstance(a, dict) else {}).items()}
+                for a in authors_list
+            ]
+            has_any = bool(
+                title_val or original_title_val or abstract_val or abstract_ru_val or abstract_en_val
+                or pages_val or keywords_val or keywords_en_val
+                or references or references_ru or references_en or authors_list
+            )
+            if not has_any:
+                return jsonify(
+                    success=False,
+                    error="Сайт найден, но содержательных метаданных извлечь не удалось.",
+                ), 200
+
+            return jsonify(
+                success=True,
+                doi=_norm_empty(payload.get("doi")),
+                title=title_val,
+                original_title=original_title_val,
+                abstract=abstract_val,
+                abstract_ru=abstract_ru_val,
+                abstract_en=abstract_en_val,
+                authors=authors_list,
+                references=references,
+                references_ru=references_ru,
+                references_en=references_en,
+                pages=pages_val or None,
+                keywords=keywords_val or None,
+                keywords_en=keywords_en_val or None,
+                source_url=_norm_empty(payload.get("source_url")),
+            )
+        except Exception as e:
+            current_app.logger.exception("SYSTEM ras-site update error: %s", e)
             return jsonify(success=False, error=str(e)), 500
 
     @app.route("/markup/<path:json_filename>/save", methods=["POST"])

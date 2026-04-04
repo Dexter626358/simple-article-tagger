@@ -302,12 +302,41 @@ Return only valid JSON without additional comments or explanations.
 - IMPORTANT: Do NOT route entries by entry language.
 - Route by list section only (where the entry was found).
 - English entries inside "Список литературы" must remain in RUS.
+### References Additional Extraction Rules
+- CRITICAL: If the article text contains a bibliography/reference list, do NOT leave both references arrays empty.
+- IMPORTANT DISTINCTION: "Список литературы" and "References" are NOT the same field.
+- A separate English "References" block is OPTIONAL and may be absent.
+- If no separate English "References" block exists in the article, leaving ENG empty is correct.
+- If the article contains a Russian bibliography block AND a separate English "References" block, extract BOTH blocks separately.
+- Do NOT assume that extracting only "Список литературы" is sufficient when a separate "References" section is also present.
+- Do NOT merge a separate English "References" section into RUS just because a Russian bibliography already exists earlier in the text.
+- If "References" appears after the Russian literature list, at the end of the article, or on later pages, it still must be extracted into ENG.
+- PAIRING PRINCIPLE (MANDATORY ONLY IF BOTH SECTIONS EXIST):
+  - Apply this rule only when the article contains BOTH a Russian bibliography section (e.g., "Список литературы"/"Литература") AND a separate English "References" section.
+  - Each source must have a pair: original -> "Литература" (RUS), translated/parallel entry -> "References" (ENG).
+  - The number of entries must be 1:1: `len(RUS) == len(ENG)`.
+  - Preserve the order: pair entries by position (1st with 1st, 2nd with 2nd, etc.). Do NOT reorder to "fix" matching.
+  - If one side is missing an entry but the other side contains it, duplicate the existing entry verbatim to the missing side (do NOT translate or invent).
+  - If an entry is already in English inside "Литература", keep it in RUS AND also duplicate it into ENG if needed to maintain 1:1.
+  - FINAL CHECK (MANDATORY, INTERNAL ONLY, DO NOT OUTPUT THESE NOTES):
+    - Confirm `len(RUS) == len(ENG)`.
+    - Confirm order is preserved.
+    - Confirm every RUS entry has a corresponding ENG entry by index.
+    - Confirm all English-language entries are duplicated into ENG when needed to keep 1:1.
+    - Confirm no entry was lost: if any bibliography text exists in either section, it must appear in at least one of the arrays, and if both sections exist, it must appear in both arrays (paired).
+- Search not only for exact headings "Список литературы" and "References", but also close variants such as "Литература", "Библиография", "Источники", "Bibliography".
+- The references block may start at the end of one page/column and continue on the next page/column. Do not lose entries because of page breaks or two-column PDF order.
+- If there is no explicit heading, still recognize a references block by bibliographic patterns: numbering like [1], 1., 2); author-year starts; repeated year/volume/pages/DOI patterns.
+- If boundaries are ambiguous, prefer fewer/larger entries rather than dropping bibliography text.
+- Before returning JSON, check the end of the article text once more: if a references-like block is visible there, ensure all visible entries are present in output.
 ### References Structure Rules
 - If ONLY section titled "Список литературы" exists: put ALL entries in RUS array, ENG empty.
 - If a COMBINED list is present: put ALL entries in RUS array, ENG empty.
 - If TWO SEPARATE sections exist:
   - "Список литературы" -> RUS array
   - "References" -> ENG array
+- If both sections exist, do NOT stop after extracting the first one. Keep scanning until the separate English "References" block is also extracted.
+- If the English "References" section is shorter than the Russian list, still extract it as a separate ENG array; do not replace it with the Russian block.
 - If ONLY section titled "References" exists: put ALL entries in ENG array, RUS empty.
 - If structure is unclear: put all entries in RUS array by default.
 """
@@ -368,12 +397,19 @@ COLUMN ARTIFACTS:
 - If numbering is missing, split conservatively by entry-start patterns.
 - If boundary is ambiguous, keep more text inside the current entry.
 - Do NOT reorder entries and do NOT infer a "correct" bibliography order.
+- Continuation lines after page breaks, column breaks, DOI lines, URL lines, or wrapped page ranges belong to the same reference and must not be dropped.
 
 6. COMPLETENESS (MANDATORY):
 - Extract ABSOLUTELY ALL references from the input.
 - NEVER skip entries, even if damaged, unreadable, or incomplete.
 - DAMAGED ENTRIES: include as-is; do not repair or delete OCR noise.
 - If INPUT is non-empty and contains any bibliographic-looking text, OUTPUT MUST NOT be empty.
+- Typical failure cases that must still be handled:
+  * the first or last reference is cut by page/column boundaries;
+  * a reference starts without numbering;
+  * DOI/URL is moved to the next line;
+  * one reference is split into several short lines;
+  * the heading is missing but the block is clearly bibliography.
 - If boundaries are unclear, return fewer/larger entries rather than dropping content.
 - BEFORE returning JSON, perform an internal check:
   * Count entries in input: N_input.
@@ -404,6 +440,11 @@ STRICT RULES:
 - Do NOT take DOI or EDN from references, footnotes, neighboring articles, or external knowledge.
 - Do NOT include organization name in address.
 - If address is not explicitly and clearly separable from the organization name, leave address empty.
+- If a bibliography/references block is present in the article text, do NOT leave references_ru and references_en both empty.
+- Search for references also under close heading variants and at the end of the article, including text split by page breaks or two-column PDF extraction.
+- Distinguish between Russian "Список литературы" and separate English "References": if both exist in the article, extract both separately and do not treat one as a substitute for the other.
+- A separate English "References" block is not mandatory; if it is absent in the article, references_en may stay empty.
+- If BOTH sections exist, enforce 1:1 pairing between references_ru and references_en by position; never translate, and if one side is missing entries, duplicate verbatim from the other side to restore parity.
 
 Текст статьи:
 {article_text}

@@ -10545,6 +10545,93 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
     }, 10); // Небольшая задержка 10мс для гарантии, что основное поле заполнено
   }
 
+  function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
+    if (!AUTO_EXTRACT_AUTHOR_CODES) {
+      return;
+    }
+
+    const skip = Array.isArray(skipField)
+      ? new Set(skipField)
+      : new Set(skipField ? [skipField] : []);
+
+    setTimeout(() => {
+      if (!skip.has("email")) {
+        const emailField = $(`.author-input[data-field="email"][data-lang="RUS"][data-index="${authorIndex}"]`);
+        if (emailField) {
+          const currentValue = emailField.value.trim();
+          if (!currentValue) {
+            const email = extractEmail(text);
+            if (email) {
+              emailField.value = email;
+              emailField.dispatchEvent(new Event("input", { bubbles: true }));
+              const emailEngField = $(`.author-input[data-field="email"][data-lang="ENG"][data-index="${authorIndex}"]`);
+              if (emailEngField) {
+                emailEngField.value = email;
+                emailEngField.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+            }
+          }
+        }
+      }
+
+      if (!skip.has("spin")) {
+        const spinField = $(`.author-input[data-field="spin"][data-lang="CODES"][data-index="${authorIndex}"]`);
+        if (spinField) {
+          const currentValue = spinField.value.trim();
+          if (!currentValue) {
+            const spin = extractSPIN(text);
+            if (spin) {
+              spinField.value = spin;
+              spinField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+        }
+      }
+
+      if (!skip.has("orcid")) {
+        const orcidField = $(`.author-input[data-field="orcid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+        if (orcidField) {
+          const currentValue = orcidField.value.trim();
+          if (!currentValue) {
+            const orcid = extractORCID(text);
+            if (orcid) {
+              orcidField.value = orcid;
+              orcidField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+        }
+      }
+
+      if (!skip.has("scopusid")) {
+        const scopusField = $(`.author-input[data-field="scopusid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+        if (scopusField) {
+          const currentValue = scopusField.value.trim();
+          if (!currentValue) {
+            const scopusId = extractScopusID(text);
+            if (scopusId) {
+              scopusField.value = scopusId;
+              scopusField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+        }
+      }
+
+      if (!skip.has("researcherid")) {
+        const researcherField = $(`.author-input[data-field="researcherid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+        if (researcherField) {
+          const currentValue = researcherField.value.trim();
+          if (!currentValue) {
+            const researcherId = extractResearcherID(text);
+            if (researcherId) {
+              researcherField.value = researcherId;
+              researcherField.dispatchEvent(new Event("input", { bubbles: true }));
+            }
+          }
+        }
+      }
+    }, 10);
+  }
+
   function removeCountryFromAddress(text) {
     // Список названий стран на русском и английском языках
     const countries = [
@@ -11134,157 +11221,200 @@ function extractInitialsFromText(text) {
 
 
 
+  function getActiveAuthorIndex() {
+    const activeElement = document.activeElement;
+    if (activeElement) {
+      const activeAuthorItem = activeElement.closest(".author-item");
+      const activeAuthorItemIndex = activeAuthorItem?.dataset?.authorIndex;
+      if (activeAuthorItemIndex !== undefined) {
+        const parsedAuthorItemIndex = parseInt(activeAuthorItemIndex, 10);
+        if (!Number.isNaN(parsedAuthorItemIndex)) {
+          return parsedAuthorItemIndex;
+        }
+      }
+
+      const activeAuthorInput = activeElement.closest(".author-input");
+      const activeIndex = activeAuthorInput?.dataset?.index;
+      if (activeIndex !== undefined) {
+        const parsedActiveIndex = parseInt(activeIndex, 10);
+        if (!Number.isNaN(parsedActiveIndex)) {
+          return parsedActiveIndex;
+        }
+      }
+    }
+
+    const authorItems = $$(".author-item");
+    for (const item of authorItems) {
+      const index = item.dataset.authorIndex;
+      if (index !== undefined) {
+        const details = $(`#author-details-${index}`);
+        if (details && details.style.display !== "none") {
+          return parseInt(index, 10);
+        }
+      }
+    }
+
+    if (authorItems.length > 0) {
+      const firstIndex = authorItems[0].dataset.authorIndex;
+      if (firstIndex !== undefined) {
+        return parseInt(firstIndex, 10);
+      }
+    }
+    return 0;
+  }
+
+  function applyAuthorFieldText(fieldId, fullText) {
+    if (!fieldId || !fieldId.startsWith("author_")) return false;
+    const authorIndex = getActiveAuthorIndex();
+    const parts = fieldId.split("_");
+    if (parts.length < 2) return false;
+
+    const fieldName = parts[1];
+    const lang = parts.length >= 3 ? parts[2] : null;
+
+    let targetField = null;
+    let value = "";
+
+    if (fieldName === "surname") {
+      if (!lang) return false;
+      targetField = $(`.author-input[data-field="surname"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
+      value = extractSurnameFromText(fullText);
+    } else if (fieldName === "initials") {
+      if (!lang) return false;
+      targetField = $(`.author-input[data-field="initials"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
+      value = extractInitialsFromText(fullText);
+    } else if (fieldName === "org") {
+      if (!lang) return false;
+      targetField = $(`.author-input[data-field="orgName"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
+      value = fullText.trim();
+    } else if (fieldName === "address") {
+      if (!lang) return false;
+      targetField = $(`.author-input[data-field="address"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
+      value = removeCountryFromAddress(fullText);
+    } else if (fieldName === "email") {
+      targetField = $(`.author-input[data-field="email"][data-lang="RUS"][data-index="${authorIndex}"]`);
+      const normalized = String(fullText || "")
+        .replace(/\s*@\s*/g, "@")
+        .replace(/@\s+/g, "@")
+        .replace(/\s+@/g, "@")
+        .replace(/\s+/g, " ")
+        .trim();
+      const compact = normalized.replace(/\s+/g, "");
+      const email = extractEmail(compact) || extractEmail(normalized) || extractEmail(fullText);
+      if (!email) {
+        alert("E-mail адрес не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий e-mail (например: user@domain.com)");
+        return false;
+      }
+      value = email;
+      const emailEngField = $(`.author-input[data-field="email"][data-lang="ENG"][data-index="${authorIndex}"]`);
+      if (emailEngField) {
+        emailEngField.value = email;
+      }
+      autoExtractAuthorDataFromLine(fullText, authorIndex, "email");
+    } else if (fieldName === "spin") {
+      targetField = $(`.author-input[data-field="spin"][data-lang="CODES"][data-index="${authorIndex}"]`);
+      if (!targetField) {
+        alert(`Поле SPIN не найдено. Убедитесь, что форма автора открыта.`);
+        return false;
+      }
+      const spin = extractSPIN(fullText);
+      if (!spin) {
+        alert("SPIN код не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий SPIN (например: SPIN: 1234-5678)");
+        return false;
+      }
+      value = spin;
+      autoExtractAuthorDataFromLine(fullText, authorIndex, "spin");
+    } else if (fieldName === "orcid") {
+      targetField = $(`.author-input[data-field="orcid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+      if (!targetField) {
+        alert(`Поле ORCID не найдено. Убедитесь, что форма автора открыта.`);
+        return false;
+      }
+      const orcid = extractORCID(fullText);
+      if (!orcid) {
+        alert("ORCID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий ORCID (например: 0000-0000-0000-0000)");
+        return false;
+      }
+      value = orcid;
+      autoExtractAuthorDataFromLine(fullText, authorIndex, ["orcid", "spin"]);
+    } else if (fieldName === "scopusid") {
+      targetField = $(`.author-input[data-field="scopusid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+      if (!targetField) {
+        alert(`Поле Scopus ID не найдено. Убедитесь, что форма автора открыта.`);
+        return false;
+      }
+      const scopusId = extractScopusID(fullText);
+      if (!scopusId) {
+        alert("Scopus ID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий Scopus ID (например: 123456789)");
+        return false;
+      }
+      value = scopusId;
+      autoExtractAuthorDataFromLine(fullText, authorIndex, "scopusid");
+    } else if (fieldName === "researcherid") {
+      targetField = $(`.author-input[data-field="researcherid"][data-lang="CODES"][data-index="${authorIndex}"]`);
+      if (!targetField) {
+        alert(`Поле Researcher ID не найдено. Убедитесь, что форма автора открыта.`);
+        return false;
+      }
+      const researcherId = extractResearcherID(fullText);
+      if (!researcherId) {
+        alert("Researcher ID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий Researcher ID (например: A-1234-5678)");
+        return false;
+      }
+      value = researcherId;
+      autoExtractAuthorDataFromLine(fullText, authorIndex, "researcherid");
+    } else if (fieldName === "other") {
+      if (!lang) return false;
+      targetField = $(`.author-input[data-field="otherInfo"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
+      value = fullText.trim();
+    } else {
+      return false;
+    }
+
+    if (!targetField) {
+      alert(`Поле автора не найдено. Убедитесь, что форма автора открыта.`);
+      return false;
+    }
+
+    targetField.value = value;
+    if (fieldName === "org" || fieldName === "address") {
+      initOrganizationCards(authorIndex);
+    }
+    targetField.dispatchEvent(new Event("input", { bubbles: true }));
+    targetField.focus();
+
+    if (fieldName === "surname" || fieldName === "initials") {
+      updateAuthorName(authorIndex);
+    }
+
+    const authorDetails = $(`#author-details-${authorIndex}`);
+    if (authorDetails && authorDetails.style.display === "none") {
+      toggleAuthorDetails(authorIndex);
+    }
+
+    const authorItem = $(`.author-item[data-author-index="${authorIndex}"]`);
+    if (authorItem) {
+      authorItem.classList.add("active");
+      setTimeout(() => authorItem.classList.remove("active"), 1200);
+    }
+
+    return true;
+  }
+
 function applySelectionToField(fieldId) {
     const texts = getSelectedTexts();
     if (!texts.length) return;
     const fullText = texts.join(" ");
-    let value = "";
-    
-    // Обработка полей авторов
+
     if (fieldId.startsWith("author_")) {
-      const authorIndex = getActiveAuthorIndex();
-      const parts = fieldId.split("_");
-      if (parts.length < 2) return;
-      
-      const fieldName = parts[1]; // surname, initials, org, address, email, other
-      const lang = parts.length >= 3 ? parts[2] : null; // rus, eng, или null для email
-      
-      // Находим соответствующее поле автора
-      let targetField = null;
-      if (fieldName === "surname") {
-        if (!lang) return;
-        targetField = $(`.author-input[data-field="surname"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        value = extractSurnameFromText(fullText);
-      } else if (fieldName === "initials") {
-        if (!lang) return;
-        targetField = $(`.author-input[data-field="initials"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        value = extractInitialsFromText(fullText);
-      } else if (fieldName === "org") {
-        if (!lang) return;
-        targetField = $(`.author-input[data-field="orgName"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        value = fullText.trim();
-      } else if (fieldName === "address") {
-        if (!lang) return;
-        targetField = $(`.author-input[data-field="address"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        // Удаляем названия стран из адреса
-        value = removeCountryFromAddress(fullText);
-      } else if (fieldName === "email") {
-        targetField = $(`.author-input[data-field="email"][data-lang="RUS"][data-index="${authorIndex}"]`);
-        // Извлекаем только e-mail адрес из выделенного текста
-        const email = extractEmail(fullText);
-        if (!email) {
-          alert("E-mail адрес не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий e-mail (например: user@domain.com)");
-          return;
-        }
-        value = email;
-        // E-mail одинаковый для обоих языков - всегда копируем в ENG поле
-        const emailEngField = $(`.author-input[data-field="email"][data-lang="ENG"][data-index="${authorIndex}"]`);
-        if (emailEngField) {
-          emailEngField.value = email;
-        }
-        // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем email, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, "email");
-      } else if (fieldName === "spin") {
-        targetField = $(`.author-input[data-field="spin"][data-lang="CODES"][data-index="${authorIndex}"]`);
-        if (!targetField) {
-          alert(`Поле SPIN не найдено. Убедитесь, что форма автора открыта.`);
-          return;
-        }
-        const spin = extractSPIN(fullText);
-        if (!spin) {
-          alert("SPIN код не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий SPIN (например: SPIN: 1234-5678)");
-          return;
-        }
-        value = spin;
-        // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем spin, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, "spin");
-      } else if (fieldName === "orcid") {
-        targetField = $(`.author-input[data-field="orcid"][data-lang="CODES"][data-index="${authorIndex}"]`);
-        if (!targetField) {
-          alert(`Поле ORCID не найдено. Убедитесь, что форма автора открыта.`);
-          return;
-        }
-        const orcid = extractORCID(fullText);
-        if (!orcid) {
-          alert("ORCID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий ORCID (например: 0000-0000-0000-0000)");
-          return;
-        }
-        value = orcid;
-        // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем orcid, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, ["orcid", "spin"]);
-      } else if (fieldName === "scopusid") {
-        targetField = $(`.author-input[data-field="scopusid"][data-lang="CODES"][data-index="${authorIndex}"]`);
-        if (!targetField) {
-          alert(`Поле Scopus ID не найдено. Убедитесь, что форма автора открыта.`);
-          return;
-        }
-        const scopusId = extractScopusID(fullText);
-        if (!scopusId) {
-          alert("Scopus ID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий Scopus ID (например: 123456789)");
-          return;
-        }
-        value = scopusId;
-        // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем scopusid, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, "scopusid");
-      } else if (fieldName === "researcherid") {
-        targetField = $(`.author-input[data-field="researcherid"][data-lang="CODES"][data-index="${authorIndex}"]`);
-        if (!targetField) {
-          alert(`Поле Researcher ID не найдено. Убедитесь, что форма автора открыта.`);
-          return;
-        }
-        const researcherId = extractResearcherID(fullText);
-        if (!researcherId) {
-          alert("Researcher ID не найден в выделенном тексте. Убедитесь, что выделен текст, содержащий Researcher ID (например: A-1234-5678)");
-          return;
-        }
-        value = researcherId;
-        // Автоматически извлекаем и заполняем другие поля из той же строки (пропускаем researcherid, т.к. он уже заполнен)
-        autoExtractAuthorDataFromLine(fullText, authorIndex, "researcherid");
-      } else if (fieldName === "other") {
-        if (!lang) return;
-        targetField = $(`.author-input[data-field="otherInfo"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-        // Вставляем текст как есть, без удаления ФИО
-        value = fullText.trim();
-      } else {
-        // Неизвестное поле
-        return;
+      if (applyAuthorFieldText(fieldId, fullText)) {
+        clearSelection();
       }
-      
-      if (!targetField) {
-        alert(`Поле автора не найдено. Убедитесь, что форма автора открыта.`);
-        return;
-      }
-      
-      targetField.value = value;
-      if (fieldName === "org" || fieldName === "address") {
-        initOrganizationCards(authorIndex);
-      }
-      // Триггерим событие input для обновления всех обработчиков
-      targetField.dispatchEvent(new Event('input', { bubbles: true }));
-      targetField.focus();
-      
-      // Обновляем имя автора в заголовке, если изменились фамилия или инициалы
-      if (fieldName === "surname" || fieldName === "initials") {
-        updateAuthorName(authorIndex);
-      }
-      
-      // Открываем форму автора, если она закрыта
-      const authorDetails = $(`#author-details-${authorIndex}`);
-      if (authorDetails && authorDetails.style.display === "none") {
-        toggleAuthorDetails(authorIndex);
-      }
-      
-      // Подсвечиваем поле
-      const authorItem = $(`.author-item[data-author-index="${authorIndex}"]`);
-      if (authorItem) {
-        authorItem.classList.add("active");
-        setTimeout(() => authorItem.classList.remove("active"), 1200);
-      }
-      
-      clearSelection();
       return;
     }
-    
+
+    let value = "";
+
     // Обработка обычных полей
     const field = document.getElementById(fieldId);
     if (!field) return;
@@ -11544,13 +11674,45 @@ function applySelectionToField(fieldId) {
       });
     }
 
+    const resolvePdfFieldIdFromFocusedElement = (el) => {
+      if (!el || (el.tagName !== "INPUT" && el.tagName !== "TEXTAREA")) return null;
+      if (el.id) return el.id;
+
+      const authorItem = el.closest(".author-item");
+      const authorIndex = authorItem?.dataset?.authorIndex;
+      if (authorIndex !== undefined) {
+        if (el.classList.contains("org-row-org-rus")) return "author_org_rus";
+        if (el.classList.contains("org-row-org-eng")) return "author_org_eng";
+        if (el.classList.contains("org-row-address-rus")) return "author_address_rus";
+        if (el.classList.contains("org-row-address-eng")) return "author_address_eng";
+      }
+
+      if (!el.classList.contains("author-input")) return null;
+
+      const field = el.dataset.field;
+      const lang = (el.dataset.lang || "").toLowerCase();
+      if (!field) return null;
+
+      if (field === "surname") return `author_surname_${lang}`;
+      if (field === "initials") return `author_initials_${lang}`;
+      if (field === "orgName") return `author_org_${lang}`;
+      if (field === "address") return `author_address_${lang}`;
+      if (field === "email") return "author_email";
+      if (field === "otherInfo") return `author_other_${lang}`;
+      if (field === "spin") return "author_spin";
+      if (field === "orcid") return "author_orcid";
+      if (field === "scopusid") return "author_scopusid";
+      if (field === "researcherid") return "author_researcherid";
+      return null;
+    };
+
     document.addEventListener("focusin", (e) => {
       const el = e.target;
       if (!el) return;
-      if ((el.tagName === "INPUT" || el.tagName === "TEXTAREA") && el.id) {
-        currentFieldId = el.id;
-        if (pdfBbox) pdfBbox.setActiveField(el.id);
-      }
+      const resolvedFieldId = resolvePdfFieldIdFromFocusedElement(el);
+      if (!resolvedFieldId) return;
+      currentFieldId = resolvedFieldId;
+      if (pdfBbox) pdfBbox.setActiveField(resolvedFieldId);
     });
 
     const clearBtn = $("#clearBtn");
@@ -12441,6 +12603,15 @@ function applySelectionToField(fieldId) {
         clearButtonSelector: "#bboxClearBtn",
         extractEndpoint: "/api/pdf-extract-text",
         saveEndpoint: "/api/pdf-save-coordinates",
+        applyExtractedText: (fieldId, text) => {
+          if (fieldId && fieldId.startsWith("author_")) {
+            applyAuthorFieldText(fieldId, text);
+            return;
+          }
+          if (typeof pdfBbox.applyExtractedTextDefault === "function") {
+            pdfBbox.applyExtractedTextDefault(fieldId, text);
+          }
+        },
       });
     }
   });

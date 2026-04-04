@@ -1,4 +1,4 @@
-﻿(() => {
+(() => {
   const state = {
     initialized: false,
     activeFieldId: null,
@@ -843,6 +843,7 @@
 
   window.PdfBbox = {
     init,
+    applyExtractedTextDefault: defaultApplyExtractedText,
     setActiveField,
     saveSelections,
     clearPageSelections,

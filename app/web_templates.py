@@ -1051,8 +1051,8 @@ HTML_TEMPLATE = """
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
-    .author-input.author-code-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
-    .author-input.author-code-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
+    .author-input.author-code-invalid,.author-input.author-email-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus,.author-input.author-email-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .correspondence-toggle{margin-top:5px;}
     .toggle-label{display:flex;align-items:center;gap:8px;cursor:pointer;}
     .toggle-label input[type="checkbox"]{width:18px;height:18px;cursor:pointer;}
@@ -6782,8 +6782,8 @@ MARKUP_TEMPLATE = r"""
     .author-field label{display:block;font-size:12px;color:#666;margin-bottom:4px;font-weight:500;}
     .author-field input,.author-field textarea{width:100%;padding:8px;border:1px solid #ddd;border-radius:4px;font-size:13px;font-family:inherit;}
     .author-field input:focus,.author-field textarea:focus{outline:2px solid #667eea;outline-offset:2px;border-color:#667eea;}
-    .author-input.author-code-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
-    .author-input.author-code-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
+    .author-input.author-code-invalid,.author-input.author-email-invalid,input.soft-invalid,textarea.soft-invalid,select.soft-invalid{border-color:#e57373!important;background-color:#fff8f8;}
+    .author-input.author-code-invalid:focus,.author-input.author-email-invalid:focus,input.soft-invalid:focus,textarea.soft-invalid:focus,select.soft-invalid:focus{outline:2px solid #c62828;outline-offset:2px;border-color:#c62828!important;}
     .author-field textarea.author-textarea{min-height:54px;resize:vertical;}
     .author-org-toolbar{display:flex;justify-content:flex-end;margin-bottom:8px;}
     .author-org-list{display:flex;flex-direction:column;gap:10px;}
@@ -10052,6 +10052,27 @@ function updateEdnFieldHighlight(input) {
   input.classList.toggle("soft-invalid", !isValidEdnValue(input.value));
 }
 
+/** Пустое значение считается допустимым; иначе — формат как у extractEmail (целиком строка). */
+function isValidAuthorEmailValue(raw) {
+  const v = String(raw || "").trim();
+  if (!v) return true;
+  return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(v);
+}
+
+function updateAuthorEmailHighlightByIndex(index) {
+  const rus = document.querySelector(
+    `.author-input[data-field="email"][data-lang="RUS"][data-index="${index}"]`,
+  );
+  const eng = document.querySelector(
+    `.author-input[data-field="email"][data-lang="ENG"][data-index="${index}"]`,
+  );
+  const primary = rus || eng;
+  if (!primary) return;
+  const ok = isValidAuthorEmailValue(primary.value);
+  if (rus) rus.classList.toggle("author-email-invalid", !ok);
+  if (eng) eng.classList.toggle("author-email-invalid", !ok);
+}
+
 function normalizeCorrespondenceSelection(preferredIndex = null) {
   const checkboxes = Array.from(document.querySelectorAll(".author-correspondence"));
   if (!checkboxes.length) return;
@@ -10135,6 +10156,23 @@ function attachAuthorNameListeners(index) {
     codeInput.addEventListener("change", run);
     run();
   });
+
+  const emailRus = authorItem.querySelector(
+    `.author-input[data-field="email"][data-lang="RUS"][data-index="${index}"]`,
+  );
+  const emailEng = authorItem.querySelector(
+    `.author-input[data-field="email"][data-lang="ENG"][data-index="${index}"]`,
+  );
+  const runEmailHighlight = () => updateAuthorEmailHighlightByIndex(index);
+  if (emailRus) {
+    emailRus.addEventListener("input", runEmailHighlight);
+    emailRus.addEventListener("change", runEmailHighlight);
+  }
+  if (emailEng) {
+    emailEng.addEventListener("input", runEmailHighlight);
+    emailEng.addEventListener("change", runEmailHighlight);
+  }
+  runEmailHighlight();
 }
 
 // Сбор данных авторов из формы

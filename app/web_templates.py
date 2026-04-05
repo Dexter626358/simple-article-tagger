@@ -4289,15 +4289,22 @@ function closeAnnotationModal() {
         
         // Вспомогательные функции для извлечения данных из текста
         window.extractDOI = function(text) {
-          // Remove invisible OCR artifacts and normalize spaces around DOI separators.
-          const normalized = String(text || "")
+          // Нормализация OCR/PDF: метки DOI:, юникод-дефисы и слэш, пробелы после "10.".
+          let normalized = String(text || "")
             .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
-            .replace(/\s*([\/-])\s*/g, "$1");
-          const m = normalized.match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/i);
+            .replace(/\r\n|[\r\n\u2028\u2029]/g, "")
+            .replace(/\bdoi\s*[:\uFF1A]\s*/gi, "")
+            .replace(/https?:\/\/(dx\.)?doi\.org\//gi, "")
+            .replace(/\u00a0/g, " ")
+            .replace(/[\u2013\u2014\u2212\uFE63\uFF0D]/g, "-")
+            .replace(/\uFF0F/g, "/")
+            .replace(/(10\.)\s+/gi, "$1")
+            .replace(/\s*([\/-])\s*/g, "$1")
+            .trim();
+          const m = normalized.match(/\b10\.\d+\/\S+/i);
           if (!m) return null;
           let doi = m[0];
           let rest = normalized.slice(m.index + doi.length);
-          // Цикл: подбираем все фрагменты (напр. " 2" затем " -192" -> 182-192)
           const contRe = /^[\s,.;:]*([A-Za-z0-9]+(?:[-._;()/:][A-Za-z0-9]+)*)/;
           for (;;) {
             const continuation = rest.match(contRe);
@@ -4308,7 +4315,7 @@ function closeAnnotationModal() {
             doi = doi + frag;
             rest = rest.slice(continuation[0].length);
           }
-          return doi.replace(/[),.;:]+$/, "");
+          return doi.replace(/[),.;:\]\}"']+$/, "").replace(/\.+$/, "");
         };
         
         window.extractEmail = function(text) {
@@ -10366,11 +10373,18 @@ function collectAuthorsData() {
   }
 
   function extractDOI(text) {
-    // Remove invisible OCR artifacts and normalize spaces around DOI separators.
-    const normalized = String(text || "")
+    let normalized = String(text || "")
       .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
-      .replace(/\s*([\/-])\s*/g, "$1");
-    const m = normalized.match(/\b10\.\d{4,9}\/[-._;()/:A-Za-z0-9]+/i);
+      .replace(/\r\n|[\r\n\u2028\u2029]/g, "")
+      .replace(/\bdoi\s*[:\uFF1A]\s*/gi, "")
+      .replace(/https?:\/\/(dx\.)?doi\.org\//gi, "")
+      .replace(/\u00a0/g, " ")
+      .replace(/[\u2013\u2014\u2212\uFE63\uFF0D]/g, "-")
+      .replace(/\uFF0F/g, "/")
+      .replace(/(10\.)\s+/gi, "$1")
+      .replace(/\s*([\/-])\s*/g, "$1")
+      .trim();
+    const m = normalized.match(/\b10\.\d+\/\S+/i);
     if (!m) return null;
     let doi = m[0];
     let rest = normalized.slice(m.index + doi.length);
@@ -10384,8 +10398,10 @@ function collectAuthorsData() {
       doi = doi + frag;
       rest = rest.slice(continuation[0].length);
     }
-    return doi.replace(/[),.;:]+$/, "");
+    return doi.replace(/[),.;:\]\}"']+$/, "").replace(/\.+$/, "");
   }
+
+  window.extractDOI = extractDOI;
 
   function extractEmail(text) {
     // Регулярное выражение для поиска e-mail адресов
@@ -11132,37 +11148,87 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
     if (el) el.textContent = n ? `Выбрано строк: ${n}` : "";
   }
 
-  function getActiveAuthorIndex() {
-    // Находим первого открытого (expanded) автора
-    const authorItems = $$(".author-item");
-    for (const item of authorItems) {
-      const index = item.dataset.authorIndex;
-      if (index !== undefined) {
-        const details = $(`#author-details-${index}`);
-        if (details && details.style.display !== "none") {
-          return parseInt(index, 10);
-        }
+  /** Слова аффилиации — не считать фамилией, если весь фрагмент из таких токенов. */
+  const AFFILIATION_STOPWORDS_SURNAME = new Set([
+    "аспирант", "студент", "студентка", "кандидат", "доктор", "профессор", "доцент",
+    "сотрудник", "руководитель", "заведующий", "заведующая", "ведущий", "научный",
+    "кафедра", "кафедры", "факультет", "институт", "университет", "академия", "школа",
+    "философии", "философия", "экономики", "химии", "физики", "математики", "истории",
+    "литературы", "права", "медицины", "биологии", "технологий",
+    "россии", "рф", "москва", "санкт", "петербург", "петербургский", "государственный",
+    "электротехнический", "лаборатория", "центр", "фонд", "корпорация", "компания",
+    "имени", "им", "лети", "льэти", "lэти",
+    "graduate", "student", "department", "university", "institute", "faculty", "professor",
+    "associate", "assistant", "research", "center", "centre", "school", "college",
+  ]);
+
+  function normSurnameToken(w) {
+    return String(w || "")
+      .toLowerCase()
+      .replace(/[.,;:]+$/g, "")
+      .replace(/^["'«»(]+|["'»)]+$/g, "")
+      .trim();
+  }
+
+  function isAffiliationStopwordToken(w) {
+    const n = normSurnameToken(w);
+    if (!n) return true;
+    if (AFFILIATION_STOPWORDS_SURNAME.has(n)) return true;
+    return n.split("-").some((p) => AFFILIATION_STOPWORDS_SURNAME.has(p));
+  }
+
+  /**
+   * PDF.js нередко даёт по одному символу на «слово»: К у р т о в → склеиваем в Куртов.
+   * Токены с точкой (С., Ю.) не трогаем.
+   */
+  function collapseSpacedSingleLetterTokens(parts) {
+    const out = [];
+    let buf = "";
+    const flush = () => {
+      if (buf.length) {
+        out.push(buf);
+        buf = "";
+      }
+    };
+    for (const p of parts) {
+      if (/^[А-ЯЁA-Za-zа-яё]$/.test(p)) {
+        buf += p;
+      } else {
+        flush();
+        out.push(p);
       }
     }
-    // Если ни один не открыт, возвращаем первого автора
-    if (authorItems.length > 0) {
-      const firstIndex = authorItems[0].dataset.authorIndex;
-      if (firstIndex !== undefined) {
-        return parseInt(firstIndex, 10);
-      }
-    }
-    return 0;
+    flush();
+    return out;
+  }
+
+  /** Нормализация строки из PDF/OCR перед разбором ФИО: невидимые символы, склеенные «И.И.». */
+  function normalizeAuthorNameLineForExtract(text) {
+    let s = String(text || "")
+      .replace(/[\u00ad\u200b-\u200f\u2060\ufeff]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!s) return "";
+    let prev;
+    do {
+      prev = s;
+      s = s.replace(
+        /([A-Za-z\u0410-\u042F\u0401\u0430-\u044F\u0451])\.([A-Za-z\u0410-\u042F\u0401\u0430-\u044F\u0451])\./g,
+        "$1. $2.",
+      );
+    } while (s !== prev);
+    return s;
   }
 
   function extractSurnameFromText(text) {
-    const raw = String(text || "").replace(/\s+/g, " ").trim();
+    const raw = normalizeAuthorNameLineForExtract(text);
     if (!raw) return "";
     const cleaned = raw
       .replace(/^\d+[)\.]?\s+/, "")
       .replace(/[,:;]+/g, " ")
       .trim();
     if (!cleaned) return "";
-    const parts = cleaned.split(" ").filter(Boolean);
+    const parts = collapseSpacedSingleLetterTokens(cleaned.split(" ").filter(Boolean));
     if (!parts.length) return "";
 
     const LETTER = "[A-Za-z\\u0410-\\u042F\\u0401\\u0430-\\u044F\\u0451]";
@@ -11187,8 +11253,69 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
       "st.","st","saint","san","sant"
     ]);
 
-    const nonInitials = parts.filter(p => !isInitial(p));
+    const firstInitialIdx = parts.findIndex((p) => isInitial(p));
+    let pool;
+    if (firstInitialIdx === -1) {
+      pool = parts.filter((p) => !isInitial(p));
+    } else if (firstInitialIdx > 0) {
+      pool = parts.slice(0, firstInitialIdx).filter((p) => !isInitial(p));
+    } else {
+      pool = parts.filter((p) => !isInitial(p));
+    }
+    const nonInitials = pool.length ? pool : parts.filter((p) => !isInitial(p));
+
+    const leadSurname = cleaned.match(
+      /^([А-ЯЁA-Z][А-ЯЁа-яёA-Za-z\-]{2,}|[A-Z][A-Za-z\-]{2,})(?=\s|[,.;]|$)/,
+    );
+    if (leadSurname) {
+      const w = leadSurname[1].replace(/[.,]+$/g, "").trim();
+      const wNorm = w.toLowerCase().replace(/[.,]+$/g, "");
+      if (w && !isAffiliationStopwordToken(w) && !particles.has(wNorm)) {
+        return w;
+      }
+    }
+
     if (nonInitials.length) {
+      let anchorIdx = -1;
+      for (let i = nonInitials.length - 1; i >= 0; i -= 1) {
+        if (!isAffiliationStopwordToken(nonInitials[i])) {
+          anchorIdx = i;
+          break;
+        }
+      }
+      if (anchorIdx >= 0) {
+        let idx = anchorIdx;
+        const surnameParts = [nonInitials[idx].replace(/[\.]+$/g, "")];
+        while (idx - 1 >= 0) {
+          const prev = nonInitials[idx - 1];
+          const prevNorm = prev.toLowerCase().replace(/[\.]+$/g, "");
+          if (particles.has(prevNorm)) {
+            surnameParts.unshift(prev.replace(/[\.]+$/g, ""));
+            idx -= 1;
+          } else {
+            break;
+          }
+        }
+        let j = anchorIdx;
+        while (j + 1 < nonInitials.length) {
+          const next = nonInitials[j + 1];
+          const nextNorm = next.toLowerCase().replace(/[\.]+$/g, "");
+          if (particles.has(nextNorm)) {
+            surnameParts.push(next.replace(/[\.]+$/g, ""));
+            j += 1;
+          } else {
+            break;
+          }
+        }
+        const out = surnameParts.join(" ").trim();
+        if (out) return out;
+      }
+
+      const onlyJunk = nonInitials.every((p) => isAffiliationStopwordToken(p));
+      if (onlyJunk) {
+        return "";
+      }
+
       let idx = nonInitials.length - 1;
       let surnameParts = [nonInitials[idx].replace(/[\.]+$/g, "")];
 
@@ -11203,15 +11330,19 @@ function autoExtractAuthorDataFromLine(text, authorIndex, skipField = null) {
         }
       }
 
-      return surnameParts.join(" ");
+      const out = surnameParts.join(" ").trim();
+      if (out) return out;
     }
 
-    return parts[parts.length - 1].replace(/[\.]+$/g, "");
+    const fallback = parts[parts.length - 1].replace(/[\.]+$/g, "").trim();
+    if (fallback && !isAffiliationStopwordToken(fallback)) {
+      return fallback;
+    }
+    return "";
   }
 
-
-function extractInitialsFromText(text) {
-    const raw = String(text || "");
+  function extractInitialsFromText(text) {
+    const raw = normalizeAuthorNameLineForExtract(text);
     if (!raw.trim()) return "";
 
     const LETTER = "[A-Za-z\\u0410-\\u042F\\u0401\\u0430-\\u044F\\u0451]";
@@ -11236,10 +11367,27 @@ function extractInitialsFromText(text) {
       .replace(/[,:;]+/g, " ")
       .trim();
     if (!cleaned) return "";
-    const parts = cleaned.split(" ").filter(Boolean);
+    let parts = collapseSpacedSingleLetterTokens(cleaned.split(" ").filter(Boolean));
     if (!parts.length) return "";
 
-    const spaced = parts.filter(p => {
+    const isInitialTok = (token) => {
+      const t = String(token || "").replace(DASH_RE, "-");
+      return RE_INITIAL_1.test(t)
+        || RE_INITIAL_2.test(t)
+        || RE_INITIAL_H.test(t)
+        || RE_INITIAL_3.test(t);
+    };
+
+    while (parts.length >= 2) {
+      const w0 = parts[0].replace(/[.,]+$/g, "");
+      if (!isInitialTok(parts[0]) && w0.length > 2) {
+        parts = parts.slice(1);
+      } else {
+        break;
+      }
+    }
+
+    const spaced = parts.filter((p) => {
       const t = String(p || "").replace(DASH_RE, "-");
       return RE_INITIAL_1.test(t) || RE_INITIAL_2.test(t) || RE_INITIAL_H.test(t) || RE_INITIAL_3.test(t);
     });
@@ -11247,12 +11395,22 @@ function extractInitialsFromText(text) {
       return spaced.join(" ");
     }
 
-    const letters = parts.slice(0, 2).map(p => p[0]).filter(Boolean);
-    if (letters.length) {
-      return letters.map(ch => ch + ".").join(" ");
+    const canShortLetterFallback =
+      parts.length >= 2
+      && parts.slice(0, 2).every((p) => p.replace(/[.,]/g, "").length <= 3);
+    if (canShortLetterFallback) {
+      const letters = parts.slice(0, 2).map((p) => p[0]).filter(Boolean);
+      if (letters.length === 2) {
+        return letters.map((ch) => ch + ".").join(" ");
+      }
     }
 
-    return "";
+    if (parts.length === 1 && parts[0].replace(/[.,]/g, "").length > 2 && !isInitialTok(parts[0])) {
+      return "";
+    }
+
+    const tail = cleaned.trim();
+    return tail || "";
   }
 
 
@@ -11305,9 +11463,104 @@ function extractInitialsFromText(text) {
     return 0;
   }
 
-  function applyAuthorFieldText(fieldId, fullText) {
+  function getActiveOrgRowIndex(authorIndex) {
+    const last = window.__pdfBboxLastOrgFocus;
+    if (
+      last &&
+      last.authorIndex === authorIndex &&
+      Number.isInteger(last.row) &&
+      last.row >= 0
+    ) {
+      return last.row;
+    }
+    const ae = document.activeElement;
+    if (ae && ae.classList && ae.classList.contains("author-org-value")) {
+      const authorItem = ae.closest(".author-item");
+      const card = ae.closest(".author-org-card");
+      if (authorItem && card) {
+        const ai = parseInt(authorItem.dataset.authorIndex, 10);
+        if (!Number.isNaN(ai) && ai === authorIndex) {
+          const row = parseInt(card.getAttribute("data-org-row") || "0", 10);
+          if (!Number.isNaN(row) && row >= 0) {
+            return row;
+          }
+        }
+      }
+    }
+    return 0;
+  }
+
+  window.getActiveAuthorIndexForPdfBbox = getActiveAuthorIndex;
+  window.getActiveOrgRowIndexForPdfBbox = getActiveOrgRowIndex;
+
+  function finishAuthorFieldChrome(authorIndex, fieldName) {
+    if (fieldName === "surname" || fieldName === "initials") {
+      updateAuthorName(authorIndex);
+    }
+    const authorDetails = $(`#author-details-${authorIndex}`);
+    if (authorDetails && authorDetails.style.display === "none") {
+      toggleAuthorDetails(authorIndex);
+    }
+    const authorItem = $(`.author-item[data-author-index="${authorIndex}"]`);
+    if (authorItem) {
+      authorItem.classList.add("active");
+      setTimeout(() => authorItem.classList.remove("active"), 1200);
+    }
+  }
+
+  function applyAuthorOrganizationRow(authorIndex, lang, text, forcedOrgRowIndex, fieldName) {
+    const list = document.getElementById(`author-org-list-${authorIndex}`);
+    if (!list) {
+      const langU = lang.toUpperCase();
+      const dataField = fieldName === "org" ? "orgName" : "address";
+      const inp = $(`.author-input[data-field="${dataField}"][data-lang="${langU}"][data-index="${authorIndex}"]`);
+      if (!inp) {
+        alert(`Поле автора не найдено. Убедитесь, что форма автора открыта.`);
+        return false;
+      }
+      inp.value = text.trim();
+      initOrganizationCards(authorIndex);
+      inp.dispatchEvent(new Event("input", { bubbles: true }));
+      inp.focus();
+      finishAuthorFieldChrome(authorIndex, fieldName);
+      return true;
+    }
+    let rowIdx = Number.isInteger(forcedOrgRowIndex) ? forcedOrgRowIndex : getActiveOrgRowIndex(authorIndex);
+    if (rowIdx < 0) {
+      rowIdx = 0;
+    }
+    let rows = collectOrganizationRows(authorIndex);
+    if (!rows.length) {
+      rows = [{ orgRus: "", orgEng: "", addressRus: "", addressEng: "" }];
+    }
+    while (rows.length <= rowIdx) {
+      rows.push({ orgRus: "", orgEng: "", addressRus: "", addressEng: "" });
+    }
+    const key =
+      fieldName === "org"
+        ? (lang === "rus" ? "orgRus" : "orgEng")
+        : (lang === "rus" ? "addressRus" : "addressEng");
+    rows[rowIdx] = { ...rows[rowIdx], [key]: text.trim() };
+    renderOrganizationRows(authorIndex, rows);
+    const sel =
+      fieldName === "org"
+        ? (lang === "rus" ? ".org-row-org-rus" : ".org-row-org-eng")
+        : (lang === "rus" ? ".org-row-address-rus" : ".org-row-address-eng");
+    const card = list.querySelector(`.author-org-card[data-org-row="${rowIdx}"]`);
+    const ta = card && card.querySelector(sel);
+    if (ta) {
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+      ta.focus();
+    }
+    finishAuthorFieldChrome(authorIndex, fieldName);
+    return true;
+  }
+
+  function applyAuthorFieldText(fieldId, fullText, forcedAuthorIndex, forcedOrgRowIndex) {
     if (!fieldId || !fieldId.startsWith("author_")) return false;
-    const authorIndex = getActiveAuthorIndex();
+    const authorIndex = Number.isInteger(forcedAuthorIndex)
+      ? forcedAuthorIndex
+      : getActiveAuthorIndex();
     const parts = fieldId.split("_");
     if (parts.length < 2) return false;
 
@@ -11327,12 +11580,22 @@ function extractInitialsFromText(text) {
       value = extractInitialsFromText(fullText);
     } else if (fieldName === "org") {
       if (!lang) return false;
-      targetField = $(`.author-input[data-field="orgName"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-      value = fullText.trim();
+      return applyAuthorOrganizationRow(
+        authorIndex,
+        lang,
+        fullText.trim(),
+        forcedOrgRowIndex,
+        "org",
+      );
     } else if (fieldName === "address") {
       if (!lang) return false;
-      targetField = $(`.author-input[data-field="address"][data-lang="${lang.toUpperCase()}"][data-index="${authorIndex}"]`);
-      value = removeCountryFromAddress(fullText);
+      return applyAuthorOrganizationRow(
+        authorIndex,
+        lang,
+        removeCountryFromAddress(fullText),
+        forcedOrgRowIndex,
+        "address",
+      );
     } else if (fieldName === "email") {
       targetField = $(`.author-input[data-field="email"][data-lang="RUS"][data-index="${authorIndex}"]`);
       const normalized = String(fullText || "")
@@ -11419,26 +11682,10 @@ function extractInitialsFromText(text) {
     }
 
     targetField.value = value;
-    if (fieldName === "org" || fieldName === "address") {
-      initOrganizationCards(authorIndex);
-    }
     targetField.dispatchEvent(new Event("input", { bubbles: true }));
     targetField.focus();
 
-    if (fieldName === "surname" || fieldName === "initials") {
-      updateAuthorName(authorIndex);
-    }
-
-    const authorDetails = $(`#author-details-${authorIndex}`);
-    if (authorDetails && authorDetails.style.display === "none") {
-      toggleAuthorDetails(authorIndex);
-    }
-
-    const authorItem = $(`.author-item[data-author-index="${authorIndex}"]`);
-    if (authorItem) {
-      authorItem.classList.add("active");
-      setTimeout(() => authorItem.classList.remove("active"), 1200);
-    }
+    finishAuthorFieldChrome(authorIndex, fieldName);
 
     return true;
   }
@@ -11536,6 +11783,18 @@ function applySelectionToField(fieldId) {
   }
 
   document.addEventListener("DOMContentLoaded", () => {
+    document.addEventListener("focusin", (e) => {
+      const t = e.target;
+      if (!t || !t.classList || !t.classList.contains("author-org-value")) return;
+      const authorItem = t.closest(".author-item");
+      const card = t.closest(".author-org-card");
+      if (!authorItem || !card) return;
+      const ai = parseInt(authorItem.dataset.authorIndex, 10);
+      const row = parseInt(card.getAttribute("data-org-row") || "0", 10);
+      if (Number.isNaN(ai) || Number.isNaN(row)) return;
+      window.__pdfBboxLastOrgFocus = { authorIndex: ai, row };
+    });
+
     const annotationField = document.getElementById("annotation");
     const annotationEnField = document.getElementById("annotation_en");
     if (annotationField) {
@@ -12873,9 +13132,16 @@ function applySelectionToField(fieldId) {
         clearButtonSelector: "#bboxClearBtn",
         extractEndpoint: "/api/pdf-extract-text",
         saveEndpoint: "/api/pdf-save-coordinates",
-        applyExtractedText: (fieldId, text) => {
+        applyExtractedText: (fieldId, text, selection) => {
           if (fieldId && fieldId.startsWith("author_")) {
-            applyAuthorFieldText(fieldId, text);
+            const idx = selection && Number.isInteger(selection.author_index)
+              ? selection.author_index
+              : undefined;
+            const orgRow =
+              selection && Number.isInteger(selection.org_row_index)
+                ? selection.org_row_index
+                : undefined;
+            applyAuthorFieldText(fieldId, text, idx, orgRow);
             return;
           }
           if (typeof pdfBbox.applyExtractedTextDefault === "function") {

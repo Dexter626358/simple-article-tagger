@@ -253,6 +253,34 @@ def parse_pages_range(pages_str: str) -> Optional[tuple[int, int]]:
         return None
 
 
+def json_file_start_page(json_path: Path) -> Optional[int]:
+    """Начальная страница статьи из поля pages в JSON, либо None."""
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        pr = parse_pages_range(str(data.get("pages") or ""))
+        if pr:
+            return pr[0]
+    except Exception:
+        return None
+    return None
+
+
+def sort_json_files_by_start_page(json_files: list[Path]) -> list[Path]:
+    """
+    Сортирует JSON статей по начальной странице (по возрастанию), затем по имени файла.
+    Файлы без распознаваемого поля pages идут в конце, по имени.
+    """
+
+    def sort_key(p: Path) -> tuple:
+        sp = json_file_start_page(p)
+        if sp is not None:
+            return (0, sp, p.name.lower())
+        return (1, p.name.lower())
+
+    return sorted(json_files, key=sort_key)
+
+
 def analyze_issue_pages(json_files: list[Path]) -> Optional[str]:
     """
     Анализирует страницы всех статей в JSON файлах и определяет диапазон страниц выпуска.
@@ -521,7 +549,7 @@ def generate_xml_for_archive_dir(
             print("❌ Ошибка: не найден элемент articles в XML структуре")
             return None
 
-        for json_file in sorted(json_files):
+        for json_file in sort_json_files_by_start_page(json_files):
             try:
                 article_elem = json_to_article_xml(json_file)
                 articles_elem.append(article_elem)
@@ -613,7 +641,7 @@ def generate_xml_for_archive_dir(
             return None
         
         # Добавляем статьи из JSON файлов
-        for json_file in sorted(json_files):
+        for json_file in sort_json_files_by_start_page(json_files):
             try:
                 article_elem = json_to_article_xml(json_file)
                 articles_elem.append(article_elem)

@@ -154,7 +154,7 @@
       const extracted = data?.extracted?.[0]?.text;
       if (!extracted) return;
       const applyFn = getConfig("applyExtractedText", defaultApplyExtractedText);
-      applyFn(selection.field_id, extracted);
+      applyFn(selection.field_id, extracted, selection);
     } catch (err) {
       console.warn("PDF extract failed:", err);
     }
@@ -180,7 +180,7 @@
     return btn ? btn.textContent.trim() : fieldId;
   };
 
-  const defaultApplyExtractedText = (fieldId, text) => {
+  const defaultApplyExtractedText = (fieldId, text, _selection) => {
     if (!fieldId || !text) return;
     const field = document.getElementById(fieldId);
     if (!field) return;
@@ -215,14 +215,19 @@
       }
     }
 
-    // Р”РѕР±Р°РІР»СЏРµРј С‚РµРєСЃС‚ Рє СЃСѓС‰РµСЃС‚РІСѓСЋС‰РµРјСѓ (РµСЃР»Рё РїРѕР»Рµ РЅРµ РїСѓСЃС‚РѕРµ)
-    if (field.value.trim()) {
-      // РћРїСЂРµРґРµР»СЏРµРј СЂР°Р·РґРµР»РёС‚РµР»СЊ РІ Р·Р°РІРёСЃРёРјРѕСЃС‚Рё РѕС‚ С‚РёРїР° РїРѕР»СЏ
+    const replaceFromPdf =
+      fieldId === "title" ||
+      fieldId === "title_en" ||
+      fieldId === "doi" ||
+      fieldId === "keywords" ||
+      fieldId === "keywords_en";
+
+    if (replaceFromPdf) {
+      field.value = value;
+    } else if (field.value.trim()) {
       let separator = " ";
       if (fieldId === "references_ru" || fieldId === "references_en") {
         separator = "\n";
-      } else if (fieldId === "keywords" || fieldId === "keywords_en") {
-        separator = ", ";
       }
       field.value = field.value.trim() + separator + value;
     } else {
@@ -356,10 +361,38 @@
         const point = getOverlayPoint(e);
         console.log("point:", point);
 
+        let authorIndexSnapshot;
+        if (
+          state.activeFieldId &&
+          state.activeFieldId.startsWith("author_") &&
+          typeof window.getActiveAuthorIndexForPdfBbox === "function"
+        ) {
+          const idx = window.getActiveAuthorIndexForPdfBbox();
+          if (Number.isInteger(idx)) {
+            authorIndexSnapshot = idx;
+          }
+        }
+
+        let orgRowSnapshot;
+        if (
+          state.activeFieldId &&
+          (state.activeFieldId.startsWith("author_org_") ||
+            state.activeFieldId.startsWith("author_address_")) &&
+          Number.isInteger(authorIndexSnapshot) &&
+          typeof window.getActiveOrgRowIndexForPdfBbox === "function"
+        ) {
+          const r = window.getActiveOrgRowIndexForPdfBbox(authorIndexSnapshot);
+          if (Number.isInteger(r)) {
+            orgRowSnapshot = r;
+          }
+        }
+
         drag = {
           startX: point.x,
           startY: point.y,
           el: null,
+          authorIndexSnapshot,
+          orgRowSnapshot,
         };
 
         // РЎРѕР·РґР°С‘Рј СЌР»РµРјРµРЅС‚ РІ РєРѕРЅС‚РµРєСЃС‚Рµ РґРѕРєСѓРјРµРЅС‚Р° iframe (РЅРµ СЂРѕРґРёС‚РµР»СЊСЃРєРѕРіРѕ РѕРєРЅР°)
@@ -418,6 +451,8 @@
         const width = Math.abs(endX - startX);
         const height = Math.abs(endY - startY);
 
+        const authorIndexSnapshot = drag.authorIndexSnapshot;
+        const orgRowSnapshot = drag.orgRowSnapshot;
         drag.el.remove();
         drag = null;
 
@@ -446,6 +481,12 @@
           page_width: normalized.page_width,
           page_height: normalized.page_height,
           pending_apply: true,
+          ...(Number.isInteger(authorIndexSnapshot)
+            ? { author_index: authorIndexSnapshot }
+            : {}),
+          ...(Number.isInteger(orgRowSnapshot)
+            ? { org_row_index: orgRowSnapshot }
+            : {}),
         };
 
         // Р”РѕР±Р°РІР»СЏРµРј РЅРѕРІС‹Р№ bbox (РЅРµ СѓРґР°Р»СЏРµРј РїСЂРµРґС‹РґСѓС‰РёРµ вЂ” СЂР°Р·СЂРµС€Р°РµРј РјРЅРѕР¶РµСЃС‚РІРµРЅРЅРѕРµ РІС‹РґРµР»РµРЅРёРµ)

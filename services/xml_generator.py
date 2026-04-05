@@ -264,8 +264,11 @@ def create_xml_with_articles(config: Optional[Dict[str, Any]] = None,
         if articles_path.exists():
             json_files = list(articles_path.glob("*.json"))
             logging.info(f"Найдено {len(json_files)} JSON файлов со статьями в {articles_path}")
-            
-            for json_file in sorted(json_files):
+
+            # Ленивый импорт: xml_generator_helper тянет этот модуль при загрузке.
+            from services.xml_generator_helper import sort_json_files_by_start_page
+
+            for json_file in sort_json_files_by_start_page(json_files):
                 try:
                     article_elem = json_to_article_xml(json_file)
                     # Проверяем, есть ли авторы в статье
